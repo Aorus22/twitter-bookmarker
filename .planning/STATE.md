@@ -1,21 +1,21 @@
 ---
 gsd_state_version: "1.0"
-milestone: 1.0
-current_phase: 6
-current_phase_name: Hardening, Tests & Docs
-status: completed
+milestone: "1.0"
+milestone_name: MVP
+status: Awaiting next milestone
 stopped_at: Phase 6 complete — all phases complete
-last_updated: "2026-09-27T02:07:03.250Z"
+last_updated: "2026-09-27T02:07:46.538Z"
 last_activity: 2026-09-27
-last_activity_desc: Phase 6 complete
-state_head: 5b3eee5adf1cbc7515fbec3e401ffe4d41253280
+last_activity_desc: Milestone v1.0 completed and archived
+state_head: b7ab036aa5f68c8bb0a87ebc72a052e93ebff649
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 16
   completed_plans: 16
   percent: 100
-milestone_name: MVP
+current_phase: 6
+current_phase_name: Hardening, Tests & Docs
 ---
 
 # Project State
@@ -29,12 +29,10 @@ See: .planning/PROJECT.md (updated 2026-09-27)
 
 ## Current Position
 
-Phase: 6 of 6 (Hardening, Tests & Docs)
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-09-27 — Phase 6 complete
-
-Progress: [██████████] 100%
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-27 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
@@ -93,3 +91,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 Last session: 2026-09-27 08:30
 Stopped at: Phase 6 complete — all phases complete
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with $gsd-new-milestone

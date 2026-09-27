@@ -2,8 +2,8 @@
  * Placement and lifecycle of the per-tweet organizer root (PRD §31, §51).
  *
  * Responsibilities:
- *  - find the tweet's action area and append exactly one root there (never the
- *    page header — XI-08);
+ *  - find the tweet's action area and insert exactly one root on its own row
+ *    directly above it (never the page header — XI-08);
  *  - keep injection idempotent: an article that already owns a root is updated
  *    in place, never duplicated (XI-04);
  *  - re-render every visible root when categories/settings/the saved set change
@@ -84,6 +84,34 @@ function makePositioningSafe(article: HTMLElement): void {
   if (view.getComputedStyle(article).position === "static") article.style.position = "relative";
 }
 
+/**
+ * The element the organizer root is inserted *before*, so the controls occupy
+ * their own row instead of sharing X's action bar with the native
+ * reply/repost/like/bookmark buttons.
+ *
+ * X wraps the native `div[role="group"]` in one or more layout wrappers. We climb
+ * from that group while the parent is a pure wrapper: it must not contain tweet
+ * body content (`User-Name` / `tweetText`) and must not be the article's own
+ * direct child (the avatar + content flex row). The highest wrapper that passes
+ * is the action-bar row, so inserting before it lands the root directly above the
+ * tools, inside the tweet's content column. When the group is already a direct
+ * child of the content column, the group itself is returned and the root still
+ * gets its own row above it.
+ */
+function findRowAnchor(article: Element, actionBar: Element): Element {
+  let anchor: Element = actionBar;
+  for (let depth = 0; depth < 4; depth += 1) {
+    const parent = anchor.parentElement;
+    if (!parent || parent === article) break;
+    // Never climb into a container that holds tweet body content.
+    if (queryFirst(parent, "userName") || queryFirst(parent, "tweetText")) break;
+    // Never climb to the article's direct child (the avatar + content row).
+    if (parent.parentElement === article) break;
+    anchor = parent;
+  }
+  return anchor;
+}
+
 function renderOptionsFor(
   options: InjectOrganizerOptions,
 ): Parameters<typeof renderOrganizer>[1] {
@@ -125,14 +153,23 @@ export function injectOrganizer(options: InjectOrganizerOptions): HTMLElement | 
   root.setAttribute(ROOT_ATTRIBUTE, INJECTED_VALUE);
   root.setAttribute(ROOT_TWEET_ID_ATTRIBUTE, options.tweetId);
   root.className = "twb-root";
-  root.style.display = "inline-flex";
+  // Its own full-width row above the native action bar.
+  root.style.display = "flex";
+  root.style.flexWrap = "wrap";
   root.style.alignItems = "center";
-  root.style.marginLeft = "4px";
+  root.style.gap = "2px";
+  root.style.width = "100%";
+  root.style.boxSizing = "border-box";
+  root.style.margin = "4px 0 2px";
   root.style.position = "relative";
 
   renderOrganizer(root, renderOptionsFor(options));
   makePositioningSafe(article);
-  actionBar.appendChild(root);
+
+  const anchor = findRowAnchor(article, actionBar);
+  const parent = anchor.parentElement;
+  if (parent) parent.insertBefore(root, anchor);
+  else actionBar.appendChild(root);
   return root;
 }
 

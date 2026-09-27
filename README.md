@@ -118,7 +118,9 @@ reload.
 
 1. Open `https://x.com/i/history`
 2. Each tweet gets an organizer (`[Organize]` in popover mode, category chips in
-   inline mode)
+   inline mode) on **its own full-width row directly above the native action
+   bar** — it never shares the row with X's reply/repost/like/bookmark buttons
+   (PRD §31, XI-08).
 3. Click **Linux** on a tweet → success toast `Saved to Linux`, controls become
    `✓ Saved`
 4. Inspect the result:

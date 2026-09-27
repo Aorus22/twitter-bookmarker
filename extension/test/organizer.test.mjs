@@ -41,16 +41,35 @@ function inject(article, overrides = {}) {
 
 const rootsIn = (scope) => scope.querySelectorAll("[data-twitter-bookmarker-root]");
 
-test("controls render inside the action area, never the header (XI-08)", () => {
+test("controls render on their own row directly above the action area (XI-08)", () => {
   const { article, actionBar } = createTweetDocument({ text: "hi" });
   const root = inject(article);
 
   assert.ok(root, "a root is created");
-  assert.equal(actionBar.querySelector("[data-twitter-bookmarker-root]"), root);
   assert.equal(actionBar.getAttribute("role"), "group");
   assert.equal(rootsIn(article).length, 1);
-  // The root is a descendant of the action bar, not of the article directly.
+  // Not inside the native action bar: the organizer must not share its row.
+  assert.equal(actionBar.querySelector("[data-twitter-bookmarker-root]"), null);
+  // Its own row: an immediate previous sibling of the action bar.
+  assert.equal(root.nextElementSibling, actionBar);
+  assert.equal(root.parentElement, actionBar.parentElement);
   assert.notEqual(root.parentElement, article);
+});
+
+test("a nested action-bar wrapper is climbed, keeping the organizer on its own row", () => {
+  const { doc, article, actionBar, content } = createTweetDocument({ text: "hi" });
+  // X wraps the native group in its own layout row.
+  const actionRow = doc.createElement("div");
+  content.appendChild(actionRow);
+  actionRow.appendChild(actionBar);
+
+  const root = inject(article);
+
+  assert.ok(root, "a root is created");
+  assert.equal(actionBar.querySelector("[data-twitter-bookmarker-root]"), null);
+  assert.equal(root.nextElementSibling, actionRow, "inserted above the whole action-bar row");
+  assert.equal(root.parentElement, content, "stays inside the tweet's content column");
+  assert.equal(rootsIn(article).length, 1);
 });
 
 test("injection is idempotent: a second call updates in place (XI-04)", () => {

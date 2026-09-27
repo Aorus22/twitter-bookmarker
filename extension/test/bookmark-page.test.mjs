@@ -102,8 +102,9 @@ test("start fetches the index once, injects, and marks saved tweets (XI-03, XI-0
 
   assert.equal(indexCalls, 1, "the saved index is fetched exactly once per page entry");
   assert.equal(article.getAttribute(INJECTED_ATTRIBUTE), "true");
-  const root = actionBar.querySelector("[data-twitter-bookmarker-root]");
+  const root = rootsIn(article)[0];
   assert.ok(root);
+  assert.equal(root.nextElementSibling, actionBar, "organizer owns the row above the action bar");
   assert.ok(root.querySelector("[data-twitter-bookmarker-saved]"));
   assert.equal(isTweetSaved("1234567890"), true);
   assert.deepEqual([...getSavedTweetIds()], ["1234567890"]);
@@ -203,7 +204,7 @@ test("a newly scrolled-in tweet gets controls exactly once (XI-03)", async () =>
 
   assert.equal(second.article.getAttribute(INJECTED_ATTRIBUTE), "true");
   assert.equal(rootsIn(second.article).length, 1);
-  assert.equal(second.actionBar.querySelector("[data-twitter-bookmarker-root]"), rootsIn(second.article)[0]);
+  assert.equal(rootsIn(second.article)[0].nextElementSibling, second.actionBar);
 });
 
 test("the debounced sweep re-injects a tweet whose DOM was wiped (marker logic, XI-04)", async () => {

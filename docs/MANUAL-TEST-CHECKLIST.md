@@ -65,7 +65,7 @@ Set display mode to **Popover** first; switch to **Inline** only for scenario B9
 
 | Where | What |
 |---|---|
-| Tweet action bar | organizer root: `[Organize]` (popover) or category chips (inline) |
+| Row directly **above** the tweet action bar | organizer root: `[Organize]` (popover) or category chips (inline) — its own full-width row, never sharing the native tools' row |
 | Popover panel | AI / Linux / Design rows, each with its colour dot |
 | Saved tweet | `✓ Saved` replacing the category controls |
 | Toasts | bottom-right stack, auto-dismiss ~3.5 s, click to dismiss |
@@ -449,7 +449,7 @@ python3 -c "import csv; print(repr(list(csv.reader(open('$HOME/.twitter-bookmark
 **Steps**
 1. On a tweet showing controls, trigger an X re-render — e.g. open and close a
    quoted tweet, or resize/scroll so X recycles the row.
-2. Inspect the action bar of that tweet.
+2. Inspect the row directly above the action bar of that tweet.
 
 **Expected**
 - Exactly **one** organizer root per tweet, with one set of category controls.

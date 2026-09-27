@@ -1,0 +1,16 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Extension build output
+extension/dist/
+
+# Go build output
+backend/bin/
+twitter-bookmarker-server
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

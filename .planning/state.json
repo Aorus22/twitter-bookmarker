@@ -1,0 +1,43 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "\"1.0\"",
+  "phases": [
+    {
+      "number": "1",
+      "name": "Go Persistence Layer & HTTP API",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Extension Foundation & Settings Popup",
+      "status": "complete"
+    },
+    {
+      "number": "3",
+      "name": "X DOM Integration",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Save Integration",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Auto Unbookmark",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "Hardening, Tests & Docs",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (plan phase 03)",
+    "reason": "Phase 03 of 6 — needs a plan"
+  },
+  "updated_at": "2026-09-27T01:38:50.948Z"
+}

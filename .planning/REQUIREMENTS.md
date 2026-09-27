@@ -9,39 +9,39 @@ Requirements for the initial MVP. Each maps to a roadmap phase.
 
 ### Backend (Go)
 
-- [ ] **BE-01**: Server binds only to `127.0.0.1` on a single hardcoded port constant (`43121`)
-- [ ] **BE-02**: Server creates `~/.twitter-bookmarker/` (0700) automatically on startup and exits with a clear error if it cannot
-- [ ] **BE-03**: `GET /health` returns `200` with `{"status":"ok"}`
-- [ ] **BE-04**: `POST /v1/bookmarks` creates the category CSV with the exact header `url,author,username,tweet_date,saved_at,text`, writes the header once, and appends subsequent rows
-- [ ] **BE-05**: Backend normalizes tweet URLs to canonical `https://x.com/<user>/status/<id>` (strips query and hash)
-- [ ] **BE-06**: Backend extracts and validates the numeric Tweet Status ID from the URL
-- [ ] **BE-07**: Backend generates `saved_at` itself in ISO 8601 UTC
-- [ ] **BE-08**: Duplicate Tweet Status ID is rejected globally (across all CSVs) with `409` and no second row is appended
-- [ ] **BE-09**: `GET /v1/index` returns all saved tweet IDs keyed by ID with `url`, `filename`, `saved_at`
-- [ ] **BE-10**: Index is loaded when valid, and rebuilt from all CSVs when missing, malformed, or when the directory is empty
-- [ ] **BE-11**: Filename is validated against `^[a-z0-9][a-z0-9-]*\.csv$`; traversal (`/`, `\`, `..`, `~`) is rejected with `400`
-- [ ] **BE-12**: CSV output is valid for commas, quotes, emoji, unicode, and embedded newlines using Go `encoding/csv`
-- [ ] **BE-13**: Concurrent duplicate requests cannot produce duplicate rows (global write mutex)
-- [ ] **BE-14**: A CSV append that succeeded is treated as success even if `index.json` persistence fails (warning logged, in-memory index updated)
-- [ ] **BE-15**: Backend logs startup, storage dir, address, index rebuild, save, duplicate, invalid request, filesystem errors, and index-persistence warnings; never logs full tweet text
-- [ ] **BE-16**: In-flight requests are drained and the server shuts down cleanly on `SIGINT`/`SIGTERM`
-- [ ] **BE-17**: Port-in-use and storage-directory failures exit with a clear error message
-- [ ] **BE-18**: Invalid payloads (bad filename, bad URL, missing author/username, bad date, malformed JSON) return `400`; backend stores no categories or settings
+- [x] **BE-01**: Server binds only to `127.0.0.1` on a single hardcoded port constant (`43121`)
+- [x] **BE-02**: Server creates `~/.twitter-bookmarker/` (0700) automatically on startup and exits with a clear error if it cannot
+- [x] **BE-03**: `GET /health` returns `200` with `{"status":"ok"}`
+- [x] **BE-04**: `POST /v1/bookmarks` creates the category CSV with the exact header `url,author,username,tweet_date,saved_at,text`, writes the header once, and appends subsequent rows
+- [x] **BE-05**: Backend normalizes tweet URLs to canonical `https://x.com/<user>/status/<id>` (strips query and hash)
+- [x] **BE-06**: Backend extracts and validates the numeric Tweet Status ID from the URL
+- [x] **BE-07**: Backend generates `saved_at` itself in ISO 8601 UTC
+- [x] **BE-08**: Duplicate Tweet Status ID is rejected globally (across all CSVs) with `409` and no second row is appended
+- [x] **BE-09**: `GET /v1/index` returns all saved tweet IDs keyed by ID with `url`, `filename`, `saved_at`
+- [x] **BE-10**: Index is loaded when valid, and rebuilt from all CSVs when missing, malformed, or when the directory is empty
+- [x] **BE-11**: Filename is validated against `^[a-z0-9][a-z0-9-]*\.csv$`; traversal (`/`, `\`, `..`, `~`) is rejected with `400`
+- [x] **BE-12**: CSV output is valid for commas, quotes, emoji, unicode, and embedded newlines using Go `encoding/csv`
+- [x] **BE-13**: Concurrent duplicate requests cannot produce duplicate rows (global write mutex)
+- [x] **BE-14**: A CSV append that succeeded is treated as success even if `index.json` persistence fails (warning logged, in-memory index updated)
+- [x] **BE-15**: Backend logs startup, storage dir, address, index rebuild, save, duplicate, invalid request, filesystem errors, and index-persistence warnings; never logs full tweet text
+- [x] **BE-16**: In-flight requests are drained and the server shuts down cleanly on `SIGINT`/`SIGTERM`
+- [x] **BE-17**: Port-in-use and storage-directory failures exit with a clear error message
+- [x] **BE-18**: Invalid payloads (bad filename, bad URL, missing author/username, bad date, malformed JSON) return `400`; backend stores no categories or settings
 
 ### Extension Settings
 
-- [ ] **EXT-01**: Extension persists `{version, settings:{unbookmarkAfterSave,displayMode}, categories:[{id,name,filename,color,order}]}` in `chrome.storage.local` only
-- [ ] **EXT-02**: Popup shows backend connection status from `GET /health` with Connected / Disconnected (and optional Retry)
-- [ ] **EXT-03**: User can add a category with name + color; extension generates stable `id`, slug `filename`, and appends `order`
-- [ ] **EXT-04**: Renaming a category updates `name` and recomputes `filename` without touching, renaming, or migrating the old CSV
-- [ ] **EXT-05**: Deleting a category removes it from `chrome.storage.local` only; no backend call, no file deletion
-- [ ] **EXT-06**: User can change a category color; color is UI-only and never sent to the backend or written to CSV
-- [ ] **EXT-07**: Popup supports drag-and-drop reorder; persisted `order` drives popup, popover, and inline button order
-- [ ] **EXT-08**: User can toggle `unbookmarkAfterSave` (default `false`)
-- [ ] **EXT-09**: User can choose `displayMode` `popover` | `inline` (default `popover`)
-- [ ] **EXT-10**: Content script listens to `chrome.storage.onChanged` and re-renders existing controls without a tab reload
-- [ ] **EXT-11**: Empty category state shows "No categories yet" + Add category in the popup and injects no organizer on tweets
-- [ ] **EXT-12**: Manifest V3 requests only `storage`, host access to `x.com`, and host access to the localhost backend
+- [x] **EXT-01**: Extension persists `{version, settings:{unbookmarkAfterSave,displayMode}, categories:[{id,name,filename,color,order}]}` in `chrome.storage.local` only
+- [x] **EXT-02**: Popup shows backend connection status from `GET /health` with Connected / Disconnected (and optional Retry)
+- [x] **EXT-03**: User can add a category with name + color; extension generates stable `id`, slug `filename`, and appends `order`
+- [x] **EXT-04**: Renaming a category updates `name` and recomputes `filename` without touching, renaming, or migrating the old CSV
+- [x] **EXT-05**: Deleting a category removes it from `chrome.storage.local` only; no backend call, no file deletion
+- [x] **EXT-06**: User can change a category color; color is UI-only and never sent to the backend or written to CSV
+- [x] **EXT-07**: Popup supports drag-and-drop reorder; persisted `order` drives popup, popover, and inline button order
+- [x] **EXT-08**: User can toggle `unbookmarkAfterSave` (default `false`)
+- [x] **EXT-09**: User can choose `displayMode` `popover` | `inline` (default `popover`)
+- [x] **EXT-10**: Content script listens to `chrome.storage.onChanged` and re-renders existing controls without a tab reload
+- [x] **EXT-11**: Empty category state shows "No categories yet" + Add category in the popup and injects no organizer on tweets
+- [x] **EXT-12**: Manifest V3 requests only `storage`, host access to `x.com`, and host access to the localhost backend
 
 ### X Integration
 
@@ -108,36 +108,36 @@ Deferred to a future release. Tracked but not in the current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BE-01 | Phase 1 | Pending |
-| BE-02 | Phase 1 | Pending |
-| BE-03 | Phase 1 | Pending |
-| BE-04 | Phase 1 | Pending |
-| BE-05 | Phase 1 | Pending |
-| BE-06 | Phase 1 | Pending |
-| BE-07 | Phase 1 | Pending |
-| BE-08 | Phase 1 | Pending |
-| BE-09 | Phase 1 | Pending |
-| BE-10 | Phase 1 | Pending |
-| BE-11 | Phase 1 | Pending |
-| BE-12 | Phase 1 | Pending |
-| BE-13 | Phase 1 | Pending |
-| BE-14 | Phase 1 | Pending |
-| BE-15 | Phase 1 | Pending |
-| BE-16 | Phase 1 | Pending |
-| BE-17 | Phase 1 | Pending |
-| BE-18 | Phase 1 | Pending |
-| EXT-01 | Phase 2 | Pending |
-| EXT-02 | Phase 2 | Pending |
-| EXT-03 | Phase 2 | Pending |
-| EXT-04 | Phase 2 | Pending |
-| EXT-05 | Phase 2 | Pending |
-| EXT-06 | Phase 2 | Pending |
-| EXT-07 | Phase 2 | Pending |
-| EXT-08 | Phase 2 | Pending |
-| EXT-09 | Phase 2 | Pending |
-| EXT-10 | Phase 2 | Pending |
-| EXT-11 | Phase 2 | Pending |
-| EXT-12 | Phase 2 | Pending |
+| BE-01 | Phase 1 | Complete |
+| BE-02 | Phase 1 | Complete |
+| BE-03 | Phase 1 | Complete |
+| BE-04 | Phase 1 | Complete |
+| BE-05 | Phase 1 | Complete |
+| BE-06 | Phase 1 | Complete |
+| BE-07 | Phase 1 | Complete |
+| BE-08 | Phase 1 | Complete |
+| BE-09 | Phase 1 | Complete |
+| BE-10 | Phase 1 | Complete |
+| BE-11 | Phase 1 | Complete |
+| BE-12 | Phase 1 | Complete |
+| BE-13 | Phase 1 | Complete |
+| BE-14 | Phase 1 | Complete |
+| BE-15 | Phase 1 | Complete |
+| BE-16 | Phase 1 | Complete |
+| BE-17 | Phase 1 | Complete |
+| BE-18 | Phase 1 | Complete |
+| EXT-01 | Phase 2 | Complete |
+| EXT-02 | Phase 2 | Complete |
+| EXT-03 | Phase 2 | Complete |
+| EXT-04 | Phase 2 | Complete |
+| EXT-05 | Phase 2 | Complete |
+| EXT-06 | Phase 2 | Complete |
+| EXT-07 | Phase 2 | Complete |
+| EXT-08 | Phase 2 | Complete |
+| EXT-09 | Phase 2 | Complete |
+| EXT-10 | Phase 2 | Complete |
+| EXT-11 | Phase 2 | Complete |
+| EXT-12 | Phase 2 | Complete |
 | XI-01 | Phase 3 | Pending |
 | XI-02 | Phase 3 | Pending |
 | XI-03 | Phase 3 | Pending |
@@ -168,6 +168,7 @@ Deferred to a future release. Tracked but not in the current roadmap.
 | TEST-06 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 58 total
 - Mapped to phases: 58
 - Unmapped: 0 ✓

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Twitter Bookmarker</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="app-header">
+        <h1>Twitter Bookmarker</h1>
+      </header>
+
+      <section class="section" aria-labelledby="backend-heading">
+        <div class="section-head">
+          <h2 id="backend-heading">Backend</h2>
+          <button id="backend-retry" type="button" class="link-button">Retry</button>
+        </div>
+        <p id="backend-status" class="status status--checking" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-text">Checking&hellip;</span>
+        </p>
+      </section>
+
+      <hr class="divider" />
+
+      <section class="section" aria-labelledby="categories-heading">
+        <div class="section-head">
+          <h2 id="categories-heading">Categories</h2>
+        </div>
+
+        <p id="categories-empty" class="empty-state" hidden>No categories yet</p>
+        <ul id="category-list" class="category-list"></ul>
+
+        <p id="category-error" class="inline-error" role="alert" hidden></p>
+
+        <form id="add-category-form" class="add-form" hidden>
+          <label class="field">
+            <span class="field-label">Name</span>
+            <input
+              id="add-category-name"
+              type="text"
+              maxlength="60"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Linux"
+              required
+            />
+          </label>
+          <label class="field field--color">
+            <span class="field-label">Color</span>
+            <input id="add-category-color" type="color" value="#4f46e5" />
+          </label>
+          <div class="add-form-actions">
+            <button id="add-category-save" type="submit" class="button button--primary">Save</button>
+            <button id="add-category-cancel" type="button" class="button">Cancel</button>
+          </div>
+        </form>
+
+        <button id="add-category-toggle" type="button" class="button button--add">+ Add category</button>
+      </section>
+
+      <hr class="divider" />
+
+      <section class="section" aria-labelledby="settings-heading">
+        <h2 id="settings-heading" class="visually-hidden">Settings</h2>
+
+        <div class="setting-row">
+          <label class="setting-label" for="setting-unbookmark">Unbookmark after save</label>
+          <input
+            id="setting-unbookmark"
+            type="checkbox"
+            class="switch"
+            role="switch"
+            aria-label="Unbookmark after save"
+          />
+        </div>
+
+        <div class="setting-row">
+          <span class="setting-label" id="display-mode-label">Category display</span>
+          <div id="display-mode" class="segmented" role="radiogroup" aria-labelledby="display-mode-label">
+            <button type="button" class="segmented-option" data-mode="popover" role="radio" aria-checked="true">
+              Popover
+            </button>
+            <button type="button" class="segmented-option" data-mode="inline" role="radio" aria-checked="false">
+              Inline
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <template id="category-row-template">
+      <li class="category-row" draggable="true">
+        <button class="drag-handle" type="button" tabindex="-1" aria-label="Drag to reorder" title="Drag to reorder">
+          &#8801;
+        </button>
+        <input class="category-color" type="color" aria-label="Category color" />
+        <div class="category-main">
+          <span class="category-name"></span>
+          <input class="category-name-input" type="text" maxlength="60" autocomplete="off" spellcheck="false" hidden />
+          <span class="category-filename"></span>
+        </div>
+        <button class="icon-button category-rename" type="button" aria-label="Rename category" title="Rename">
+          &#9998;
+        </button>
+        <button class="icon-button category-delete" type="button" aria-label="Delete category" title="Delete">
+          &#128465;
+        </button>
+      </li>
+    </template>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

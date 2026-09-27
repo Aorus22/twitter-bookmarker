@@ -21,7 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Go Persistence Layer & HTTP API** - Local loopback Go server that writes tweet metadata to per-category CSVs with a rebuildable duplicate index (completed 2026-09-27)
 - [x] **Phase 2: Extension Foundation & Settings Popup** - MV3 scaffold, `chrome.storage.local` model, popup category CRUD/colors/ordering, and settings (completed 2026-09-27)
-- [ ] **Phase 3: X DOM Integration** - Route detection, MutationObserver, tweet extraction, and popover/inline organizer UI on `/i/bookmarks`
+- [x] **Phase 3: X DOM Integration** - Route detection, MutationObserver, tweet extraction, and popover/inline organizer UI on `/i/bookmarks` (completed 2026-09-27)
 - [ ] **Phase 4: Save Integration** - Content script → service worker messaging, backend HTTP, saving state, saved marker, and toasts
 - [ ] **Phase 5: Auto Unbookmark** - Verified native X unbookmark strictly after a confirmed CSV write
 - [ ] **Phase 6: Hardening, Tests & Docs** - Edge-case hardening, automated tests, build tooling, and documentation
@@ -84,9 +84,9 @@ Plans:
 
 Plans:
 
-- [ ] 03-01: Route detection, observer, and tweet discovery
-- [ ] 03-02: Tweet extractor (scoped selectors, quoted-text exclusion, media-only handling)
-- [ ] 03-03: Organizer UI (popover, inline, saved state, rerender on storage change)
+- [x] 03-01: Route detection, observer, and tweet discovery
+- [x] 03-02: Tweet extractor (scoped selectors, quoted-text exclusion, media-only handling)
+- [x] 03-03: Organizer UI (popover, inline, saved state, rerender on storage change)
 
 ### Phase 4: Save Integration
 
@@ -154,7 +154,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Go Persistence Layer & HTTP API | 3/3 | Complete    | 2026-09-27 |
 | 2. Extension Foundation & Settings Popup | 3/3 | Complete    | 2026-09-27 |
-| 3. X DOM Integration | 0/3 | Not started | - |
+| 3. X DOM Integration | 3/3 | Complete    | 2026-09-27 |
 | 4. Save Integration | 0/2 | Not started | - |
 | 5. Auto Unbookmark | 0/2 | Not started | - |
 | 6. Hardening, Tests & Docs | 0/3 | Not started | - |

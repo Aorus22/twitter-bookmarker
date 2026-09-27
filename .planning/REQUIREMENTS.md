@@ -45,18 +45,18 @@ Requirements for the initial MVP. Each maps to a roadmap phase.
 
 ### X Integration
 
-- [ ] **XI-01**: Organizer is injected only on `https://x.com/i/bookmarks`
-- [ ] **XI-02**: SPA route changes are detected without full reload; leaving `/i/bookmarks` stops injection; returning resumes it
-- [ ] **XI-03**: A single `MutationObserver` discovers newly loaded tweets; the saved index is fetched once per Bookmarks page entry and lookup is O(1)
-- [ ] **XI-04**: Injection is idempotent via a per-tweet marker attribute; no duplicate controls on DOM re-render
-- [ ] **XI-05**: Metadata extraction is scoped to the tweet container and yields `url`, `author`, `username`, `tweet_date`, `text`, `tweet_id`
-- [ ] **XI-06**: Embedded quoted-tweet text is excluded; only the top-level tweet text is persisted
-- [ ] **XI-07**: Media-only tweets extract with empty `text` and remain saveable
-- [ ] **XI-08**: Organizer controls render in the tweet action area near X's native action buttons (not in the page header)
-- [ ] **XI-09**: Popover mode shows all categories in `order` with color indicators and closes on selection, outside click, or tweet removal
-- [ ] **XI-10**: Inline mode renders all category buttons in `order`
-- [ ] **XI-11**: Previously saved tweet IDs render as `✓ Saved` with no category controls
-- [ ] **XI-12**: If a required field (`url`, `author`, `username`, `tweet_date`) cannot be extracted, no partial record is sent and "Could not read tweet data" is shown
+- [x] **XI-01**: Organizer is injected only on `https://x.com/i/bookmarks`
+- [x] **XI-02**: SPA route changes are detected without full reload; leaving `/i/bookmarks` stops injection; returning resumes it
+- [x] **XI-03**: A single `MutationObserver` discovers newly loaded tweets; the saved index is fetched once per Bookmarks page entry and lookup is O(1)
+- [x] **XI-04**: Injection is idempotent via a per-tweet marker attribute; no duplicate controls on DOM re-render
+- [x] **XI-05**: Metadata extraction is scoped to the tweet container and yields `url`, `author`, `username`, `tweet_date`, `text`, `tweet_id`
+- [x] **XI-06**: Embedded quoted-tweet text is excluded; only the top-level tweet text is persisted
+- [x] **XI-07**: Media-only tweets extract with empty `text` and remain saveable
+- [x] **XI-08**: Organizer controls render in the tweet action area near X's native action buttons (not in the page header)
+- [x] **XI-09**: Popover mode shows all categories in `order` with color indicators and closes on selection, outside click, or tweet removal
+- [x] **XI-10**: Inline mode renders all category buttons in `order`
+- [x] **XI-11**: Previously saved tweet IDs render as `✓ Saved` with no category controls
+- [x] **XI-12**: If a required field (`url`, `author`, `username`, `tweet_date`) cannot be extracted, no partial record is sent and "Could not read tweet data" is shown
 
 ### Save Integration
 
@@ -138,18 +138,18 @@ Deferred to a future release. Tracked but not in the current roadmap.
 | EXT-10 | Phase 2 | Complete |
 | EXT-11 | Phase 2 | Complete |
 | EXT-12 | Phase 2 | Complete |
-| XI-01 | Phase 3 | Pending |
-| XI-02 | Phase 3 | Pending |
-| XI-03 | Phase 3 | Pending |
-| XI-04 | Phase 3 | Pending |
-| XI-05 | Phase 3 | Pending |
-| XI-06 | Phase 3 | Pending |
-| XI-07 | Phase 3 | Pending |
-| XI-08 | Phase 3 | Pending |
-| XI-09 | Phase 3 | Pending |
-| XI-10 | Phase 3 | Pending |
-| XI-11 | Phase 3 | Pending |
-| XI-12 | Phase 3 | Pending |
+| XI-01 | Phase 3 | Complete |
+| XI-02 | Phase 3 | Complete |
+| XI-03 | Phase 3 | Complete |
+| XI-04 | Phase 3 | Complete |
+| XI-05 | Phase 3 | Complete |
+| XI-06 | Phase 3 | Complete |
+| XI-07 | Phase 3 | Complete |
+| XI-08 | Phase 3 | Complete |
+| XI-09 | Phase 3 | Complete |
+| XI-10 | Phase 3 | Complete |
+| XI-11 | Phase 3 | Complete |
+| XI-12 | Phase 3 | Complete |
 | SAVE-01 | Phase 4 | Pending |
 | SAVE-02 | Phase 4 | Pending |
 | SAVE-03 | Phase 4 | Pending |

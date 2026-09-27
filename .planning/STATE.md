@@ -2,44 +2,44 @@
 gsd_state_version: "1.0"
 milestone: v2.0
 milestone_name: Local Web Gallery
-current_phase: 10
-current_phase_name: Hardening, Accessibility & Responsive
-status: completed
+status: Awaiting next milestone
 stopped_at: Phase 10 complete — all phases complete
-last_updated: "2026-09-27T17:09:26.194Z"
+last_updated: "2026-09-27T17:18:43.184Z"
 last_activity: 2026-09-28
-last_activity_desc: Phase 10 complete
-state_head: 719c3c7094b45fd07f04ea9e9e0e46a6038515b7
+last_activity_desc: Milestone v2.0 completed and archived
+state_head: 2e60204ec4baa91a7fd3f72ddabc2b5a32c74453
 progress:
   total_phases: 10
   completed_phases: 10
   total_plans: 10
   completed_plans: 10
   percent: 100
+current_phase: 10
+current_phase_name: Hardening, Accessibility & Responsive
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-27)
+See: .planning/PROJECT.md (updated 2026-09-28)
 
 **Core value:** A categorized tweet is durably persisted to CSV before anything else happens — CSV is the source of truth, and nothing is ever unbookmarked before the CSV write succeeds. The Phase 2 gallery is a read-only projection of that CSV and may never become a second source of truth.
-**Current focus:** Phase 2 — Gallery HTTP API
+**Current focus:** None — v2.0 shipped and archived; the next milestone starts at Phase 11
 
 ## Current Position
 
-Phase: 10 of 10 (Hardening, Accessibility & Responsive)
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-09-28 — Phase 10 complete
+Phase: Milestone v2.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-28 — Milestone v2.0 completed and archived
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Total plans completed (v1.0): 16
-- Total plans completed (v2.0): 1
+- Total plans completed (v2.0): 10
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -48,29 +48,19 @@ Last activity: 2026-09-28 — Phase 10 complete
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Gallery Read Layer | 1 | 1 | - |
-| 2. Gallery HTTP API | 0 | TBD | - |
-| 3. Web Scaffold, Theme & API Client | 0 | TBD | - |
-| 4. Gallery Homepage | 0 | TBD | - |
-| 5. Collection Gallery | 0 | TBD | - |
-| 6. Discovery Tools | 0 | TBD | - |
-| 7. Infinite Scroll | 0 | TBD | - |
-| 8. Media Lightbox | 0 | TBD | - |
-| 9. Production Serving | 0 | TBD | - |
-| 10. Hardening, Accessibility & Responsive | 0 | TBD | - |
-| 1 | 1 | - | - |
-| 2 | 1 | - | - |
-| 3 | 1 | - | - |
-| 4 | 1 | - | - |
-| 5 | 1 | - | - |
-| 6 | 1 | - | - |
-| 7 | 1 | - | - |
-| 8 | 1 | - | - |
-| 9 | 1 | - | - |
-| 10 | 1 | - | - |
+| 2. Gallery HTTP API | 1 | 1 | - |
+| 3. Web Scaffold, Theme & API Client | 1 | 1 | - |
+| 4. Gallery Homepage | 1 | 1 | - |
+| 5. Collection Gallery | 1 | 1 | - |
+| 6. Discovery Tools | 1 | 1 | - |
+| 7. Infinite Scroll | 1 | 1 | - |
+| 8. Media Lightbox | 1 | 1 | - |
+| 9. Production Serving | 1 | 1 | - |
+| 10. Hardening, Accessibility & Responsive | 1 | 1 | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 complete
+- Last 5 plans: 06-01, 07-01, 08-01, 09-01, 10-01 complete
 - Trend: —
 
 ## Accumulated Context
@@ -100,14 +90,19 @@ Items acknowledged and deferred, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| *(none)* | | | | |
+| Accessibility | Two moderate landmark violations (`landmark-no-duplicate-banner`, `landmark-unique`) while the desktop filter Popover is open — three `<header>` landmarks exist, one inside `role="dialog"`; the fix is to render the Popover panel's `<header>` as a `<div>` | Open | 2026-09-28 | v2.0 |
+| Accessibility | The active quick-range pill (`bg-grad-brand text-accent`) sits on a gradient axe cannot evaluate; measured ≈1.25–2.54:1 — a deliberate design combination needing a human design decision, not a token change | Open | 2026-09-28 | v2.0 |
+| Verification | No real screen-reader pass (VoiceOver/NVDA) in any phase; the harness proves names, roles, focus order and axe rules, not spoken output | Open | 2026-09-28 | v2.0 |
+| Verification | PRD §82 step 21 (the original tweet opening in a new tab) is asserted as the canonical `x.com/<user>/status/<id>` href plus target/rel, not by live navigation; documented as manual checklist step F1-21 | Open | 2026-09-28 | v2.0 |
+| Tooling | `scripts/check-web-acceptance.sh` drops its `--out` argument when it re-execs under `unshare -rn` — the arg loop consumes `"$@"` and the re-exec then passes the emptied list | Open | 2026-09-28 | v2.0 |
 
 ## Session Continuity
 
-Last session: 2026-09-27 15:00
-Stopped at: Phase 10 complete — all phases complete
+Last session: 2026-09-28
+Stopped at: Milestone v2.0 completed and archived — no active milestone
 Resume file: None
 
 ## Operator Next Steps
 
-- Autonomous run in progress (`$gsd-autonomous`): phases 2–10 remaining, then milestone audit → complete → cleanup.
+- Start the next milestone with `$gsd-new-milestone` (fresh requirements; the next phase number is 11)
+- Read `.planning/milestones/v2.0-MILESTONE-AUDIT.md` for the full audit and tech-debt detail

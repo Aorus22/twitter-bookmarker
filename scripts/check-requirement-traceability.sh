@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # check-requirement-traceability.sh — milestone-level consistency gate.
 #
-# Verifies that the requirement set is internally coherent across all three
-# planning artifacts, which is what the milestone audit checks:
+# Verifies that the requirement set is internally coherent across the planning
+# artifacts, which is what the milestone audit checks:
 #
 #   * every requirement in REQUIREMENTS.md's body has a Traceability row
 #   * no requirement appears in the table but not the body
@@ -10,8 +10,22 @@
 #   * every requirement is claimed by exactly one ROADMAP phase
 #   * ROADMAP cites no requirement that REQUIREMENTS.md never defines
 #
+# Two modes, chosen automatically:
+#
+#   live     — .planning/REQUIREMENTS.md exists (a milestone is in flight), so the
+#              live REQUIREMENTS.md/ROADMAP.md pair is checked.
+#   archived — no live REQUIREMENTS.md (between milestones, or right after
+#              $gsd-complete-milestone deletes it), so the newest
+#              .planning/milestones/v[X.Y]-REQUIREMENTS.md and its matching
+#              v[X.Y]-ROADMAP.md are checked instead. The live gate stays green
+#              between milestones without pretending a live set exists, and the
+#              archive itself is proven coherent.
+#
+# A missing requirements file is NOT a failure: that is the normal post-completion
+# state. Only a genuinely incoherent set fails.
+#
 # Usage: scripts/check-requirement-traceability.sh
-# Exit:  0 = consistent, 1 = inconsistent.
+# Exit:  0 = consistent (or nothing to check), 1 = inconsistent.
 
 set -uo pipefail
 
@@ -21,12 +35,37 @@ import re, sys, pathlib
 from collections import Counter
 
 root = pathlib.Path(sys.argv[1])
-reqp, roadp = root / ".planning/REQUIREMENTS.md", root / ".planning/ROADMAP.md"
+live_req, live_road = root / ".planning/REQUIREMENTS.md", root / ".planning/ROADMAP.md"
+archive = root / ".planning/milestones"
+
+def version_key(p):
+    m = re.search(r'v(\d+)\.(\d+)-REQUIREMENTS\.md$', p.name)
+    return (int(m.group(1)), int(m.group(2))) if m else (-1, -1)
+
+if live_req.exists():
+    mode, reqp, roadp = "live", live_req, live_road
+else:
+    archived = sorted(archive.glob("v*-REQUIREMENTS.md"), key=version_key)
+    if not archived:
+        print("SKIP  no active REQUIREMENTS.md and no archived milestone to check")
+        print("      (the next $gsd-new-milestone defines a fresh requirement set)")
+        sys.exit(0)
+    reqp = archived[-1]
+    roadp = reqp.with_name(reqp.name.replace("-REQUIREMENTS.md", "-ROADMAP.md"))
+    mode = "archived"
 
 for p in (reqp, roadp):
     if not p.exists():
         print(f"FAIL  missing {p}")
         sys.exit(1)
+
+try:
+    rel = reqp.relative_to(root)
+except ValueError:
+    rel = reqp
+if mode == "archived":
+    print(f"MODE  archived — no active REQUIREMENTS.md; checking the newest "
+          f"archived milestone: {rel}")
 
 req, road = reqp.read_text(), roadp.read_text()
 body = re.findall(r'^-\s*\[[ xX]\]\s*\*\*([A-Z][A-Z0-9]*-\d+)\*\*', req, re.M)

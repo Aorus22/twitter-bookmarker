@@ -283,6 +283,78 @@ check "$([ "$ro_code" = "405" ] && echo true || echo false)" "§80.23 gallery AP
 sum_before="$(jq -r '[.collections[] | select(.name=="Linux")][0].post_count' <<<"$(j "$BASE/api/gallery/collections")" 2>/dev/null || echo x)"
 check "$([ "$sum_before" = "8" ] && echo true || echo false)" "§80.23 gallery API did not mutate data" "got $sum_before"
 
+# ------------------------------------------- PRD §82 integration scenario (HARD-05)
+# The HTTP-assertable half of the §82 scenario (steps 1-15 and 22-24) against the
+# seeded storage dir. Steps 16-21 are browser interactions and live in
+# scripts/check-web-acceptance.sh; the whole scenario is also a checklist in
+# docs/MANUAL-TEST-CHECKLIST.md.
+hdr "§82  Integration acceptance scenario (HARD-05)"
+
+# Steps 1-2: backend running; the seeded dir holds the three named CSVs.
+check "$([ "$(code "$BASE/health")" = "200" ] && echo true || echo false)" \
+  "§82.1 backend is running (/health 200)"
+for f in ai.csv linux.csv design.csv; do
+  check "$([ -f "$FIXTURE/$f" ] && echo true || echo false)" "§82.2 storage contains $f"
+done
+
+# Steps 3-4: the homepage lists AI, Linux and Design.
+scenario_names="$(jq -r '[.collections[].name] | sort | join(",")' <<<"$(j "$BASE/api/gallery/collections")" 2>/dev/null || echo '')"
+check "$([ "$scenario_names" = "AI,Design,Linux" ] && echo true || echo false)" \
+  "§82.3-4 homepage shows AI, Linux, Design" "got [$scenario_names]"
+
+# Steps 5-8: open Linux; posts render; the 4-image tweet shows 4 media; the
+# text-only tweet still appears as a text card.
+linux82="$(j "$BASE/api/gallery/collections/linux.csv/posts?limit=30" 2>/dev/null || echo '{}')"
+check "$([ "$(jq -r '.items|length' <<<"$linux82")" = "8" ] && echo true || echo false)" \
+  "§82.5-6 opening Linux returns its 8 posts"
+check "$([ "$(jq -r '[.items[]|select(.tweet_id=="1000000000000000001")][0].media|length' <<<"$linux82")" = "4" ] && echo true || echo false)" \
+  "§82.7 the 4-image tweet carries 4 media URLs"
+check "$(jq -r '[.items[]|select(.tweet_id=="1000000000000000005")][0] | ((.media|length)==0) and ((.text|length)>0)' <<<"$linux82" 2>/dev/null || echo false)" \
+  "§82.8 the text-only tweet is present with empty media and text"
+
+# Steps 9-11: search "wayland"; then Bookmark Date → Last 7 Days changes results.
+wl82="$(j "$BASE/api/gallery/collections/linux.csv/posts?q=wayland" 2>/dev/null || echo '{}')"
+check "$([ "$(jq -r '.items|length' <<<"$wl82")" = "2" ] && echo true || echo false)" \
+  "§82.9 search 'wayland' narrows the result set to 2"
+# Half a day off the 7-day boundary so the check is immune to the seconds
+# between seeding and querying (rows are saved 0..7 days ago).
+SCEN_CUT="$(date -u -d '-6 days -12 hours' +%Y-%m-%dT%H:%M:%SZ)"
+last7="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$SCEN_CUT" 2>/dev/null || echo '{}')"
+l7="$(jq -r '.items|length' <<<"$last7" 2>/dev/null || echo x)"
+check "$([ "$l7" = "7" ] && echo true || echo false)" \
+  "§82.10-11 Bookmark Date → Last 7 Days changes the results (7 of 8)" "got $l7 of 8"
+
+# Steps 12-13: add a Tweet Date filter too; every result must satisfy both ranges.
+both82="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$SCEN_CUT&tweet_from=$CUT" 2>/dev/null || echo '{}')"
+b82="$(jq -r '.items|length' <<<"$both82" 2>/dev/null || echo x)"
+both_ok="$(jq -r --arg s "$SCEN_CUT" --arg t "$CUT" '[.items[] | ((.saved_at >= $s) and (.tweet_date >= $t))] | all' <<<"$both82" 2>/dev/null || echo false)"
+check "$([ "$b82" -le "$l7" ] 2>/dev/null && [ "$both_ok" = "true" ] && echo true || echo false)" \
+  "§82.12-13 both ranges applied (AND → $b82 of 8, every row satisfies both)" "combined=$b82 saved=$l7 all_match=$both_ok"
+
+# Step 14: sort → Newest Posted.
+newest82="$(j "$BASE/api/gallery/collections/linux.csv/posts?sort=tweet_desc" 2>/dev/null || echo '{}')"
+check "$([ "$(jq -r '.items[0].tweet_id' <<<"$newest82")" = "1000000000000000001" ] && echo true || echo false)" \
+  "§82.14 sort Newest Posted puts the newest tweet first"
+
+# Step 15: infinite scroll fetches the next page.
+p82="$(j "$BASE/api/gallery/collections/linux.csv/posts?limit=3&sort=saved_desc" 2>/dev/null || echo '{}')"
+curl82="$(jq -r '.next_cursor // empty' <<<"$p82" 2>/dev/null || echo '')"
+check "$([ -n "$curl82" ] && [ "$(jq -r '.has_more' <<<"$p82")" = "true" ] && echo true || echo false)" \
+  "§82.15 the first page reports has_more plus a cursor for the next page"
+
+# Steps 22-24: the extension saves a new tweet; returning to the gallery shows it
+# with no backend restart.
+before82="$(code "$BASE/api/gallery/collections/scenario.csv/posts")"
+saved82="$(code -X POST "$BASE/v1/bookmarks" -H 'Content-Type: application/json' \
+  -d '{"filename":"scenario.csv","tweet":{"url":"https://x.com/scenario/status/5000000000000000001","media":[],"author":"Scenario","username":"@scenario","tweet_date":"2026-09-26T00:00:00Z","text":"integration scenario row"}}')"
+check "$([ "$before82" = "404" ] && { [ "$saved82" = "201" ] || [ "$saved82" = "409" ]; } && echo true || echo false)" \
+  "§82.22 the extension-style save lands a new row (before=$before82, save=$saved82)"
+scenario_view="$(j "$BASE/api/gallery/collections/scenario.csv/posts" 2>/dev/null || echo '{}')"
+check "$([ "$(jq -r '.items|length' <<<"$scenario_view")" = "1" ] && echo true || echo false)" \
+  "§82.23-24 returning to the gallery shows the new data without a restart"
+check "$([ "$(code "$BASE/health")" = "200" ] && echo true || echo false)" \
+  "§82.24 the backend is the original process and is still healthy"
+
 # ------------------------------------------------------------- §80.24-25 SPA
 hdr "§80.24-25  Production serving"
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react"
+import { useLayoutEffect, useState, type RefObject } from "react"
 
 import { columnsForWidth } from "@/lib/masonry"
 
@@ -43,7 +43,11 @@ export function useMasonryColumns(
   // two values agree wherever there is no layout engine).
   const [width, setWidth] = useState(() => measureViewportWidth())
 
-  useEffect(() => {
+  // `useLayoutEffect`, not `useEffect`: the first render can only guess from the
+  // viewport, and the breakpoints are calibrated for the *content* width, so a
+  // wide window would paint one frame with too many columns before correcting.
+  // Measuring before paint keeps the first painted layout correct.
+  useLayoutEffect(() => {
     const update = () => {
       setWidth(measureWidth(containerRef))
     }

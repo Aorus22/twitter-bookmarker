@@ -7,6 +7,7 @@ import {
   installIntersectionObserver,
   resetIntersectionObservers,
 } from "./intersection-observer"
+import { installResizeObserver, resetResizeObservers } from "./resize-observer"
 
 /**
  * Test setup entry point — referenced by `vitest.config.ts` `setupFiles`.
@@ -21,6 +22,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   resetIntersectionObservers()
+  resetResizeObservers()
 })
 
 // jsdom has no layout engine and therefore no `scrollIntoView`; the hero CTA
@@ -35,19 +37,11 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
 // no-op here keeps every other test's output clean without hiding the call.
 window.scrollTo = () => {}
 
-// Radix (the Phase 6 Popover/Sheet surfaces) observes its content size and
-// captures pointers, neither of which jsdom implements. Both are inert stubs:
-// the surfaces' presence and behaviour are what the tests assert.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-if (typeof globalThis.ResizeObserver !== "function") {
-  globalThis.ResizeObserver =
-    ResizeObserverStub as unknown as typeof ResizeObserver
-}
+// Radix (the Phase 6 Popover/Sheet surfaces) observes its content size, which
+// jsdom does not implement. The stub is controllable (see `resize-observer.ts`)
+// because the responsive masonry's whole contract is *re-measuring on resize*,
+// and an inert stub could not tell a working observer from a dead one.
+installResizeObserver()
 
 if (typeof Element.prototype.hasPointerCapture !== "function") {
   Element.prototype.hasPointerCapture = () => false

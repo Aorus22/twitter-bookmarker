@@ -17,8 +17,10 @@ import { cn } from "@/lib/utils"
  * content (media aspect + text), never a fixed row height — this is masonry,
  * not a grid with equalised rows.
  *
- * The container is capped at `n*292 + (n-1)*32` so a column is exactly the
- * design's 292-wide card instead of flexing wider on a large viewport. Each
+ * The list is capped at `n*292 + (n-1)*32` so a column is exactly the design's
+ * 292-wide card instead of flexing wider on a large viewport. That cap lives on
+ * the inner `<ul>`; the observed wrapper around it stays uncapped so the column
+ * count can grow as well as shrink. Each
  * child is wrapped in a `<li>` (the element must be a list child) carrying the
  * 22px vertical rhythm.
  *
@@ -38,32 +40,40 @@ export function GalleryMasonry({
   columns,
   className,
 }: GalleryMasonryProps) {
-  const containerRef = useRef<HTMLUListElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const measured = useMasonryColumns(containerRef)
   const count = columns ?? measured
 
+  // The observed element is this wrapper, never the <ul> itself. The <ul> is
+  // capped at its own `masonryContainerWidth(count)`, so it can never grow past
+  // the width implied by its current count: observing it deadlocked the count
+  // (a wider window left the list at its old width, no resize fired, and the
+  // extra columns never appeared until a reload). The wrapper carries no
+  // max-width, so its width always tracks the available space and grows as well
+  // as shrinks.
   return (
-    <ul
-      ref={containerRef}
-      data-testid="gallery-masonry"
-      data-columns={count}
-      style={{
-        columnCount: count,
-        columnGap: `${MASONRY_COLUMN_GAP}px`,
-        maxWidth: `${masonryContainerWidth(count)}px`,
-      }}
-      className={cn("w-full list-none", className)}
-    >
-      {Children.map(children, (child) =>
-        child === null || child === undefined ? null : (
-          <li
-            className="w-full break-inside-avoid"
-            style={{ marginBottom: `${MASONRY_ROW_GAP}px` }}
-          >
-            {child}
-          </li>
-        )
-      )}
-    </ul>
+    <div ref={containerRef} className="w-full">
+      <ul
+        data-testid="gallery-masonry"
+        data-columns={count}
+        style={{
+          columnCount: count,
+          columnGap: `${MASONRY_COLUMN_GAP}px`,
+          maxWidth: `${masonryContainerWidth(count)}px`,
+        }}
+        className={cn("w-full list-none", className)}
+      >
+        {Children.map(children, (child) =>
+          child === null || child === undefined ? null : (
+            <li
+              className="w-full break-inside-avoid"
+              style={{ marginBottom: `${MASONRY_ROW_GAP}px` }}
+            >
+              {child}
+            </li>
+          )
+        )}
+      </ul>
+    </div>
   )
 }

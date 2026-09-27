@@ -18,6 +18,14 @@ import type {
 /** Discriminant of every extension message. */
 export type MessageType = "HEALTH_CHECK" | "GET_SAVED_INDEX" | "SAVE_TWEET";
 
+/**
+ * Machine-readable failure codes the service worker resolves a request to
+ * (PRD §39, §21). Network failure and timeouts collapse to
+ * `backend_unavailable`; `400` maps to `invalid_request`; every other non-2xx
+ * maps to `internal`.
+ */
+export type BgError = "backend_unavailable" | "invalid_request" | "internal";
+
 /** Ask the service worker to probe `GET /health`. */
 export interface HealthCheckMessage {
   type: "HEALTH_CHECK";
@@ -68,6 +76,16 @@ export type ExtensionResponse = HealthCheckResponse | GetSavedIndexResponse | Sa
 /** Convenience alias for the index entry shape used by {@link SavedIndex}. */
 export type IndexEntry = SavedIndexEntry;
 
+/**
+ * Convert a `GET_SAVED_INDEX` response into the O(1) lookup `Set<TweetID>` the
+ * content script keeps for the current Bookmarks entry (PRD §34, §54). A failed
+ * or empty index degrades to an empty Set — never to a throw.
+ */
+export function savedIndexToSet(response: GetSavedIndexResponse): Set<string> {
+  if (!response.ok || response.index === null) return new Set<string>();
+  return new Set<string>(Object.keys(response.index.items));
+}
+
 /** Runtime narrowing for messages that cross the untrusted messaging boundary. */
 export function isExtensionMessage(value: unknown): value is ExtensionMessage {
   if (typeof value !== "object" || value === null) return false;
@@ -77,8 +95,11 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
 
 /**
  * Send one typed message to the service worker and resolve with its response.
- * The caller inspects `ok` and must handle a rejected promise (no worker /
- * closed channel) itself.
+ *
+ * The returned promise **rejects** when the worker returns nothing (no worker,
+ * closed channel, crashed worker). Callers must `try/catch` and treat a throw as
+ * `backend_unavailable` — the worker never rejects on a backend failure, it
+ * resolves `{ ok: false, error }` instead.
  */
 export async function sendExtensionMessage<T extends ExtensionResponse>(message: ExtensionMessage): Promise<T> {
   const response = (await chrome.runtime.sendMessage(message)) as T | undefined;

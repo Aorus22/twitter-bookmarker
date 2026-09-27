@@ -60,13 +60,13 @@ Requirements for the initial MVP. Each maps to a roadmap phase.
 
 ### Save Integration
 
-- [ ] **SAVE-01**: Content script sends `HEALTH_CHECK`, `GET_SAVED_INDEX`, and `SAVE_TWEET` messages to the service worker instead of calling the backend directly
-- [ ] **SAVE-02**: Service worker performs all backend HTTP calls
-- [ ] **SAVE-03**: During a save all organizer controls on that tweet are disabled and show "Saving..."; a second click cannot start a second request
-- [ ] **SAVE-04**: `201` updates the local saved cache, replaces controls with `✓ Saved`, and shows a success toast ("Saved to <Category>")
-- [ ] **SAVE-05**: Backend unreachable returns controls to a usable state, shows an error toast ("Backend unavailable"), and never unbookmarks
-- [ ] **SAVE-06**: `409` adds the ID to the local cache, shows `✓ Saved` (plus optional "Already saved" info toast), does not append, and does not unbookmark
-- [ ] **SAVE-07**: Lightweight in-page toast system supports success/error/warning/info states and auto-dismisses
+- [x] **SAVE-01**: Content script sends `HEALTH_CHECK`, `GET_SAVED_INDEX`, and `SAVE_TWEET` messages to the service worker instead of calling the backend directly
+- [x] **SAVE-02**: Service worker performs all backend HTTP calls
+- [x] **SAVE-03**: During a save all organizer controls on that tweet are disabled and show "Saving..."; a second click cannot start a second request
+- [x] **SAVE-04**: `201` updates the local saved cache, replaces controls with `✓ Saved`, and shows a success toast ("Saved to <Category>")
+- [x] **SAVE-05**: Backend unreachable returns controls to a usable state, shows an error toast ("Backend unavailable"), and never unbookmarks
+- [x] **SAVE-06**: `409` adds the ID to the local cache, shows `✓ Saved` (plus optional "Already saved" info toast), does not append, and does not unbookmark
+- [x] **SAVE-07**: Lightweight in-page toast system supports success/error/warning/info states and auto-dismisses
 
 ### Auto Unbookmark
 
@@ -150,13 +150,13 @@ Deferred to a future release. Tracked but not in the current roadmap.
 | XI-10 | Phase 3 | Complete |
 | XI-11 | Phase 3 | Complete |
 | XI-12 | Phase 3 | Complete |
-| SAVE-01 | Phase 4 | Pending |
-| SAVE-02 | Phase 4 | Pending |
-| SAVE-03 | Phase 4 | Pending |
-| SAVE-04 | Phase 4 | Pending |
-| SAVE-05 | Phase 4 | Pending |
-| SAVE-06 | Phase 4 | Pending |
-| SAVE-07 | Phase 4 | Pending |
+| SAVE-01 | Phase 4 | Complete |
+| SAVE-02 | Phase 4 | Complete |
+| SAVE-03 | Phase 4 | Complete |
+| SAVE-04 | Phase 4 | Complete |
+| SAVE-05 | Phase 4 | Complete |
+| SAVE-06 | Phase 4 | Complete |
+| SAVE-07 | Phase 4 | Complete |
 | UNB-01 | Phase 5 | Pending |
 | UNB-02 | Phase 5 | Pending |
 | UNB-03 | Phase 5 | Pending |

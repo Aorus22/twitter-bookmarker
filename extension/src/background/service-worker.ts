@@ -1,18 +1,56 @@
 /**
  * Extension service worker (Manifest V3).
  *
- * Phase 2 scope: exist, bundle cleanly as an ES module, and publish the message
- * contract scaffolding. Phase 4 replaces the `not_implemented` replies with the
- * real backend HTTP client (`GET /health`, `GET /v1/index`, `POST /v1/bookmarks`)
- * so that all backend traffic is centralized here (PRD §25, §53).
+ * The worker is the extension's single backend HTTP client (PRD §25, §53):
+ * every `HEALTH_CHECK` / `GET_SAVED_INDEX` / `SAVE_TWEET` message is answered
+ * here and the corresponding request is issued through `shared/api.ts`.
+ *
+ * Invariants:
+ *  - the listener always resolves to one of the documented response shapes and
+ *    never throws out of `chrome.runtime.onMessage` (XI/PRD §39);
+ *  - the worker holds **no** state between messages — the per-page saved cache
+ *    lives in the content script (PRD §34);
+ *  - network failure is reported as `{ ok: false, error: "backend_unavailable" }`,
+ *    never as a rejected message channel.
  */
 
+import { bgErrorFrom, checkHealth, fetchSavedIndex, postBookmark } from "../shared/api.ts";
 import { isExtensionMessage } from "../shared/messages.ts";
 import type { ExtensionMessage, ExtensionResponse } from "../shared/messages.ts";
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info("[twitter-bookmarker] service worker installed");
 });
+
+/** Resolve one validated message to a response. Never rejects. */
+async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
+  switch (message.type) {
+    case "HEALTH_CHECK":
+      return { ok: true, connected: await checkHealth() };
+
+    case "GET_SAVED_INDEX":
+      try {
+        return { ok: true, index: await fetchSavedIndex() };
+      } catch (error) {
+        return { ok: false, index: null, error: bgErrorFrom(error) };
+      }
+
+    case "SAVE_TWEET":
+      try {
+        const outcome = await postBookmark(message.payload);
+        return outcome.kind === "saved"
+          ? { ok: true, result: outcome.body }
+          : { ok: true, duplicate: outcome.body };
+      } catch (error) {
+        return { ok: false, error: bgErrorFrom(error) };
+      }
+
+    default:
+      // `isExtensionMessage` guarantees this is unreachable, but a response is
+      // still required if `ExtensionMessage` ever grows a variant.
+      return { ok: false, error: "internal" };
+  }
+}
 
 chrome.runtime.onMessage.addListener(
   (
@@ -22,19 +60,26 @@ chrome.runtime.onMessage.addListener(
   ): boolean => {
     if (!isExtensionMessage(message)) return false;
 
-    switch (message.type) {
-      case "HEALTH_CHECK":
-        // Phase 4: GET {BACKEND_BASE_URL}/health
-        sendResponse({ ok: false, connected: false });
-        return false;
-      case "GET_SAVED_INDEX":
-        // Phase 4: GET {BACKEND_BASE_URL}/v1/index
-        sendResponse({ ok: false, index: null, error: "not_implemented" });
-        return false;
-      case "SAVE_TWEET":
-        // Phase 4: POST {BACKEND_BASE_URL}/v1/bookmarks
-        sendResponse({ ok: false, error: "not_implemented" });
-        return false;
-    }
+    void handleMessage(message).then(
+      (response) => {
+        try {
+          sendResponse(response);
+        } catch {
+          /* The page/port went away before the answer could be delivered. */
+        }
+      },
+      () => {
+        // Defensive: `handleMessage` must not reject, but the listener still
+        // owes the caller a typed response instead of a broken channel.
+        try {
+          sendResponse({ ok: false, index: null, error: "internal" });
+        } catch {
+          /* The page/port went away before the answer could be delivered. */
+        }
+      },
+    );
+
+    // Keep the message channel open for the async response.
+    return true;
   },
 );

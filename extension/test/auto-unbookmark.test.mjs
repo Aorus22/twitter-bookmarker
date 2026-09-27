@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { createSaveController, savedToast } from "../src/content/save-controller.ts";
 import { createSavedHook, unbookmarkFailedToast } from "../src/content/index.ts";
 import { unbookmarkTweet } from "../src/content/unbookmark.ts";
+import { EXTRACTION_ERROR } from "../src/content/tweet-extractor.ts";
 import { createFakeObserverFactory } from "./helpers/fake-observer.mjs";
 import { createTweetDocument } from "./helpers/tweet-fixtures.mjs";
 
@@ -185,6 +186,43 @@ test("only a confirmed 201 invokes the post-success hook (UNB-01, PRD §41)", as
 /* -------------------------------------------------------------------------- */
 /* UNB-03 — end-to-end through the controller                                 */
 /* -------------------------------------------------------------------------- */
+
+test("an extraction failure never reaches the unbookmark path (XI-12, UNB-01)", async () => {
+  const { article } = createTweetDocument({ text: "hi", alreadyBookmarked: true });
+  let sendCalls = 0;
+  let unbookmarkCalls = 0;
+  const toasts = [];
+
+  const hook = createSavedHook({
+    settings: () => settings(true),
+    unbookmark: async () => {
+      unbookmarkCalls += 1;
+      return "removed";
+    },
+    toast: (kind, message) => toasts.push([kind, message]),
+  });
+
+  const onSelect = createSaveController({
+    settings: settings(true),
+    onSaved: hook,
+    sendMessage: async () => {
+      sendCalls += 1;
+      return SAVED_RESPONSE;
+    },
+    extract: () => ({ ok: false, reason: "missing_username" }),
+    toast: (kind, message) => toasts.push([kind, message]),
+    setSaving: () => {},
+    setSaved: () => {},
+  });
+
+  onSelect(CATEGORY, { article, tweetId: TWEET_ID, source: article });
+  await flush();
+  await flush();
+
+  assert.equal(sendCalls, 0, "no SAVE_TWEET is sent for unreadable metadata");
+  assert.equal(unbookmarkCalls, 0, "an extraction failure must never unbookmark");
+  assert.deepEqual(toasts, [["error", EXTRACTION_ERROR]]);
+});
 
 test("201 + failed unbookmark keeps '✓ Saved' and the CSV success toast (UNB-03)", async () => {
   const { article } = createTweetDocument({ text: "hi", alreadyBookmarked: true });

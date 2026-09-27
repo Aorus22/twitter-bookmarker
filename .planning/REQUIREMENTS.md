@@ -106,12 +106,12 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### PROD — Production Serving (Phase 9, PRD §11, §56, §57, §58, §84)
 
-- [ ] **PROD-01**: The Go server serves the built `web/dist` assets at `/` in production with no Vite process required
-- [ ] **PROD-02**: API routing takes precedence over static serving — `/api/*`, `/v1/*`, and `/health` never fall through to the SPA fallback
-- [ ] **PROD-03**: Unknown frontend routes (e.g. `/collections/linux.csv`) serve `index.html` so React Router survives a direct browser refresh
-- [ ] **PROD-04**: Unknown `/api/*` paths return a proper API `404` (the error JSON shape), never `index.html`
-- [ ] **PROD-05**: Missing `web/dist` degrades gracefully with a clear log message rather than crashing the server
-- [ ] **PROD-06**: The root Makefile gains web targets (e.g. `web`, `dev-web`, `dev-backend`, `build`) consistent with its existing style, and `make build` still produces the server binary and extension `dist/`
+- [x] **PROD-01**: The Go server serves the built `web/dist` assets at `/` in production with no Vite process required
+- [x] **PROD-02**: API routing takes precedence over static serving — `/api/*`, `/v1/*`, and `/health` never fall through to the SPA fallback
+- [x] **PROD-03**: Unknown frontend routes (e.g. `/collections/linux.csv`) serve `index.html` so React Router survives a direct browser refresh
+- [x] **PROD-04**: Unknown `/api/*` paths return a proper API `404` (the error JSON shape), never `index.html`
+- [x] **PROD-05**: Missing `web/dist` degrades gracefully with a clear log message rather than crashing the server
+- [x] **PROD-06**: The root Makefile gains web targets (e.g. `web`, `dev-web`, `dev-backend`, `build`) consistent with its existing style, and `make build` still produces the server binary and extension `dist/`
 
 ### HARD — Hardening, Accessibility & Responsive (Phase 10, PRD §61, §62, §66, §67, §82)
 
@@ -223,12 +223,12 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | LIGHT-04 | 8 — Media Lightbox | Complete |
 | LIGHT-05 | 8 — Media Lightbox | Complete |
 | LIGHT-06 | 8 — Media Lightbox | Complete |
-| PROD-01 | 9 — Production Serving | Pending |
-| PROD-02 | 9 — Production Serving | Pending |
-| PROD-03 | 9 — Production Serving | Pending |
-| PROD-04 | 9 — Production Serving | Pending |
-| PROD-05 | 9 — Production Serving | Pending |
-| PROD-06 | 9 — Production Serving | Pending |
+| PROD-01 | 9 — Production Serving | Complete |
+| PROD-02 | 9 — Production Serving | Complete |
+| PROD-03 | 9 — Production Serving | Complete |
+| PROD-04 | 9 — Production Serving | Complete |
+| PROD-05 | 9 — Production Serving | Complete |
+| PROD-06 | 9 — Production Serving | Complete |
 | HARD-01 | 10 — Hardening, Accessibility & Responsive | Pending |
 | HARD-02 | 10 — Hardening, Accessibility & Responsive | Pending |
 | HARD-03 | 10 — Hardening, Accessibility & Responsive | Pending |

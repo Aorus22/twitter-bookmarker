@@ -31,7 +31,7 @@ The backend and the web app are deliberately kept in separate phases so each can
 - [x] **Phase 6: Discovery Tools** - Debounced server-side search, combinable tweet/bookmarked date filters with quick ranges, four sort modes, and URL-backed state (PRD §2.6; PRD §28–§33, §76, §77) (completed 2026-09-27)
 - [x] **Phase 7: Infinite Scroll** - IntersectionObserver cursor pagination with skeleton and bottom-loader states, dedupe, and refetch on focus (PRD §2.7; PRD §34, §35, §44, §47, §68) (completed 2026-09-27)
 - [x] **Phase 8: Media Lightbox** - Large media plus metadata panel, prev/next across the loaded dataset, focus trap, and Escape/arrow keyboard navigation (PRD §2.8; PRD §26, §27, §67) (completed 2026-09-27)
-- [ ] **Phase 9: Production Serving** - The Go server serves `web/dist` with API precedence, SPA fallback, a proper API 404, graceful missing-dist handling, and Makefile targets (PRD §2.9; PRD §11, §56–§58, §84)
+- [x] **Phase 9: Production Serving** - The Go server serves `web/dist` with API precedence, SPA fallback, a proper API 404, graceful missing-dist handling, and Makefile targets (PRD §2.9; PRD §11, §56–§58, §84) (completed 2026-09-27)
 - [ ] **Phase 10: Hardening, Accessibility & Responsive** - Malformed-data and large-CSV hardening, error/retry UX, responsive columns and Sheet filter, accessibility, and the PRD §82 integration scenario (PRD §2.10; PRD §61, §62, §66, §67, §82)
 
 ### Phase Details
@@ -198,5 +198,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 6. Discovery Tools | 1/1 | Complete    | 2026-09-27 |
 | 7. Infinite Scroll | 1/1 | Complete    | 2026-09-27 |
 | 8. Media Lightbox | 1/1 | Complete    | 2026-09-27 |
-| 9. Production Serving | 0/TBD | Not started | - |
+| 9. Production Serving | 1/1 | Complete    | 2026-09-27 |
 | 10. Hardening, Accessibility & Responsive | 0/TBD | Not started | - |

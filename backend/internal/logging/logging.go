@@ -54,6 +54,22 @@ func (lg *Logger) IndexRebuild(dir, reason string, count int) {
 	)
 }
 
+// WebAssets reports the directory the built single-page app is served from
+// (PRD-2 §11).
+func (lg *Logger) WebAssets(dir string) {
+	lg.Slog().Info("serving built web app", "web_dist", dir)
+}
+
+// WebAssetsMissing reports that web/dist is absent. The server keeps serving
+// the API; the message names the expected directory and how to build it
+// (PROD-05). It is emitted once, at construction, not per request.
+func (lg *Logger) WebAssetsMissing(dir string) {
+	lg.Slog().Warn("built web app not found; the API is still available",
+		"web_dist", dir,
+		"hint", "run `make web` (or `cd web && pnpm build`), or set TWITTER_BOOKMARKER_WEB_DIR",
+	)
+}
+
 // SaveSuccess reports a persisted bookmark by id + filename only.
 func (lg *Logger) SaveSuccess(tweetID, filename string) {
 	lg.Slog().Info("bookmark saved",

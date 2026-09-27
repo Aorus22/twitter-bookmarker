@@ -286,9 +286,17 @@ check "$([ "$sum_before" = "8" ] && echo true || echo false)" "§80.23 gallery A
 # ------------------------------------------------------------- §80.24-25 SPA
 hdr "§80.24-25  Production serving"
 
-if [ -f "$ROOT/web/dist/index.html" ]; then
-  root_ct="$(curl -s -o /dev/null -w '%{content_type}' --max-time 10 "$BASE/")"
-  check "$(grep -qi 'text/html' <<<"$root_ct" && echo true || echo false)" "§80.24 / serves web/dist HTML" "$root_ct"
+# Gate on the server actually *serving* the SPA, not on web/dist merely existing:
+# Phase 3 builds web/dist but Phase 9 wires up static serving, so between those
+# phases the directory exists while the checks below would be meaningless.
+root_probe="$(curl -s -w '\n%{content_type}' --max-time 10 "$BASE/" 2>/dev/null || true)"
+root_ct="$(tail -1 <<<"$root_probe")"
+serves_spa=false
+if grep -qi 'text/html' <<<"$root_ct" && grep -qi '<div id="\?root' <<<"$root_probe"; then serves_spa=true; fi
+
+if [ "$serves_spa" = "true" ]; then
+  check "$([ -f "$ROOT/web/dist/index.html" ] && echo true || echo false)" \
+    "§80.24 / serves web/dist HTML" "$root_ct"
   deep="$(curl -s --max-time 10 "$BASE/collections/linux.csv")"
   check "$(grep -qi '<div id="root"\|<div id=root' <<<"$deep" && echo true || echo false)" \
     "§80.25 deep SPA route serves index.html"
@@ -298,8 +306,8 @@ if [ -f "$ROOT/web/dist/index.html" ]; then
   check "$(grep -q '"status":"error"' <<<"$apinope" && echo true || echo false)" \
     "§80.25 unknown /api path returns the error JSON, not HTML"
 else
-  miss "§80.24 / serves web/dist (web/dist not built yet)"
-  miss "§80.25 SPA deep route + unknown-API 404 (web/dist not built yet)"
+  miss "§80.24 / serves web/dist HTML (static serving arrives in Phase 9)"
+  miss "§80.25 SPA deep route + unknown-/api 404 (static serving arrives in Phase 9)"
 fi
 
 # ------------------------------------------------------------------ summary

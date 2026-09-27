@@ -78,14 +78,14 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### DISC — Discovery Tools (Phase 6, PRD §28–§33, §76, §77)
 
-- [ ] **DISC-01**: Collection search is server-side, case-insensitive, covers text/author/username, debounces at ~300 ms, and requires no submit button
-- [ ] **DISC-02**: A `Filter` control opens a popover on desktop and a Sheet/Drawer on narrow viewports, containing Tweet Date from/to, Bookmarked Date from/to, quick ranges, `Reset`, and `Apply`
-- [ ] **DISC-03**: Quick date presets `Today`, `Last 7 Days`, `Last 30 Days`, and `This Year` apply to the **Bookmarked Date** range by default, and both ranges stay manually editable
-- [ ] **DISC-04**: Tweet-date and bookmarked-date filters can be active simultaneously and results satisfy both
-- [ ] **DISC-05**: Local date selections are converted to RFC3339 UTC boundaries before being sent to the backend, and ranges are inclusive
-- [ ] **DISC-06**: All four sort modes are selectable in the UI with `saved_desc` (Newest Bookmarked) as the default
-- [ ] **DISC-07**: Search, filter, and sort state are reflected in the URL query string so refresh, back/forward, and bookmarking preserve them; cursors are not stored permanently in the URL
-- [ ] **DISC-08**: Changing search/filter/sort clears current pages, resets the cursor, scrolls near the top, and fetches the first page
+- [x] **DISC-01**: Collection search is server-side, case-insensitive, covers text/author/username, debounces at ~300 ms, and requires no submit button
+- [x] **DISC-02**: A `Filter` control opens a popover on desktop and a Sheet/Drawer on narrow viewports, containing Tweet Date from/to, Bookmarked Date from/to, quick ranges, `Reset`, and `Apply`
+- [x] **DISC-03**: Quick date presets `Today`, `Last 7 Days`, `Last 30 Days`, and `This Year` apply to the **Bookmarked Date** range by default, and both ranges stay manually editable
+- [x] **DISC-04**: Tweet-date and bookmarked-date filters can be active simultaneously and results satisfy both
+- [x] **DISC-05**: Local date selections are converted to RFC3339 UTC boundaries before being sent to the backend, and ranges are inclusive
+- [x] **DISC-06**: All four sort modes are selectable in the UI with `saved_desc` (Newest Bookmarked) as the default
+- [x] **DISC-07**: Search, filter, and sort state are reflected in the URL query string so refresh, back/forward, and bookmarking preserve them; cursors are not stored permanently in the URL
+- [x] **DISC-08**: Changing search/filter/sort clears current pages, resets the cursor, scrolls near the top, and fetches the first page
 
 ### SCROLL — Infinite Scroll (Phase 7, PRD §34, §35, §44, §47, §68)
 
@@ -204,14 +204,14 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | COLL-09 | 5 — Collection Gallery | Complete |
 | COLL-10 | 5 — Collection Gallery | Complete |
 | COLL-11 | 5 — Collection Gallery | Complete |
-| DISC-01 | 6 — Discovery Tools | Pending |
-| DISC-02 | 6 — Discovery Tools | Pending |
-| DISC-03 | 6 — Discovery Tools | Pending |
-| DISC-04 | 6 — Discovery Tools | Pending |
-| DISC-05 | 6 — Discovery Tools | Pending |
-| DISC-06 | 6 — Discovery Tools | Pending |
-| DISC-07 | 6 — Discovery Tools | Pending |
-| DISC-08 | 6 — Discovery Tools | Pending |
+| DISC-01 | 6 — Discovery Tools | Complete |
+| DISC-02 | 6 — Discovery Tools | Complete |
+| DISC-03 | 6 — Discovery Tools | Complete |
+| DISC-04 | 6 — Discovery Tools | Complete |
+| DISC-05 | 6 — Discovery Tools | Complete |
+| DISC-06 | 6 — Discovery Tools | Complete |
+| DISC-07 | 6 — Discovery Tools | Complete |
+| DISC-08 | 6 — Discovery Tools | Complete |
 | SCROLL-01 | 7 — Infinite Scroll | Pending |
 | SCROLL-02 | 7 — Infinite Scroll | Pending |
 | SCROLL-03 | 7 — Infinite Scroll | Pending |

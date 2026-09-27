@@ -49,6 +49,8 @@ export interface ExtractedTweet {
   tweetDate: string;
   /** Main tweet text only; empty for media-only tweets. */
   text: string;
+  /** Canonical media URLs of the main tweet; `[]` when it has none (PRD §14). */
+  media: string[];
   /** X status ID, used as the global duplicate key. */
   tweetId: string;
 }
@@ -56,6 +58,7 @@ export interface ExtractedTweet {
 /** Wire format of the tweet object accepted by `POST /v1/bookmarks` (PRD §19). */
 export interface SaveTweetPayload {
   url: string;
+  media: string[];
   author: string;
   username: string;
   tweet_date: string;

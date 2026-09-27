@@ -86,7 +86,6 @@ MVP tidak mencakup:
 - account system;
 - remote backend;
 - quoted tweet text;
-- media URL;
 - download image/video;
 - keyboard shortcut;
 - category icon;
@@ -570,8 +569,12 @@ Setiap category memiliki satu CSV.
 Header wajib:
 
 ```csv
-url,author,username,tweet_date,saved_at,text
+url,media,author,username,tweet_date,saved_at,text
 ```
+
+Kolom `media` berada tepat setelah `url` (lihat §14). File lama yang masih
+memakai header enam kolom tidak boleh di-append; migrasinya dilakukan oleh
+folder `Scripts/` di repo data (`hehenugas/twitter-bookmarker-csv`, private).
 
 Encoding:
 
@@ -596,6 +599,39 @@ Example:
 ```text
 https://x.com/foobar/status/123456789
 ```
+
+---
+
+## `media`
+
+Array URL media milik tweet utama, dikodekan sebagai JSON array di dalam satu
+field CSV.
+
+Tweet tanpa media:
+
+```text
+[]
+```
+
+Tweet dengan media:
+
+```text
+["https://pbs.twimg.com/media/ABC.jpg","https://pbs.twimg.com/media/DEF.jpg"]
+```
+
+Aturan normalisasi (dipakai identik oleh extension dan backend):
+
+- hanya URL `https://pbs.twimg.com/...` yang diterima;
+- query sizing (`?format=…&name=…`) dibuang; kalau path belum punya ekstensi,
+  ekstensi diambil dari parameter `format`;
+- path card/avatar/banner (`/card_img/`, `/profile_images/`, `/profile_banner/`,
+  `/profile_background/`) ditolak;
+- duplikat dibuang, urutan asli dipertahankan, maksimum 8 entri;
+- video dan animated GIF menyimpan **poster frame**-nya, bukan URL mp4, karena
+  DOM X hanya mengekspos `blob:` untuk pemutaran;
+- media milik quoted tweet tidak pernah ikut.
+
+URL media tidak boleh ditaruh di field `text`.
 
 ---
 
@@ -705,7 +741,8 @@ Jika tweet hanya berisi media tanpa caption:
 text = ""
 ```
 
-Jangan menyimpan URL image/video.
+Jangan menyimpan URL image/video di dalam `text`. URL media disimpan di kolom
+`media` (§14).
 
 ---
 
@@ -2130,9 +2167,9 @@ No categories yet
 `linux.csv`:
 
 ```csv
-url,author,username,tweet_date,saved_at,text
-https://x.com/foo/status/123,Foo Bar,@foo,2026-09-27T01:00:00Z,2026-09-27T03:00:00Z,"Testing Linux today"
-https://x.com/bar/status/456,"Foo, Bar 🐧",@bar,2026-09-26T14:21:00Z,2026-09-27T03:02:00Z,"Line one
+url,media,author,username,tweet_date,saved_at,text
+https://x.com/foo/status/123,"[""https://pbs.twimg.com/media/AAA.jpg""]",Foo Bar,@foo,2026-09-27T01:00:00Z,2026-09-27T03:00:00Z,"Testing Linux today"
+https://x.com/bar/status/456,[],"Foo, Bar 🐧",@bar,2026-09-26T14:21:00Z,2026-09-27T03:02:00Z,"Line one
 
 Line two"
 ```

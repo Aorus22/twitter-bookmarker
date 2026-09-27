@@ -88,6 +88,7 @@ test("SAVE_TWEET forwards the payload and resolves 201/409/5xx to typed shapes",
     filename: "linux.csv",
     tweet: {
       url: "https://x.com/foo/status/123456",
+      media: ["https://pbs.twimg.com/media/AAA.jpg"],
       author: "Foo, Bar",
       username: "@foo",
       tweet_date: "2026-09-27T01:00:00.000Z",

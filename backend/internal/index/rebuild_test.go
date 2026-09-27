@@ -17,12 +17,12 @@ func TestRebuildFromTwoCSVsYieldsAllIDs(t *testing.T) {
 	dir := t.TempDir()
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo Bar", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
-		{"https://x.com/bar/status/456", "Bar", "@bar", "2026-09-26T01:00:00Z", "2026-09-27T03:02:00Z", "two"},
+		{"https://x.com/foo/status/123", "[]", "Foo Bar", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/bar/status/456", "[]", "Bar", "@bar", "2026-09-26T01:00:00Z", "2026-09-27T03:02:00Z", "two"},
 	})
 	writeCSVFile(t, dir, "ai.csv", [][]string{
 		header(),
-		{"https://x.com/baz/status/789", "Baz", "@baz", "2026-09-25T01:00:00Z", "2026-09-27T04:00:00Z", "three"},
+		{"https://x.com/baz/status/789", "[]", "Baz", "@baz", "2026-09-25T01:00:00Z", "2026-09-27T04:00:00Z", "three"},
 	})
 
 	ix, err := index.LoadOrRebuild(dir, logging.Discard())
@@ -71,11 +71,11 @@ func TestRebuildCorruptIndexYieldsAllIDsAndCSVsByteIdentical(t *testing.T) {
 	dir := t.TempDir()
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo, Bar 🐧", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "line one\n\nline two"},
+		{"https://x.com/foo/status/123", "[]", "Foo, Bar 🐧", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "line one\n\nline two"},
 	})
 	writeCSVFile(t, dir, "ai.csv", [][]string{
 		header(),
-		{"https://x.com/baz/status/789", "Baz", "@baz", "2026-09-25T01:00:00Z", "2026-09-27T04:00:00Z", "three"},
+		{"https://x.com/baz/status/789", "[]", "Baz", "@baz", "2026-09-25T01:00:00Z", "2026-09-27T04:00:00Z", "three"},
 	})
 
 	before := snapshotFiles(t, dir, "linux.csv", "ai.csv")
@@ -165,7 +165,7 @@ func TestValidIndexLoadsAsIs(t *testing.T) {
 	}
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/111", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/foo/status/111", "[]", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
 	})
 	beforeCSV := snapshotFiles(t, dir, "linux.csv")["linux.csv"]
 	beforeIndex, err := os.ReadFile(filepath.Join(dir, "index.json"))

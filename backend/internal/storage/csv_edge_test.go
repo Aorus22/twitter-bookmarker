@@ -113,8 +113,8 @@ func TestCSVEdgeCasesRoundTripAndExternalParse(t *testing.T) {
 				t.Fatalf("data rows = %d, want 1", len(rows))
 			}
 			row := rows[0]
-			if len(row) != 6 {
-				t.Fatalf("field count = %d, want 6: %q", len(row), row)
+			if len(row) != 7 {
+				t.Fatalf("field count = %d, want 7: %q", len(row), row)
 			}
 
 			// encoding/csv normalises CRLF to LF on read; every other byte
@@ -123,20 +123,23 @@ func TestCSVEdgeCasesRoundTripAndExternalParse(t *testing.T) {
 			if row[0] != resp.URL {
 				t.Errorf("url field = %q, want %q", row[0], resp.URL)
 			}
-			if row[1] != tc.author {
-				t.Errorf("author field = %q, want %q", row[1], tc.author)
+			if row[1] != "[]" {
+				t.Errorf("media field = %q, want []", row[1])
 			}
-			if row[2] != tc.username {
-				t.Errorf("username field = %q, want %q", row[2], tc.username)
+			if row[2] != tc.author {
+				t.Errorf("author field = %q, want %q", row[2], tc.author)
 			}
-			if row[3] != "2026-09-27T01:00:00Z" {
-				t.Errorf("tweet_date field = %q, want 2026-09-27T01:00:00Z", row[3])
+			if row[3] != tc.username {
+				t.Errorf("username field = %q, want %q", row[3], tc.username)
 			}
-			if row[4] != resp.SavedAt {
-				t.Errorf("saved_at field = %q, want %q", row[4], resp.SavedAt)
+			if row[4] != "2026-09-27T01:00:00Z" {
+				t.Errorf("tweet_date field = %q, want 2026-09-27T01:00:00Z", row[4])
 			}
-			if row[5] != wantText {
-				t.Errorf("text field = %q, want %q", row[5], wantText)
+			if row[5] != resp.SavedAt {
+				t.Errorf("saved_at field = %q, want %q", row[5], resp.SavedAt)
+			}
+			if row[6] != wantText {
+				t.Errorf("text field = %q, want %q", row[6], wantText)
 			}
 
 			raw, err := os.ReadFile(path)
@@ -155,10 +158,10 @@ func TestCSVEdgeCasesRoundTripAndExternalParse(t *testing.T) {
 			}
 
 			// An external parser must accept the file with strict quoting and
-			// exactly 6 fields per record.
+			// exactly 7 fields per record.
 			want := [][]string{
-				{"url", "author", "username", "tweet_date", "saved_at", "text"},
-				{resp.URL, tc.author, tc.username, "2026-09-27T01:00:00Z", resp.SavedAt, tc.text},
+				{"url", "media", "author", "username", "tweet_date", "saved_at", "text"},
+				{resp.URL, "[]", tc.author, tc.username, "2026-09-27T01:00:00Z", resp.SavedAt, tc.text},
 			}
 			assertExternalParserReads(t, path, want)
 		})
@@ -193,8 +196,8 @@ func readCSVWithPython(python, path string) ([][]string, error) {
 	const script = `import csv, json, sys
 with open(sys.argv[1], newline="", encoding="utf-8") as f:
     rows = list(csv.reader(f, strict=True))
-if any(len(r) != 6 for r in rows):
-    sys.exit("every record must have exactly 6 fields")
+if any(len(r) != 7 for r in rows):
+    sys.exit("every record must have exactly 7 fields")
 print(json.dumps(rows))
 `
 	cmd := exec.Command(python, "-c", script, path)
@@ -217,7 +220,7 @@ func readCSVStrictGo(path string) ([][]string, error) {
 	defer f.Close()
 
 	r := csv.NewReader(f)
-	r.FieldsPerRecord = 6
+	r.FieldsPerRecord = 7
 	r.LazyQuotes = false
 	return r.ReadAll()
 }

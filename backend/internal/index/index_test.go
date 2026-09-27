@@ -11,6 +11,7 @@ import (
 	"twitter-bookmarker/internal/index"
 	"twitter-bookmarker/internal/logging"
 	"twitter-bookmarker/internal/model"
+	"twitter-bookmarker/internal/storage"
 )
 
 func writeCSVFile(t *testing.T, dir, name string, rows [][]string) {
@@ -32,20 +33,55 @@ func writeCSVFile(t *testing.T, dir, name string, rows [][]string) {
 	}
 }
 
+// header is the current category CSV header (media column included).
 func header() []string {
-	return []string{"url", "author", "username", "tweet_date", "saved_at", "text"}
+	return strings.Split(storage.Header, ",")
+}
+
+// legacyHeader is the pre-media header. Files still using it must keep
+// rebuilding correctly until Scripts/migrate_schema.py has run.
+func legacyHeader() []string {
+	return strings.Split(storage.LegacyHeader, ",")
+}
+
+// TestLegacyHeaderFilesStillRebuild proves the header-aware column mapping: in a
+// not-yet-migrated file `saved_at` sits at index 4, in a migrated file at 5.
+func TestLegacyHeaderFilesStillRebuild(t *testing.T) {
+	dir := t.TempDir()
+	writeCSVFile(t, dir, "old.csv", [][]string{
+		legacyHeader(),
+		{"https://x.com/foo/status/123", "Foo Bar", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+	})
+	writeCSVFile(t, dir, "new.csv", [][]string{
+		header(),
+		{"https://x.com/bar/status/456", "[]", "Bar", "@bar", "2026-09-27T01:05:00Z", "2026-09-27T03:05:00Z", "two"},
+	})
+
+	ix, err := index.LoadOrRebuild(dir, logging.Discard())
+	if err != nil {
+		t.Fatalf("LoadOrRebuild() error = %v", err)
+	}
+	if ix.Count() != 2 {
+		t.Fatalf("Count() = %d, want 2", ix.Count())
+	}
+	if entry, _ := ix.Lookup("123"); entry.SavedAt != "2026-09-27T03:00:00Z" || entry.Filename != "old.csv" {
+		t.Errorf("legacy row indexed as %+v, want saved_at=2026-09-27T03:00:00Z filename=old.csv", entry)
+	}
+	if entry, _ := ix.Lookup("456"); entry.SavedAt != "2026-09-27T03:05:00Z" || entry.Filename != "new.csv" {
+		t.Errorf("migrated row indexed as %+v, want saved_at=2026-09-27T03:05:00Z filename=new.csv", entry)
+	}
 }
 
 func TestLoadOrRebuildMissingIndexRebuildsFromCSV(t *testing.T) {
 	dir := t.TempDir()
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo Bar", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
-		{"https://x.com/bar/status/456", "Bar", "@bar", "2026-09-26T01:00:00Z", "2026-09-27T03:02:00Z", "two"},
+		{"https://x.com/foo/status/123", "[]", "Foo Bar", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/bar/status/456", "[]", "Bar", "@bar", "2026-09-26T01:00:00Z", "2026-09-27T03:02:00Z", "two"},
 	})
 	writeCSVFile(t, dir, "ai.csv", [][]string{
 		header(),
-		{"https://x.com/baz/status/789", "Baz", "@baz", "2026-09-25T01:00:00Z", "2026-09-27T04:00:00Z", "three"},
+		{"https://x.com/baz/status/789", "[]", "Baz", "@baz", "2026-09-25T01:00:00Z", "2026-09-27T04:00:00Z", "three"},
 	})
 
 	ix, err := index.LoadOrRebuild(dir, logging.Discard())
@@ -105,7 +141,7 @@ func TestLoadOrRebuildCorruptIndexRebuildsFromCSV(t *testing.T) {
 	}
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/foo/status/123", "[]", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
 	})
 
 	ix, err := index.LoadOrRebuild(dir, logging.Discard())
@@ -136,7 +172,7 @@ func TestLoadOrRebuildIndexPathIsDirectoryRebuildsFromCSV(t *testing.T) {
 	}
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/foo/status/123", "[]", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
 	})
 
 	ix, err := index.LoadOrRebuild(dir, logging.Discard())
@@ -157,7 +193,7 @@ func TestLoadOrRebuildValidIndexLoads(t *testing.T) {
 	// A CSV containing a different tweet must NOT be merged when the index is valid.
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/111", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/foo/status/111", "[]", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
 	})
 
 	ix, err := index.LoadOrRebuild(dir, logging.Discard())
@@ -179,14 +215,14 @@ func TestRebuildIgnoresNonCSVAndUnsafeNames(t *testing.T) {
 	dir := t.TempDir()
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
+		{"https://x.com/foo/status/123", "[]", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "one"},
 	})
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not csv"), 0o600); err != nil {
 		t.Fatalf("write notes.txt: %v", err)
 	}
 	writeCSVFile(t, dir, "Bad.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/999", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "bad"},
+		{"https://x.com/foo/status/999", "[]", "Foo", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "bad"},
 	})
 	if err := os.Mkdir(filepath.Join(dir, "subdir.csv"), 0o700); err != nil {
 		t.Fatalf("mkdir subdir.csv: %v", err)
@@ -208,7 +244,7 @@ func TestRebuildHandlesMultilineCommasAndEmoji(t *testing.T) {
 	dir := t.TempDir()
 	writeCSVFile(t, dir, "linux.csv", [][]string{
 		header(),
-		{"https://x.com/foo/status/123", "Foo, Bar 🐧", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "line one\n\nline two, with comma"},
+		{"https://x.com/foo/status/123", "[]", "Foo, Bar 🐧", "@foo", "2026-09-27T01:00:00Z", "2026-09-27T03:00:00Z", "line one\n\nline two, with comma"},
 	})
 
 	ix, err := index.LoadOrRebuild(dir, logging.Discard())

@@ -1,11 +1,13 @@
 /**
- * Container-scoped tweet metadata extraction (PRD §28–§30, §40).
+ * Container-scoped tweet metadata extraction (PRD §14, §28–§30, §40).
  *
  * Invariants:
  *  - every lookup is rooted at the passed tweet container — never `document`
  *    (mixing tweet A's metadata into tweet B is the failure mode this prevents);
- *  - quoted-tweet text is excluded; only the top-level tweet text is returned;
+ *  - quoted-tweet text *and media* are excluded; only the top-level tweet's
+ *    values are returned;
  *  - a media-only tweet yields `text === ""` and is still valid;
+ *  - a tweet without media yields `media === []`, which is never a failure;
  *  - a missing `url`/`author`/`username`/`tweet_date` yields a typed failure and
  *    no partial record (XI-12).
  */
@@ -168,9 +170,83 @@ export function getMainText(article: Element): string {
   return textOf(text).replace(/\s+$/, "");
 }
 
+/* -------------------------------------------------------------------------- */
+// Media URLs (PRD §14)
+/* -------------------------------------------------------------------------- */
+
+/** Hard cap mirroring the backend's `storage.MaxMedia`. */
+const MAX_MEDIA = 8;
+
+/** The only host X serves tweet media from. */
+const MEDIA_HOST = "pbs.twimg.com";
+
+/** pbs.twimg.com paths that are never tweet media (cards, avatars, banners). */
+const NON_MEDIA_PREFIXES = ["/card_img/", "/profile_images/", "/profile_banner/", "/profile_background/"];
+
+/** `format` query values that may be promoted to a file extension. */
+const MEDIA_IMAGE_FORMATS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
+
+/**
+ * Canonical form of one media URL, or `""` when it is not tweet media.
+ *
+ * This mirrors the backend's `storage.NormalizeMedia` exactly, so a URL sighted
+ * in the page and a URL later backfilled from the API are byte-identical:
+ *   - only `https://pbs.twimg.com/<path>` survives;
+ *   - the sizing query is dropped; an extension-less path gets `.` + `format`;
+ *   - card/avatar/banner paths are rejected.
+ */
+export function normalizeMediaUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return "";
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return "";
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname.toLowerCase() !== MEDIA_HOST) return "";
+
+  const mediaPath = parsed.pathname;
+  if (mediaPath.length === 0 || mediaPath === "/") return "";
+  if (NON_MEDIA_PREFIXES.some((prefix) => mediaPath.startsWith(prefix))) return "";
+
+  if (!/\.[A-Za-z0-9]+$/.test(mediaPath)) {
+    const format = (parsed.searchParams.get("format") ?? "").toLowerCase();
+    if (MEDIA_IMAGE_FORMATS.has(format)) return `https://${MEDIA_HOST}${mediaPath}.${format}`;
+  }
+  return `https://${MEDIA_HOST}${mediaPath}`;
+}
+
+/**
+ * Ordered, deduplicated media URLs of the main tweet (never the quoted one).
+ *
+ * Photos come from `[data-testid="tweetPhoto"]`, videos/GIFs from their poster
+ * frame. Link-preview cards are excluded both by selector scope and by
+ * {@link normalizeMediaUrl}'s path filter. Media is optional metadata: a tweet
+ * without media yields `[]` and never fails extraction.
+ */
+export function getMediaUrls(article: Element): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const key of ["tweetPhoto", "videoPlayer"] as const) {
+    for (const element of queryAll(article, key)) {
+      if (isWithinQuotedWrapper(element, article)) continue;
+      const raw = element.getAttribute("poster") ?? element.getAttribute("src") ?? "";
+      const normalized = normalizeMediaUrl(raw);
+      if (normalized.length === 0 || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+      if (out.length === MAX_MEDIA) return out;
+    }
+  }
+  return out;
+}
+
 /**
  * Extract a complete tweet from `article`, or a typed failure when a required
- * field is missing. `text` is the only optional field.
+ * field is missing. `text` and `media` are the only optional fields.
  */
 export function extractTweet(article: Element): ExtractionResult {
   const tweetId = getTweetId(article);
@@ -190,6 +266,14 @@ export function extractTweet(article: Element): ExtractionResult {
 
   return {
     ok: true,
-    tweet: { url, author, username, tweetDate, text: getMainText(article), tweetId },
+    tweet: {
+      url,
+      author,
+      username,
+      tweetDate,
+      text: getMainText(article),
+      media: getMediaUrls(article),
+      tweetId,
+    },
   };
 }

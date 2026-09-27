@@ -12,9 +12,11 @@ import {
   getAuthor,
   getCanonicalUrl,
   getMainText,
+  getMediaUrls,
   getTweetDate,
   getTweetId,
   getUsername,
+  normalizeMediaUrl,
 } from "../src/content/tweet-extractor.ts";
 import { createTweetDocument } from "./helpers/tweet-fixtures.mjs";
 
@@ -29,6 +31,7 @@ test("plain tweet extracts every field from its container", () => {
     username: "@ada",
     tweetDate: "2024-05-01T12:34:56.000Z",
     text: "Hello world",
+    media: [],
     tweetId: "1234567890",
   });
 });
@@ -177,4 +180,104 @@ test("the quoted tweet's permalink never becomes the parent tweet url", () => {
   });
   assert.equal(getTweetId(article), "1234567890");
   assert.equal(getCanonicalUrl(article), "https://x.com/ada/status/1234567890");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Media URLs (PRD §14)                                                      */
+/* -------------------------------------------------------------------------- */
+
+test("a media-only tweet yields its photo url and no text (PRD §14, §30)", () => {
+  const { article } = createTweetDocument({ media: true });
+  const result = extractTweet(article);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.tweet.text, "");
+  assert.deepEqual(result.tweet.media, ["https://pbs.twimg.com/media/example.jpg"]);
+  assert.deepEqual(getMediaUrls(article), ["https://pbs.twimg.com/media/example.jpg"]);
+});
+
+test("four photos keep their DOM order and the sizing query is stripped", () => {
+  const { article } = createTweetDocument({
+    text: "art",
+    media: [
+      "https://pbs.twimg.com/media/AAA?format=jpg&name=small",
+      "https://pbs.twimg.com/media/BBB?format=jpg&name=900x900",
+      "https://pbs.twimg.com/media/CCC.jpg",
+      "https://pbs.twimg.com/media/DDD?format=png&name=large",
+    ],
+  });
+
+  assert.deepEqual(getMediaUrls(article), [
+    "https://pbs.twimg.com/media/AAA.jpg",
+    "https://pbs.twimg.com/media/BBB.jpg",
+    "https://pbs.twimg.com/media/CCC.jpg",
+    "https://pbs.twimg.com/media/DDD.png",
+  ]);
+  assert.deepEqual(extractTweet(article).tweet.media, getMediaUrls(article));
+});
+
+test("a repeated photo is stored once", () => {
+  const { article } = createTweetDocument({
+    text: "dup",
+    media: [
+      "https://pbs.twimg.com/media/AAA.jpg",
+      "https://pbs.twimg.com/media/AAA.jpg",
+      "https://pbs.twimg.com/media/AAA?format=jpg&name=small",
+    ],
+  });
+  assert.deepEqual(getMediaUrls(article), ["https://pbs.twimg.com/media/AAA.jpg"]);
+});
+
+test("a video contributes its poster frame, never the blob playback url", () => {
+  const { article } = createTweetDocument({
+    text: "clip",
+    media: { videoPoster: "https://pbs.twimg.com/amplify_video_thumb/123/img/hash.jpg" },
+  });
+  assert.deepEqual(getMediaUrls(article), ["https://pbs.twimg.com/amplify_video_thumb/123/img/hash.jpg"]);
+});
+
+test("the quoted tweet's media is excluded (PRD §14, §29)", () => {
+  const { article } = createTweetDocument({
+    text: "Main",
+    quoted: "Quoted",
+    quotedStyle: "rolelink",
+    quotedMedia: ["https://pbs.twimg.com/media/QUOTED.jpg"],
+  });
+  assert.deepEqual(getMediaUrls(article), []);
+  assert.deepEqual(extractTweet(article).tweet.media, []);
+});
+
+test("a tweet without media yields [] rather than failing", () => {
+  const { article } = createTweetDocument({ text: "no media here" });
+  const result = extractTweet(article);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.tweet.media, []);
+});
+
+test("normalizeMediaUrl rejects everything that is not tweet media", () => {
+  const rejects = [
+    "",
+    "   ",
+    "not a url",
+    "http://pbs.twimg.com/media/AAA.jpg",
+    "https://example.com/media/AAA.jpg",
+    "https://pbs.twimg.com/card_img/123/abc.jpg",
+    "https://pbs.twimg.com/profile_images/1/avatar.jpg",
+    "https://pbs.twimg.com/profile_banner/1/banner.jpg",
+    "blob:https://x.com/8f14e45f",
+    "https://pbs.twimg.com/",
+  ];
+  for (const raw of rejects) {
+    assert.equal(normalizeMediaUrl(raw), "", `expected ${JSON.stringify(raw)} to be rejected`);
+  }
+
+  assert.equal(normalizeMediaUrl("https://pbs.twimg.com/media/AAA.jpg"), "https://pbs.twimg.com/media/AAA.jpg");
+  assert.equal(
+    normalizeMediaUrl("  https://pbs.twimg.com/media/AAA?format=webp&name=small  "),
+    "https://pbs.twimg.com/media/AAA.webp",
+  );
+  assert.equal(
+    normalizeMediaUrl("https://pbs.twimg.com/media/AAA?name=large"),
+    "https://pbs.twimg.com/media/AAA",
+  );
 });

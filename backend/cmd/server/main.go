@@ -35,13 +35,19 @@ func main() {
 }
 
 func run(args []string) error {
+	rebuildIndex := false
 	for _, arg := range args {
 		switch arg {
 		case "-h", "--help":
 			fmt.Fprintf(os.Stdout,
-				"Usage: %s\n\nStarts the local Twitter Bookmarker backend on %s.\nStorage directory: ~/%s\n",
+				"Usage: %s [--rebuild-index]\n\n"+
+					"Starts the local Twitter Bookmarker backend on %s.\n"+
+					"Storage directory: ~/%s\n\n"+
+					"  --rebuild-index  regenerate index.json from the CSV files and exit\n",
 				serverName, config.Addr(), config.DirName)
 			return nil
+		case "--rebuild-index":
+			rebuildIndex = true
 		default:
 			return fmt.Errorf("unknown argument %q (try -h)", arg)
 		}
@@ -52,6 +58,15 @@ func run(args []string) error {
 	dir, err := config.EnsureStorageDir()
 	if err != nil {
 		return fmt.Errorf("storage directory: %w", err)
+	}
+
+	if rebuildIndex {
+		count, err := index.RebuildAndPersist(dir, log)
+		if err != nil {
+			return fmt.Errorf("rebuild index: %w", err)
+		}
+		fmt.Fprintf(os.Stdout, "rebuilt %s from CSVs: %d tweets\n", index.FileName, count)
+		return nil
 	}
 
 	idx, err := index.LoadOrRebuild(dir, log)

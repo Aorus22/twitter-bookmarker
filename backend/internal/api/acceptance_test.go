@@ -232,8 +232,8 @@ func TestPRD65Acceptance(t *testing.T) {
 		if parsed.Before(before) || parsed.After(after) {
 			t.Fatalf("saved_at %v outside [%v, %v]", parsed, before, after)
 		}
-		if row := csvDataRows(t, dir, "linux.csv")[0]; row[4] != resp.SavedAt {
-			t.Fatalf("csv saved_at = %q, response saved_at = %q", row[4], resp.SavedAt)
+		if row := csvDataRows(t, dir, "linux.csv")[0]; row[5] != resp.SavedAt {
+			t.Fatalf("csv saved_at = %q, response saved_at = %q", row[5], resp.SavedAt)
 		}
 	})
 

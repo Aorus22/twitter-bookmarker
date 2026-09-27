@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bufio"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -13,21 +15,50 @@ import (
 )
 
 // Header is the exact CSV header written once per file.
-const Header = "url,author,username,tweet_date,saved_at,text"
+//
+// `media` sits directly after `url` and holds a JSON array of media URLs
+// (`[]` when the tweet has none). Every row therefore has seven fields.
+const Header = "url,media,author,username,tweet_date,saved_at,text"
 
-var headerRecord = []string{"url", "author", "username", "tweet_date", "saved_at", "text"}
+var headerRecord = strings.Split(Header, ",")
 
-// IsHeaderRecord reports whether rec is exactly the category CSV header.
-func IsHeaderRecord(rec []string) bool {
-	if len(rec) != len(headerRecord) {
+// LegacyHeader is the pre-media header. Files still carrying it keep rebuilding
+// correctly (see index.loadCSV), but they are never appended to: Save refuses
+// with a SchemaMismatchError until Scripts/migrate_schema.py has run.
+const LegacyHeader = "url,author,username,tweet_date,saved_at,text"
+
+var legacyHeaderRecord = strings.Split(LegacyHeader, ",")
+
+// IsHeaderRecord reports whether rec is exactly the current category CSV header.
+func IsHeaderRecord(rec []string) bool { return recordEquals(rec, headerRecord) }
+
+// IsLegacyHeaderRecord reports whether rec is exactly the pre-media header.
+func IsLegacyHeaderRecord(rec []string) bool { return recordEquals(rec, legacyHeaderRecord) }
+
+func recordEquals(rec, want []string) bool {
+	if len(rec) != len(want) {
 		return false
 	}
-	for i := range headerRecord {
-		if rec[i] != headerRecord[i] {
+	for i := range want {
+		if rec[i] != want[i] {
 			return false
 		}
 	}
 	return true
+}
+
+// existingHeader reads the first physical line of an existing CSV file.
+func existingHeader(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	line, err := bufio.NewReader(f).ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 // IndexStore is the subset of the derived index the Store needs. Declaring it
@@ -114,6 +145,25 @@ func (s *Store) Save(req model.SaveRequest) (model.SaveResponse, error) {
 		return resp, err
 	}
 
+	// An existing file written with the pre-media header must never receive a
+	// seven-column row. The CSV layout is fixed per file, so refuse loudly
+	// instead of silently corrupting the source of truth.
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 {
+		header, headerErr := existingHeader(path)
+		if headerErr != nil {
+			return resp, fmt.Errorf("read csv header %s: %w", req.Filename, headerErr)
+		}
+		if header != Header {
+			return resp, &SchemaMismatchError{Filename: req.Filename, Found: header}
+		}
+	}
+
+	// Media is auxiliary: invalid entries are dropped, never rejected.
+	mediaJSON, err := json.Marshal(NormalizeMedia(req.Tweet.Media))
+	if err != nil {
+		return resp, fmt.Errorf("encode media %s: %w", req.Filename, err)
+	}
+
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return resp, fmt.Errorf("open csv %s: %w", req.Filename, err)
@@ -135,6 +185,7 @@ func (s *Store) Save(req model.SaveRequest) (model.SaveResponse, error) {
 	}
 	row := []string{
 		canonicalURL,
+		string(mediaJSON),
 		author,
 		username,
 		parsedDate.UTC().Format(time.RFC3339),

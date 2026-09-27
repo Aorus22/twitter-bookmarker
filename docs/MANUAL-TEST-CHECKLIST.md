@@ -120,11 +120,25 @@ Set display mode to **Popover** first; switch to **Inline** only for scenario B9
 cat ~/.twitter-bookmarker/linux.csv
 curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 ```
-- CSV has exactly one header row `url,author,username,tweet_date,saved_at,text`
+- CSV has exactly one header row `url,media,author,username,tweet_date,saved_at,text`
   and exactly one data row for the tweet.
 - The row's `saved_at` ends in `Z` (UTC) and the URL is canonical
   (`https://x.com/<handle>/status/<id>`, no `?s=` tracking suffix).
+- `media` parses as a JSON array. On a tweet with a photo it holds
+  `https://pbs.twimg.com/media/<id>.<ext>` (sizing query stripped); on a tweet
+  with video/GIF it holds the `amplify_video_thumb`/`tweet_video_thumb` poster;
+  on a text-only tweet it is exactly `[]`:
+
+  ```bash
+  python3 -c "import csv,json; r=list(csv.DictReader(open('$HOME/.twitter-bookmarker/linux.csv',newline=''))); print([json.loads(x['media']) for x in r])"
+  ```
 - `index.json` has one `tweets["<id>"]` entry pointing at `linux.csv`.
+
+> **Prerequisite for existing installs:** a directory whose CSVs still carry the
+> six-column header must be migrated first (backend answers 500 by design).
+> Run `Scripts/migrate_schema.py --apply`, `Scripts/backfill_media.py --apply`,
+> then `Scripts/rebuild_index.sh` from the private data repository. Save a fresh
+> tweet afterwards to prove the 7-column path end to end.
 
 ---
 

@@ -24,6 +24,7 @@ const EXTRACTED = {
   username: "@foo",
   tweetDate: "2026-09-27T01:00:00.000Z",
   text: "hello",
+  media: ["https://pbs.twimg.com/media/AAA.jpg"],
   tweetId: TWEET_ID,
 };
 const SAVED_RESPONSE = {

@@ -67,6 +67,14 @@ async function verifyManifest() {
   }
   pass("content bundle contains both accepted route literals");
 
+  // Media extraction (PRD §14) is DOM-coupled: if the anchors or the media
+  // host filter fall out of the bundle, saved rows silently lose their media
+  // column. Both must survive minification as literals.
+  for (const anchor of ["tweetPhoto", "videoPlayer", "pbs.twimg.com"]) {
+    assert.ok(contentBundle.includes(anchor), `content bundle is missing media anchor ${anchor}`);
+  }
+  pass("content bundle contains the media selectors and the pbs.twimg.com host filter");
+
   const referenced = [
     manifest.background.service_worker,
     manifest.action.default_popup,

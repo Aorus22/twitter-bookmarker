@@ -3,10 +3,12 @@ package storage_test
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -84,7 +86,7 @@ func TestSaveWritesHeaderOnceThenAppends(t *testing.T) {
 		t.Fatalf("header = %q, want %q", lines[0], storage.Header)
 	}
 	for i, line := range lines {
-		if i > 0 && strings.HasPrefix(line, "url,author,username") {
+		if i > 0 && strings.HasPrefix(line, "url,media,author") {
 			t.Fatalf("header repeated on line %d: %q", i+1, line)
 		}
 	}
@@ -114,17 +116,20 @@ func TestCSVRoundTripSpecialCharacters(t *testing.T) {
 		t.Fatalf("data rows = %d, want 1", len(rows))
 	}
 	row := rows[0]
-	if len(row) != 6 {
-		t.Fatalf("field count = %d, want 6", len(row))
+	if len(row) != 7 {
+		t.Fatalf("field count = %d, want 7", len(row))
 	}
 	if row[0] != resp.URL || row[0] != "https://x.com/foo/status/123" {
 		t.Errorf("url field = %q, want canonical URL", row[0])
 	}
-	if row[1] != author {
-		t.Errorf("author field = %q, want %q", row[1], author)
+	if row[1] != "[]" {
+		t.Errorf("media field = %q, want []", row[1])
 	}
-	if row[5] != text {
-		t.Errorf("text field = %q, want %q", row[5], text)
+	if row[2] != author {
+		t.Errorf("author field = %q, want %q", row[2], author)
+	}
+	if row[6] != text {
+		t.Errorf("text field = %q, want %q", row[6], text)
 	}
 
 	// encoding/csv (not manual escaping) must have quoted the tricky fields.
@@ -147,11 +152,11 @@ func TestSaveMediaOnlyTweetHasEmptyText(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("data rows = %d, want 1", len(rows))
 	}
-	if len(rows[0]) != 6 {
-		t.Fatalf("field count = %d, want 6", len(rows[0]))
+	if len(rows[0]) != 7 {
+		t.Fatalf("field count = %d, want 7", len(rows[0]))
 	}
-	if rows[0][5] != "" {
-		t.Fatalf("text field = %q, want empty", rows[0][5])
+	if rows[0][6] != "" {
+		t.Fatalf("text field = %q, want empty", rows[0][6])
 	}
 }
 
@@ -172,8 +177,8 @@ func TestSaveNormalizesURLAndTweetDate(t *testing.T) {
 	}
 
 	row := dataRows(t, dir, "linux.csv")[0]
-	if row[3] != "2026-09-27T01:00:00Z" {
-		t.Errorf("tweet_date field = %q, want 2026-09-27T01:00:00Z (UTC normalized)", row[3])
+	if row[4] != "2026-09-27T01:00:00Z" {
+		t.Errorf("tweet_date field = %q, want 2026-09-27T01:00:00Z (UTC normalized)", row[4])
 	}
 }
 
@@ -197,8 +202,8 @@ func TestSaveGeneratesUTCSavedAt(t *testing.T) {
 	if parsed.Before(before) || parsed.After(after) {
 		t.Errorf("saved_at %v outside [%v, %v]", parsed, before, after)
 	}
-	if row := dataRows(t, dir, "linux.csv")[0]; row[4] != resp.SavedAt {
-		t.Errorf("csv saved_at = %q, response saved_at = %q", row[4], resp.SavedAt)
+	if row := dataRows(t, dir, "linux.csv")[0]; row[5] != resp.SavedAt {
+		t.Errorf("csv saved_at = %q, response saved_at = %q", row[5], resp.SavedAt)
 	}
 }
 
@@ -370,5 +375,95 @@ func TestSaveManyDistinctTweetsToSameFile(t *testing.T) {
 	}
 	if rows := dataRows(t, dir, "linux.csv"); len(rows) != n {
 		t.Fatalf("data rows = %d, want %d", len(rows), n)
+	}
+}
+
+func TestSaveWritesMediaAsJSONArray(t *testing.T) {
+	store, _, dir := newTestStore(t)
+
+	req := saveReq("linux.csv", "https://x.com/foo/status/123", "art")
+	req.Tweet.Media = []string{
+		"https://pbs.twimg.com/media/AAA?format=jpg&name=small",
+		"https://pbs.twimg.com/media/BBB.jpg",
+		"https://pbs.twimg.com/media/BBB.jpg",
+		"https://example.com/not-media.jpg",
+	}
+	if _, err := store.Save(req); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	row := dataRows(t, dir, "linux.csv")[0]
+	if len(row) != 7 {
+		t.Fatalf("field count = %d, want 7", len(row))
+	}
+	var media []string
+	if err := json.Unmarshal([]byte(row[1]), &media); err != nil {
+		t.Fatalf("media column %q is not a JSON array: %v", row[1], err)
+	}
+	want := []string{
+		"https://pbs.twimg.com/media/AAA.jpg",
+		"https://pbs.twimg.com/media/BBB.jpg",
+	}
+	if !reflect.DeepEqual(media, want) {
+		t.Errorf("media column = %#v, want %#v (canonicalized, deduped, host-filtered)", media, want)
+	}
+}
+
+func TestSaveRefusesPreMigrationFile(t *testing.T) {
+	store, _, dir := newTestStore(t)
+
+	// A file the previous schema version left behind: legacy header, legacy row.
+	legacy := storage.LegacyHeader + "\n" +
+		"https://x.com/old/status/999,Old,@old,2026-09-01T00:00:00Z,2026-09-01T01:00:00Z,\"already here\"\n"
+	path := filepath.Join(dir, "linux.csv")
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("write legacy csv: %v", err)
+	}
+
+	_, err := store.Save(saveReq("linux.csv", "https://x.com/foo/status/123", "new"))
+	if err == nil {
+		t.Fatal("Save() on a pre-migration file succeeded; it must refuse")
+	}
+	var mismatch *storage.SchemaMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("Save() error = %v (%T), want *storage.SchemaMismatchError", err, err)
+	}
+	if mismatch.Filename != "linux.csv" {
+		t.Errorf("SchemaMismatchError.Filename = %q, want linux.csv", mismatch.Filename)
+	}
+
+	// The source of truth must be byte-for-byte untouched.
+	raw, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read csv: %v", readErr)
+	}
+	if string(raw) != legacy {
+		t.Fatalf("legacy csv was modified:\n%s", raw)
+	}
+}
+
+func TestSaveAcceptsMigratedFileWithMedia(t *testing.T) {
+	store, _, dir := newTestStore(t)
+
+	req := saveReq("linux.csv", "https://x.com/foo/status/123", "one")
+	req.Tweet.Media = []string{"https://pbs.twimg.com/media/AAA.jpg"}
+	if _, err := store.Save(req); err != nil {
+		t.Fatalf("first Save() error = %v", err)
+	}
+
+	second := saveReq("linux.csv", "https://x.com/bar/status/456", "two")
+	if _, err := store.Save(second); err != nil {
+		t.Fatalf("append Save() error = %v", err)
+	}
+
+	rows := dataRows(t, dir, "linux.csv")
+	if len(rows) != 2 {
+		t.Fatalf("data rows = %d, want 2", len(rows))
+	}
+	if rows[0][1] != `["https://pbs.twimg.com/media/AAA.jpg"]` {
+		t.Errorf("row 1 media = %q", rows[0][1])
+	}
+	if rows[1][1] != "[]" {
+		t.Errorf("row 2 media = %q, want []", rows[1][1])
 	}
 }

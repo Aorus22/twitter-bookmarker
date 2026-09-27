@@ -114,6 +114,11 @@ func (ix *Index) rebuild(dir string, log *logging.Logger) (int, error) {
 
 // loadCSV reads one category CSV and merges its rows into the index. A
 // malformed row stops that file but never aborts the whole rebuild.
+//
+// The column layout is decided by the file's own header record, never guessed
+// from a field count: a migrated file has `media` at index 1 and `saved_at` at
+// index 5, a not-yet-migrated file has `saved_at` at index 4. A file with no
+// header at all is treated as the current schema.
 func (ix *Index) loadCSV(path, filename string) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -127,6 +132,7 @@ func (ix *Index) loadCSV(path, filename string) (int, error) {
 
 	count := 0
 	first := true
+	savedAtIndex := 5 // current schema: url,media,author,username,tweet_date,saved_at,text
 	for {
 		rec, err := r.Read()
 		if err == io.EOF {
@@ -137,29 +143,55 @@ func (ix *Index) loadCSV(path, filename string) (int, error) {
 		}
 		if first {
 			first = false
-			if storage.IsHeaderRecord(rec) {
+			switch {
+			case storage.IsHeaderRecord(rec):
+				savedAtIndex = 5
+				continue
+			case storage.IsLegacyHeaderRecord(rec):
+				savedAtIndex = 4
 				continue
 			}
 		}
-		if ix.addRecord(filename, rec) {
+		if ix.addRecord(filename, rec, savedAtIndex) {
 			count++
 		}
 	}
 	return count, nil
 }
 
-// addRecord inserts a CSV row (url, author, username, tweet_date, saved_at,
-// text) keyed by the Status ID parsed from its canonical URL.
-func (ix *Index) addRecord(filename string, rec []string) bool {
-	if len(rec) < 6 {
+// addRecord inserts a CSV row keyed by the Status ID parsed from its canonical
+// URL. savedAtIndex is 5 for the current schema (media present) and 4 for the
+// pre-media layout; a row needs at least that index plus its trailing text.
+func (ix *Index) addRecord(filename string, rec []string, savedAtIndex int) bool {
+	if len(rec) < savedAtIndex+2 {
 		return false
 	}
 	canonical, id, err := storage.NormalizeURL(rec[0])
 	if err != nil {
 		return false
 	}
-	ix.Add(id, model.IndexEntry{URL: canonical, Filename: filename, SavedAt: rec[4]})
+	ix.Add(id, model.IndexEntry{URL: canonical, Filename: filename, SavedAt: rec[savedAtIndex]})
 	return true
+}
+
+// RebuildAndPersist discards the on-disk index and rebuilds it from the CSVs,
+// then writes the result atomically. It is the CLI path behind
+// `twitter-bookmarker-server --rebuild-index`, so a data migration regenerates
+// index.json with exactly the code that serves `GET /v1/index`.
+func RebuildAndPersist(dir string, log *logging.Logger) (int, error) {
+	if log == nil {
+		log = logging.Discard()
+	}
+	ix := New()
+	count, err := ix.rebuild(dir, log)
+	if err != nil {
+		return 0, err
+	}
+	if err := ix.Persist(dir); err != nil {
+		return 0, err
+	}
+	log.IndexRebuild(dir, "forced rebuild", count)
+	return count, nil
 }
 
 // Lookup returns the index entry for a Status ID.

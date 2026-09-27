@@ -56,6 +56,23 @@ export const X_SELECTORS = {
   quotedLink: { primary: 'div[role="link"]', fallbacks: [] },
   /** A profile link; its first path segment is the @handle. */
   profileLink: { primary: 'a[href^="/"]', fallbacks: [] },
+  /**
+   * One photo of the main tweet (PRD §14). The primary form is X's own
+   * `tweetPhoto` test id; the fallbacks match any pbs media image, which keeps
+   * the extraction working if X renames the container.
+   */
+  tweetPhoto: {
+    primary: '[data-testid="tweetPhoto"] img',
+    fallbacks: ['img[src*="pbs.twimg.com/media/"]', 'img[src*="amplify_video_thumb"]', 'img[src*="tweet_video_thumb"]'],
+  },
+  /**
+   * The video/GIF player of the main tweet. Its `poster` frame is the media URL
+   * that gets stored (see PRD §14: mp4 blob URLs are deliberately not used).
+   */
+  videoPlayer: {
+    primary: '[data-testid="videoPlayer"] video',
+    fallbacks: ['video[poster]', '[data-testid="videoComponent"] img'],
+  },
   /** The extension's own per-tweet root (used only to find/replace our nodes). */
   organizerRoot: { primary: "[data-twitter-bookmarker-root]", fallbacks: [] },
   /** The popover trigger inside an organizer root. */

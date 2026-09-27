@@ -59,9 +59,7 @@ export function appendTweet(doc, options = {}) {
   }
 
   if (options.media) {
-    const image = doc.createElement("img");
-    image.setAttribute("src", "https://pbs.twimg.com/media/example.jpg");
-    content.appendChild(image);
+    appendMedia(content, doc, options.media);
   }
 
   // --- quoted tweet ---------------------------------------------------------
@@ -96,6 +94,10 @@ export function appendTweet(doc, options = {}) {
       wrapper.appendChild(quotedText);
     }
 
+    if (options.quotedMedia) {
+      appendMedia(wrapper, doc, options.quotedMedia);
+    }
+
     content.appendChild(wrapper);
   }
 
@@ -117,6 +119,44 @@ export function createTweetDocument(options = {}) {
   const doc = createDocument();
   const { article, actionBar, content } = appendTweet(doc, options);
   return { doc, article, actionBar, content };
+}
+
+/**
+ * Append media markup to `parent` in X's real shape.
+ *
+ * `media` accepts:
+ *   - `true`                 → one photo at the default URL (legacy fixtures);
+ *   - `string[]`             → one `[data-testid="tweetPhoto"]` per URL;
+ *   - `{ photos, videoPoster }` → photos plus a `videoPlayer` with that poster.
+ */
+function appendMedia(parent, doc, media) {
+  const photos =
+    media === true
+      ? ["https://pbs.twimg.com/media/example.jpg"]
+      : Array.isArray(media)
+        ? media
+        : (media.photos ?? []);
+
+  for (const src of photos) {
+    const container = doc.createElement("div");
+    container.setAttribute("data-testid", "tweetPhoto");
+    const image = doc.createElement("img");
+    image.setAttribute("src", src);
+    container.appendChild(image);
+    parent.appendChild(container);
+  }
+
+  const poster = media !== true && !Array.isArray(media) && media !== null ? media.videoPoster : undefined;
+  if (typeof poster === "string") {
+    const player = doc.createElement("div");
+    player.setAttribute("data-testid", "videoPlayer");
+    const video = doc.createElement("video");
+    // X exposes only a blob URL for playback; only the poster is storeable.
+    video.setAttribute("src", "blob:https://x.com/8f14e45f");
+    video.setAttribute("poster", poster);
+    player.appendChild(video);
+    parent.appendChild(player);
+  }
 }
 
 /** A plain, fully-populated quote-free tweet. */

@@ -41,6 +41,7 @@ function sampleArticle() {
     username: "@foo",
     href: "/foo/status/123456",
     datetime: "2026-09-27T01:00:00.000Z",
+    media: ["https://pbs.twimg.com/media/AAA?format=jpg&name=small"],
   }).article;
 }
 
@@ -136,6 +137,7 @@ test("201 marks saved, toasts the category name, and fires onSaved with snake_ca
     filename: "linux.csv",
     tweet: {
       url: "https://x.com/foo/status/123456",
+      media: ["https://pbs.twimg.com/media/AAA.jpg"],
       author: "Foo, Bar 🐧",
       username: "@foo",
       tweet_date: "2026-09-27T01:00:00.000Z",

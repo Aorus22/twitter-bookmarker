@@ -134,27 +134,36 @@ curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 
 ## CSV schema
 
-One file per category filename, six columns, header written exactly once:
+One file per category filename, seven columns, header written exactly once:
 
 ```csv
-url,author,username,tweet_date,saved_at,text
+url,media,author,username,tweet_date,saved_at,text
 ```
 
 | Column | Meaning |
 |---|---|
 | `url` | Canonical `https://x.com/<handle>/status/<id>` (tracking query removed) |
+| `media` | JSON array of canonical media URLs; `[]` when the tweet has none |
 | `author` | Display name as rendered |
 | `username` | `@handle` |
 | `tweet_date` | Tweet timestamp, UTC (`...Z`) |
 | `saved_at` | Backend-generated UTC save time (`...Z`) |
 | `text` | Parent tweet text only; empty for media-only tweets; quoted text excluded |
 
+`media` is normalized identically by the extension and the backend (PRD §14):
+only `https://pbs.twimg.com/...` survives, the `?format=…&name=…` sizing query is
+dropped (an extension-less path gets `.` + `format`), card/avatar/banner paths
+are rejected, duplicates are removed, order is preserved, and the list is capped
+at eight entries. A video or animated GIF stores its **poster frame** — X only
+exposes a `blob:` playback URL in the DOM, so mp4 URLs are deliberately not
+recorded.
+
 Example (`~/.twitter-bookmarker/linux.csv`, PRD §63):
 
 ```csv
-url,author,username,tweet_date,saved_at,text
-https://x.com/foo/status/123,Foo Bar,@foo,2026-09-27T01:00:00Z,2026-09-27T03:00:00Z,"Testing Linux today"
-https://x.com/bar/status/456,"Foo, Bar 🐧",@bar,2026-09-26T14:21:00Z,2026-09-27T03:02:00Z,"Line one
+url,media,author,username,tweet_date,saved_at,text
+https://x.com/foo/status/123,"[""https://pbs.twimg.com/media/AAA.jpg"",""https://pbs.twimg.com/media/BBB.jpg""]",Foo Bar,@foo,2026-09-27T01:00:00Z,2026-09-27T03:00:00Z,"Testing Linux today"
+https://x.com/bar/status/456,[],"Foo, Bar 🐧",@bar,2026-09-26T14:21:00Z,2026-09-27T03:02:00Z,"Line one
 
 Line two"
 ```
@@ -165,6 +174,24 @@ external parser:
 
 ```bash
 python3 -c "import csv; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv', newline=''), strict=True)); print(len(rows))"
+```
+
+### Files written before the media column
+
+`media` was added after the first real bookmarks had already been saved. A CSV
+whose header is still the six-column `url,author,username,tweet_date,saved_at,text`
+is **never appended to**: the backend answers 500 with an actionable log line
+instead of corrupting the file. Migrating such a directory — plus repairing the
+one row that a manual edit had merged, and backfilling real media URLs for the
+existing tweets — is handled by the `Scripts/` folder of the data repository
+(`hehenugas/twitter-bookmarker-csv`, private). The index rebuild is
+header-aware, so a not-yet-migrated file still indexes correctly (`saved_at`
+lives at index 4 there, index 5 after the migration).
+
+Regenerate `index.json` from the CSVs at any time:
+
+```bash
+./backend/bin/twitter-bookmarker-server --rebuild-index
 ```
 
 ---

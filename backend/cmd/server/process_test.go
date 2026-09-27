@@ -403,3 +403,69 @@ func decodeBody[T any](t *testing.T, body []byte) T {
 	}
 	return v
 }
+
+// TestProcessRebuildIndexFlag proves `--rebuild-index` regenerates index.json
+// from the CSVs — with the same header-aware parser the server uses — and then
+// exits without opening a listener. The data migrates from the six-column
+// layout to the seven-column one, so both must be indexed correctly.
+func TestProcessRebuildIndexFlag(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, config.DirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir storage dir: %v", err)
+	}
+
+	migrated := strings.Join([]string{
+		storage.Header,
+		`https://x.com/foo/status/111,"[""https://pbs.twimg.com/media/A.jpg""]",Foo,@foo,2026-09-27T01:00:00Z,2026-09-27T02:00:00Z,"hi"`,
+		`https://x.com/bar/status/222,[],Bar,@bar,2026-09-27T01:05:00Z,2026-09-27T02:05:00Z,"there"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "linux.csv"), []byte(migrated), 0o600); err != nil {
+		t.Fatalf("write linux.csv: %v", err)
+	}
+
+	legacy := strings.Join([]string{
+		storage.LegacyHeader,
+		`https://x.com/baz/status/333,Baz,@baz,2026-09-27T01:10:00Z,2026-09-27T02:10:00Z,"old"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "old.csv"), []byte(legacy), 0o600); err != nil {
+		t.Fatalf("write old.csv: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), procShutdownWait)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, serverBin, "--rebuild-index")
+	cmd.Env = envWithHome(home)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("--rebuild-index exit = %v, want 0 (output:\n%s)", err, out)
+	}
+	if !strings.Contains(string(out), "rebuilt index.json from CSVs: 3 tweets") {
+		t.Errorf("stdout missing the rebuild count:\n%s", out)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "index.json"))
+	if err != nil {
+		t.Fatalf("index.json was not written: %v", err)
+	}
+	var file model.IndexFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("decode index.json: %v", err)
+	}
+
+	want := map[string]model.IndexEntry{
+		"111": {URL: "https://x.com/foo/status/111", Filename: "linux.csv", SavedAt: "2026-09-27T02:00:00Z"},
+		"222": {URL: "https://x.com/bar/status/222", Filename: "linux.csv", SavedAt: "2026-09-27T02:05:00Z"},
+		"333": {URL: "https://x.com/baz/status/333", Filename: "old.csv", SavedAt: "2026-09-27T02:10:00Z"},
+	}
+	if len(file.Tweets) != len(want) {
+		t.Fatalf("index has %d entries, want %d: %+v", len(file.Tweets), len(want), file.Tweets)
+	}
+	for id, wantEntry := range want {
+		if got := file.Tweets[id]; got != wantEntry {
+			t.Errorf("index[%s] = %+v, want %+v", id, got, wantEntry)
+		}
+	}
+}

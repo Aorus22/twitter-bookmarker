@@ -119,6 +119,7 @@ export function createSaveController(options: SaveControllerOptions): OrganizerC
       filename: category.filename,
       tweet: {
         url: tweet.url,
+        media: tweet.media ?? [],
         author: tweet.author,
         username: tweet.username,
         tweet_date: tweet.tweetDate,

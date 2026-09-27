@@ -3,13 +3,15 @@
 package model
 
 // TweetInput is the raw tweet metadata accepted from the extension.
-// Text is the only field that may be empty (media-only tweets).
+// Text is the only field that may be empty (media-only tweets). Media is
+// optional: an older extension omits it and the row is written with `[]`.
 type TweetInput struct {
-	URL       string `json:"url"`
-	Author    string `json:"author"`
-	Username  string `json:"username"`
-	TweetDate string `json:"tweet_date"`
-	Text      string `json:"text"`
+	URL       string   `json:"url"`
+	Media     []string `json:"media"`
+	Author    string   `json:"author"`
+	Username  string   `json:"username"`
+	TweetDate string   `json:"tweet_date"`
+	Text      string   `json:"text"`
 }
 
 // IndexEntry is one derived index record, keyed by Tweet Status ID.

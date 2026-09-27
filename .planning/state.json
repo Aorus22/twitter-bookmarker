@@ -51,13 +51,13 @@
     {
       "number": "10",
       "name": "Hardening, Accessibility & Responsive",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "next": {
-    "command": "/gsd:progress --next",
-    "label": "Advance to the next step (plan phase 10)",
-    "reason": "Phase 10 of 10 — needs a plan"
+    "command": "/gsd:new-milestone",
+    "label": "Start a new milestone",
+    "reason": "All phases complete — start a new milestone"
   },
-  "updated_at": "2026-09-27T16:52:20.950Z"
+  "updated_at": "2026-09-27T17:09:26.209Z"
 }

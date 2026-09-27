@@ -115,12 +115,12 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### HARD — Hardening, Accessibility & Responsive (Phase 10, PRD §61, §62, §66, §67, §82)
 
-- [ ] **HARD-01**: Malformed media JSON, malformed CSV rows, and large CSVs are exercised by automated tests and never take down a collection or the server
-- [ ] **HARD-02**: Backend errors surface as the specified user-facing messages with a working `Retry`, and a backend that is down produces the "Could not connect to Twitter Bookmarker backend" state
-- [ ] **HARD-03**: The layout is usable on desktop, tablet, and mobile per the responsive column rules, with the filter popover becoming a Sheet on narrow viewports
-- [ ] **HARD-04**: Accessibility: all controls are keyboard reachable with visible focus states, semantic buttons/links are used, images have author/tweet-based `alt` fallbacks, dialogs trap focus, Escape closes them, arrows navigate, and contrast is adequate
-- [ ] **HARD-05**: The PRD §82 integration scenario is executable end-to-end against a seeded storage directory with `ai.csv`, `linux.csv`, and `design.csv`
-- [ ] **HARD-06**: New data written to a CSV while the backend is running is visible in the gallery after a window-focus refetch, with no backend restart
+- [x] **HARD-01**: Malformed media JSON, malformed CSV rows, and large CSVs are exercised by automated tests and never take down a collection or the server
+- [x] **HARD-02**: Backend errors surface as the specified user-facing messages with a working `Retry`, and a backend that is down produces the "Could not connect to Twitter Bookmarker backend" state
+- [x] **HARD-03**: The layout is usable on desktop, tablet, and mobile per the responsive column rules, with the filter popover becoming a Sheet on narrow viewports
+- [x] **HARD-04**: Accessibility: all controls are keyboard reachable with visible focus states, semantic buttons/links are used, images have author/tweet-based `alt` fallbacks, dialogs trap focus, Escape closes them, arrows navigate, and contrast is adequate
+- [x] **HARD-05**: The PRD §82 integration scenario is executable end-to-end against a seeded storage directory with `ai.csv`, `linux.csv`, and `design.csv`
+- [x] **HARD-06**: New data written to a CSV while the backend is running is visible in the gallery after a window-focus refetch, with no backend restart
 
 ---
 
@@ -229,12 +229,12 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | PROD-04 | 9 — Production Serving | Complete |
 | PROD-05 | 9 — Production Serving | Complete |
 | PROD-06 | 9 — Production Serving | Complete |
-| HARD-01 | 10 — Hardening, Accessibility & Responsive | Pending |
-| HARD-02 | 10 — Hardening, Accessibility & Responsive | Pending |
-| HARD-03 | 10 — Hardening, Accessibility & Responsive | Pending |
-| HARD-04 | 10 — Hardening, Accessibility & Responsive | Pending |
-| HARD-05 | 10 — Hardening, Accessibility & Responsive | Pending |
-| HARD-06 | 10 — Hardening, Accessibility & Responsive | Pending |
+| HARD-01 | 10 — Hardening, Accessibility & Responsive | Complete |
+| HARD-02 | 10 — Hardening, Accessibility & Responsive | Complete |
+| HARD-03 | 10 — Hardening, Accessibility & Responsive | Complete |
+| HARD-04 | 10 — Hardening, Accessibility & Responsive | Complete |
+| HARD-05 | 10 — Hardening, Accessibility & Responsive | Complete |
+| HARD-06 | 10 — Hardening, Accessibility & Responsive | Complete |
 
 **Coverage:** 82 requirements, 82 mapped, 0 unmapped, 0 duplicated.
 

@@ -43,7 +43,7 @@ Figma variable collections: `Gallery V2 Brand` (12 colors, single mode) and `The
 | `--ink` | `#171419` | Primary text |
 | `--muted` | `#746b72` | Secondary text, usernames, meta, placeholders |
 | `--border` | `#e8dcd3` | Hairline borders (1px) |
-| `--accent` | `#f26a5b` | Coral — active nav, eyebrows, active pill text, CTA |
+| `--accent` | `#bf3f2e` | Coral — active nav, eyebrows, active pill text, CTA (**darkened in Phase 10 for WCAG AA; the mockup value `#f26a5b` measured 2.96:1 on `--surface`**) |
 | `--accent-pink` | `#ff8fa3` | Collage/placeholder accent |
 | `--accent-violet` | `#7c5cfc` | Collage/placeholder accent |
 | `--accent-blue` | `#5b8cff` | Collage/placeholder accent |

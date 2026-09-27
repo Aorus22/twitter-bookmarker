@@ -26,7 +26,13 @@
   --ink: #171419;
   --muted: #746b72;
   --border: #e8dcd3;
-  --accent: #f26a5b;
+  /* HARD-04/PRD §67: the mockup's #f26a5b coral is 2.96:1 on --surface and
+   * 2.64:1 on --bg, so every `text-accent` (active nav, eyebrows, the post
+   * "show more" toggle) failed WCAG AA, and white-on-accent CTAs failed on the
+   * same token. Darkened to the nearest coral that clears 4.5:1 on --surface,
+   * --bg and --surface-warm *and* for #fffdfc text on the accent fill; see the
+   * design spec §2.1 and the axe checks in scripts/check-web-acceptance.sh. */
+  --accent: #bf3f2e;
   --accent-pink: #ff8fa3;
   --accent-violet: #7c5cfc;
   --accent-blue: #5b8cff;

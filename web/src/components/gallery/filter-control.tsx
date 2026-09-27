@@ -143,6 +143,11 @@ export function FilterControl({
         data-testid="filter-popover"
         align="start"
         sideOffset={8}
+        // Radix Popover.Content is `role="dialog"`; without a name axe reports
+        // `aria-dialog-name` (serious, HARD-04). The panel renders the visible
+        // title, but it is not linked, so name the dialog explicitly from the
+        // one source of truth for the copy.
+        aria-label={FILTER_TITLE}
         className="w-auto border-0 bg-transparent p-0 shadow-none ring-0"
       >
         {panel}

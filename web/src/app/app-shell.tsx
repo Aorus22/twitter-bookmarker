@@ -29,6 +29,7 @@ export function AppShell() {
         >
           <Link
             to="/"
+            aria-label="Twitter Bookmarker"
             className="flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <span
@@ -37,7 +38,15 @@ export function AppShell() {
             >
               <Bookmark className="size-5" fill="currentColor" />
             </span>
-            <span className="truncate text-[15px] leading-[1.4] font-semibold text-ink">
+            {/* HARD-03: below `sm` the nav does not have room for the wordmark
+                beside the logo, the two links and the theme controls, and the
+                `truncate` fallback rendered `Tw…`. Hide it instead of
+                truncating mid-word; the logo plus the link's aria-label keep the
+                brand reachable and named. */}
+            <span
+              data-testid="app-wordmark"
+              className="hidden truncate text-[15px] leading-[1.4] font-semibold text-ink sm:inline"
+            >
               Twitter Bookmarker
             </span>
           </Link>

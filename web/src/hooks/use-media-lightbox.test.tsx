@@ -14,19 +14,19 @@ import { makePost, pbsUrl } from "@/test/fixtures"
 const POSTS = [
   makePost({
     tweet_id: "1",
-    username: "ada",
+    username: "@ada",
     media: [pbsUrl("a1"), pbsUrl("a2")],
     text: "Two images.",
   }),
   makePost({
     tweet_id: "2",
-    username: "grace",
+    username: "@grace",
     media: [],
     text: "Text only.",
   }),
   makePost({
     tweet_id: "3",
-    username: "linus",
+    username: "@linus",
     media: [pbsUrl("c1")],
     text: "One image.",
   }),

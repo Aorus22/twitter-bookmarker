@@ -33,21 +33,21 @@ const LINUX = makeCollection({
 const ADA = makePost({
   tweet_id: "1",
   author: "Ada Lovelace",
-  username: "ada",
+  username: "@ada",
   media: [pbsUrl("a1"), pbsUrl("a2")],
   text: "Two images from the archive.",
 })
 const GRACE = makePost({
   tweet_id: "2",
   author: "Grace Hopper",
-  username: "grace",
+  username: "@grace",
   media: [],
   text: "A text-only tweet.",
 })
 const LINUS = makePost({
   tweet_id: "3",
   author: "Linus Torvalds",
-  username: "linus",
+  username: "@linus",
   media: [pbsUrl("c1")],
   text: "One image.",
 })

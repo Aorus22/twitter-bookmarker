@@ -1,5 +1,5 @@
 import { ClampedPostText } from "@/components/gallery/clamped-post-text"
-import { formatLightboxMeta } from "@/lib/post-meta"
+import { displayHandle, formatLightboxMeta } from "@/lib/post-meta"
 import {
   LIGHTBOX_CLOSE_LABEL,
   OPEN_ON_X_LABEL,
@@ -71,7 +71,7 @@ export function LightboxInfoPanel({
         data-testid="lightbox-username"
         className="text-[10px] leading-[1.4] text-muted"
       >
-        @{post.username}
+        {displayHandle(post.username)}
       </p>
 
       <ClampedPostText variant="lightbox" text={post.text} className="mt-4" />

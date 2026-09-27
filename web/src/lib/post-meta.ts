@@ -43,6 +43,23 @@ export function formatPostMeta(
   return parts.join(" · ")
 }
 
+/**
+ * Render a stored `username` as exactly one `@handle`.
+ *
+ * The extension's `getUsername` already includes the sigil (`return "@" + name`)
+ * and PRD-2 §36 documents the stored value as `"username": "@foo"`, so the UI
+ * prepending its own `@` rendered `@@foo` for every real bookmark. The jsdom
+ * fixtures happened to use bare names ("tester"), which is why the unit tests
+ * never caught it — only rendering real CSV data in a browser did.
+ *
+ * Accepts both forms so hand-written or legacy CSVs keep working, and returns an
+ * empty string for a missing handle rather than a bare `@`.
+ */
+export function displayHandle(username: string): string {
+  const handle = username.trim().replace(/^@+/, "")
+  return handle === "" ? "" : `@${handle}`
+}
+
 /** The three meta lines the lightbox info panel renders (design spec §3.5). */
 export interface LightboxMetaLines {
   /** `Posted Mar 12, 2026` — the tweet's date, year always present. */

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { flattenMediaSlots, slotAt } from "@/lib/lightbox"
+import { displayHandle } from "@/lib/post-meta"
 import {
   LIGHTBOX_KEYBOARD_HINT,
   LIGHTBOX_NEXT_LABEL,
@@ -73,9 +74,10 @@ function describeMediaAlt(
   mediaIndex: number,
   mediaTotal: number
 ): string {
+  const handle = displayHandle(username)
   return mediaTotal === 1
-    ? `Media from @${username}`
-    : `Media ${mediaIndex + 1} of ${mediaTotal} from @${username}`
+    ? `Media from ${handle}`
+    : `Media ${mediaIndex + 1} of ${mediaTotal} from ${handle}`
 }
 
 const CONTROL_CLASS =
@@ -165,7 +167,7 @@ export function MediaLightbox({
         <DialogTitle className="sr-only">
           {slot === undefined || post === undefined
             ? LIGHTBOX_TITLE_PREFIX
-            : `${LIGHTBOX_TITLE_PREFIX} ${post.author} (@${post.username})`}
+            : `${LIGHTBOX_TITLE_PREFIX} ${post.author} (${displayHandle(post.username)})`}
         </DialogTitle>
         <DialogDescription className="sr-only">
           {LIGHTBOX_KEYBOARD_HINT}

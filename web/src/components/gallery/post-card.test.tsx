@@ -21,7 +21,7 @@ describe("PostCard — media post", () => {
         post={makePost({
           tweet_id: "100",
           author: "Ada Lovelace",
-          username: "ada",
+          username: "@ada",
           media: [pbsUrl("a")],
           text: "A saved tweet about Linux.",
         })}
@@ -61,7 +61,7 @@ describe("PostCard — media post", () => {
     render(
       <PostCard
         now={POST_NOW}
-        post={makePost({ tweet_id: "102", username: "ada" })}
+        post={makePost({ tweet_id: "102", username: "@ada" })}
       />
     )
 
@@ -76,7 +76,7 @@ describe("PostCard — media post", () => {
     render(
       <PostCard
         now={POST_NOW}
-        post={makePost({ tweet_id: "103", username: "ada" })}
+        post={makePost({ tweet_id: "103", username: "@ada" })}
       />
     )
 
@@ -132,7 +132,7 @@ describe("PostCard — media post", () => {
         post={makePost({
           tweet_id: "106",
           author: "Ada Lovelace",
-          username: "ada",
+          username: "@ada",
           media: [pbsUrl("broken")],
           text: "Still readable.",
         })}
@@ -164,7 +164,7 @@ describe("PostCard — text-only post (COLL-05)", () => {
         post={makePost({
           tweet_id: "200",
           author: "Ada Lovelace",
-          username: "ada",
+          username: "@ada",
           media: [],
           text: "Interesting thread about Linux.",
         })}
@@ -192,7 +192,7 @@ describe("PostCard — text-only post (COLL-05)", () => {
         now={POST_NOW}
         post={makePost({
           tweet_id: "201",
-          username: "ada",
+          username: "@ada",
           media: [],
           text: "Interesting thread about Linux.",
         })}
@@ -222,5 +222,24 @@ describe("PostCard — text-only post (COLL-05)", () => {
     expect(screen.getByTestId("post-text").className).toContain("line-clamp")
     await user.click(screen.getByTestId("post-text-toggle"))
     expect(screen.getByTestId("post-text").className).not.toContain("line-clamp")
+  })
+})
+
+describe("PostCard — the stored handle keeps its single sigil", () => {
+  // Regression guard for a bug only visible with real CSV data: the extension
+  // stores the handle as "@linuxguy" (tweet-extractor's getUsername), and the
+  // card used to prepend its own "@", rendering "@@linuxguy" on every real
+  // bookmark. The fixtures are sigiled now, so this also guards the fixtures.
+  it("renders exactly one @ for a stored handle", () => {
+    render(<PostCard post={makePost({ tweet_id: "1", username: "@linuxguy" })} />)
+
+    expect(screen.getByText("@linuxguy")).toBeInTheDocument()
+    expect(screen.queryByText("@@linuxguy")).toBeNull()
+  })
+
+  it("still accepts a bare handle from a hand-written CSV", () => {
+    render(<PostCard post={makePost({ tweet_id: "2", username: "linuxguy" })} />)
+
+    expect(screen.getByText("@linuxguy")).toBeInTheDocument()
   })
 })

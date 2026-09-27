@@ -3,7 +3,7 @@ import { PostMediaGrid } from "@/components/gallery/post-media-grid"
 import { TextPostCard } from "@/components/gallery/text-post-card"
 import { OPEN_ON_X_LABEL } from "@/lib/messages"
 import { pickPlaceholderGradient } from "@/lib/placeholder"
-import { formatPostMeta } from "@/lib/post-meta"
+import { displayHandle, formatPostMeta } from "@/lib/post-meta"
 import type { GalleryPost } from "@/types"
 
 /**
@@ -49,10 +49,11 @@ export function PostCard({ post, now, onOpenMedia }: PostCardProps) {
   const meta = formatPostMeta(post, now === undefined ? {} : { now })
   const avatar = pickPlaceholderGradient(post.username)
 
+  const handle = displayHandle(post.username)
   const describeAlt = (index: number, total: number) =>
     total === 1
-      ? `Media from @${post.username}`
-      : `Media ${index + 1} of ${total} from @${post.username}`
+      ? `Media from ${handle}`
+      : `Media ${index + 1} of ${total} from ${handle}`
 
   return (
     <article
@@ -83,7 +84,7 @@ export function PostCard({ post, now, onOpenMedia }: PostCardProps) {
             {post.author}
           </p>
           <p className="truncate text-[9px] leading-[1.4] text-muted">
-            @{post.username}
+            {handle}
           </p>
         </div>
       </div>

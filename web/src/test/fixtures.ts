@@ -24,9 +24,11 @@ export const POST_SAVED_AT = new Date(2026, 3, 3, 12, 0, 0).toISOString()
 export function makePost(
   overrides: Partial<GalleryPost> & { tweet_id: string }
 ): GalleryPost {
-  const username = overrides.username ?? "tester"
+  // Real CSVs store the sigil (extension `getUsername` returns "@foo"), so the
+  // default fixture carries it too — a bare "tester" once hid a `@@handle` bug.
+  const username = overrides.username ?? "@tester"
   return {
-    url: `https://x.com/${username}/status/${overrides.tweet_id}`,
+    url: `https://x.com/${username.replace(/^@+/, "")}/status/${overrides.tweet_id}`,
     media: [],
     author: "Test Author",
     username,

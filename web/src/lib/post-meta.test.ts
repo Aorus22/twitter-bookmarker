@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { formatPostMeta } from "./post-meta"
+import { displayHandle, formatPostMeta } from "./post-meta"
 
 const NOW = new Date(2026, 3, 3, 12, 0, 0)
 
@@ -40,5 +40,33 @@ describe("formatPostMeta (PRD-2 §23, design spec §3.3)", () => {
         { now: NOW, locale: "en-US" }
       )
     ).toBe("Mar 12, 2026")
+  })
+})
+
+describe("displayHandle (the stored handle already carries its sigil)", () => {
+  // The extension's getUsername returns "@foo" and PRD-2 §36 documents the
+  // stored value as "@foo". Prepending another "@" at the render boundary
+  // produced "@@foo" on every real card — invisible to the old fixtures, which
+  // used a bare "tester".
+  it("does not double the sigil on the stored form", () => {
+    expect(displayHandle("@linuxguy")).toBe("@linuxguy")
+  })
+
+  it("adds the sigil to a bare handle", () => {
+    expect(displayHandle("linuxguy")).toBe("@linuxguy")
+  })
+
+  it("collapses a repeated sigil to exactly one", () => {
+    expect(displayHandle("@@linuxguy")).toBe("@linuxguy")
+  })
+
+  it("trims surrounding whitespace", () => {
+    expect(displayHandle("  @linuxguy  ")).toBe("@linuxguy")
+  })
+
+  it("renders nothing for a missing handle instead of a bare sigil", () => {
+    expect(displayHandle("")).toBe("")
+    expect(displayHandle("   ")).toBe("")
+    expect(displayHandle("@")).toBe("")
   })
 })

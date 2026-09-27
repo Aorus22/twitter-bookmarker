@@ -61,8 +61,15 @@ export interface SaveControllerOptions {
    * `unbookmarkAfterSave` decision; Phase 4 never branches on it.
    */
   settings: Settings | (() => Settings);
-  /** Invoked exactly once after a confirmed `201` — never for `409`/failure. */
-  onSaved: (context: SavedTweetContext) => void;
+  /**
+   * Invoked exactly once after a confirmed `201` — never for `409`/failure.
+   *
+   * Phase 5 uses this to run the verified native unbookmark. The return value
+   * may be a promise; the controller intentionally does **not** await it (see
+   * the `201` branch), so the in-flight guard and the organizer state are never
+   * held hostage by the destructive click.
+   */
+  onSaved: (context: SavedTweetContext) => void | Promise<void>;
   /**
    * Signalled when the save-time extraction fails (PRD §40). The controller
    * independently toasts `Could not read tweet data`, so this hook is for
@@ -131,10 +138,30 @@ export function createSaveController(options: SaveControllerOptions): OrganizerC
     }
 
     if (response.ok && response.result) {
+      // Ordering is part of the contract (PRD §4.2, §37): the tweet is already
+      // persisted and rendered as `✓ Saved` *before* any unbookmark is even
+      // attempted. The persisted state is never touched again below, so the
+      // window between CSV success and an unbookmark failure can never alter it.
       setSaved(tweetId);
       toast("success", savedToast(category.name));
+
+      // `onSaved` carries the Phase-5 verified unbookmark. It is deliberately
+      // fired without an `await`: the in-flight guard must be released
+      // independently of the unbookmark await (a verification can take ~2s),
+      // and `✓ Saved` / the success toast above must not be delayed by it.
+      // Any rejection is swallowed here — the hook itself also never throws.
       try {
-        options.onSaved({ article, tweetId, category, savedAt: response.result.saved_at });
+        const hook = options.onSaved({
+          article,
+          tweetId,
+          category,
+          savedAt: response.result.saved_at,
+        });
+        if (hook && typeof (hook as PromiseLike<void>).then === "function") {
+          void Promise.resolve(hook).catch((error: unknown) => {
+            console.warn("[twitter-bookmarker] post-save hook rejected", error);
+          });
+        }
       } catch (error) {
         // A Phase-5 hook must never break the save flow.
         console.warn("[twitter-bookmarker] post-save hook failed", error);

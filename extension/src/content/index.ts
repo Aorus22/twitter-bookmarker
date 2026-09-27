@@ -1,13 +1,14 @@
 /**
- * X bookmarks content script — bootstrap (Phase 4).
+ * X bookmarks content script — bootstrap (Phase 4 + Phase 5).
  *
  * Wires the SPA route watcher to the bookmarks-page lifecycle, supplies the real
  * save controller as `onSelect`, routes extraction failures to a toast, and
  * subscribes to `chrome.storage.onChanged` so visible controls re-render without
  * a reload (PRD §26, §40, §51).
  *
- * `onSaved` is deliberately a logged no-op: the tweet is confirmed in the CSV
- * before it is invoked, and Phase 5 owns the native X unbookmark click behind it.
+ * `onSaved` is the one place auto-unbookmark lives (PRD §37, §38). It is invoked
+ * by the save controller only after a confirmed `201`, gated on
+ * `settings.unbookmarkAfterSave`, and never rolls back a confirmed save.
  */
 
 import { DEFAULT_SETTINGS } from "../shared/constants.ts";
@@ -22,27 +23,82 @@ import { createSaveController } from "./save-controller.ts";
 import type { SavedTweetContext } from "./save-controller.ts";
 import { watchRoute } from "./route.ts";
 import { showToast } from "./toast.ts";
+import type { ToastKind } from "./toast.ts";
 import { EXTRACTION_ERROR } from "./tweet-extractor.ts";
+import { unbookmarkTweet } from "./unbookmark.ts";
+import type { UnbookmarkResult } from "./unbookmark.ts";
 
 /**
- * Latest known settings. The controller only reads this through the Phase-5
- * unbookmark seam; keeping it fresh here means the toggle is never stale when
- * Phase 5 lands.
+ * Latest known settings. Kept fresh here so the `unbookmarkAfterSave` gate is
+ * never stale when the user flips the toggle.
  */
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 
+/** Warning copy when the CSV write succeeded but X still holds the bookmark (PRD §38). */
+export function unbookmarkFailedToast(categoryName: string): string {
+  return `Saved to ${categoryName}, but failed to remove from X bookmarks`;
+}
+
+/** Dependencies for {@link createSavedHook}; injected so the gate is unit-testable. */
+export interface SavedHookDeps {
+  /** Reads the live settings at click resolution time. */
+  settings: () => Settings;
+  /** The verified native unbookmark; defaults to {@link unbookmarkTweet} in wiring. */
+  unbookmark: (article: HTMLElement) => Promise<UnbookmarkResult>;
+  /** Toast surface for the warning copy. */
+  toast: (kind: ToastKind, message: string) => void;
+  /** Diagnostic sink for an unexpected verification throw. */
+  onVerificationError?: (error: unknown) => void;
+}
+
 /**
- * Post-success hook — Phase 5 fills this in with the verified unbookmark click.
- * Phase 4 only records the confirmed save, and only ever calls this after a
- * `201`.
+ * Build the post-success hook: the only auto-unbookmark entry point (PRD §37).
+ *
+ * The gate is deliberately first: with `unbookmarkAfterSave === false` the
+ * native bookmark control is never queried, observed, or clicked (UNB-01).
+ * When enabled, a `"failed"` verification or an unexpected throw emits the
+ * warning toast and leaves CSV/index/`✓ Saved` untouched (UNB-03). Nothing in
+ * this hook ever rolls back or re-enables controls, and it never rethrows.
  */
-function onSaved(context: SavedTweetContext): void {
-  const note = currentSettings.unbookmarkAfterSave
-    ? "auto-unbookmark requested (Phase 5)"
-    : "auto-unbookmark disabled";
+export function createSavedHook(deps: SavedHookDeps): (context: SavedTweetContext) => Promise<void> {
+  return async (context: SavedTweetContext): Promise<void> => {
+    // UNB-01 gate: setting off means zero bookmark-control interaction.
+    if (!deps.settings().unbookmarkAfterSave) return;
+
+    const warning = unbookmarkFailedToast(context.category.name);
+    try {
+      const outcome = await deps.unbookmark(context.article);
+      // UNB-03: "removed" needs nothing further. "failed" warns and changes
+      // nothing else — the save already happened and is never rolled back.
+      if (outcome === "failed") deps.toast("warning", warning);
+    } catch (error) {
+      // A verification error must never change persisted state or escape into
+      // the save controller.
+      deps.onVerificationError?.(error);
+      deps.toast("warning", warning);
+    }
+  };
+}
+
+const runSavedHook = createSavedHook({
+  settings: () => currentSettings,
+  unbookmark: unbookmarkTweet,
+  toast: showToast,
+  onVerificationError: (error) => {
+    console.warn("[twitter-bookmarker] unbookmark verification threw", error);
+  },
+});
+
+/**
+ * Post-success hook — invoked by the save controller exactly once, only after a
+ * confirmed `201` (UNB-01). The save is logged, then the gated unbookmark runs;
+ * the controller does not await it.
+ */
+function onSaved(context: SavedTweetContext): Promise<void> {
   console.info(
-    `[twitter-bookmarker] saved tweet ${context.tweetId} to "${context.category.name}" at ${context.savedAt} (${note})`,
+    `[twitter-bookmarker] saved tweet ${context.tweetId} to "${context.category.name}" at ${context.savedAt}`,
   );
+  return runSavedHook(context);
 }
 
 /**
@@ -93,4 +149,8 @@ function bootstrap(): void {
   }
 }
 
-bootstrap();
+// Importing this module under `node --test` must not start the page lifecycle;
+// the extension context always has both globals.
+if (typeof chrome !== "undefined" && typeof document !== "undefined") {
+  bootstrap();
+}

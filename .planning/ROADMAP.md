@@ -23,7 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Extension Foundation & Settings Popup** - MV3 scaffold, `chrome.storage.local` model, popup category CRUD/colors/ordering, and settings (completed 2026-09-27)
 - [x] **Phase 3: X DOM Integration** - Route detection, MutationObserver, tweet extraction, and popover/inline organizer UI on `/i/bookmarks` (completed 2026-09-27)
 - [x] **Phase 4: Save Integration** - Content script → service worker messaging, backend HTTP, saving state, saved marker, and toasts (completed 2026-09-27)
-- [ ] **Phase 5: Auto Unbookmark** - Verified native X unbookmark strictly after a confirmed CSV write
+- [x] **Phase 5: Auto Unbookmark** - Verified native X unbookmark strictly after a confirmed CSV write (completed 2026-09-27)
 - [ ] **Phase 6: Hardening, Tests & Docs** - Edge-case hardening, automated tests, build tooling, and documentation
 
 ## Phase Details
@@ -122,8 +122,8 @@ Plans:
 
 Plans:
 
-- [ ] 05-01: Native unbookmark trigger + state-change verification
-- [ ] 05-02: Failure handling, warning toast, and invariant guards
+- [x] 05-01: Native unbookmark trigger + state-change verification
+- [x] 05-02: Failure handling, warning toast, and invariant guards
 
 ### Phase 6: Hardening, Tests & Docs
 
@@ -156,5 +156,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Extension Foundation & Settings Popup | 3/3 | Complete    | 2026-09-27 |
 | 3. X DOM Integration | 3/3 | Complete    | 2026-09-27 |
 | 4. Save Integration | 2/2 | Complete    | 2026-09-27 |
-| 5. Auto Unbookmark | 0/2 | Not started | - |
+| 5. Auto Unbookmark | 2/2 | Complete    | 2026-09-27 |
 | 6. Hardening, Tests & Docs | 0/3 | Not started | - |

@@ -70,9 +70,9 @@ Requirements for the initial MVP. Each maps to a roadmap phase.
 
 ### Auto Unbookmark
 
-- [ ] **UNB-01**: Native X unbookmark is triggered only after a confirmed `201` from the backend
-- [ ] **UNB-02**: After clicking the native bookmark control, the extension verifies the bookmark state actually changed
-- [ ] **UNB-03**: A failed unbookmark shows "Saved to <Category>, but failed to remove from X bookmarks", keeps CSV + index + `✓ Saved`, and never rolls back data
+- [x] **UNB-01**: Native X unbookmark is triggered only after a confirmed `201` from the backend
+- [x] **UNB-02**: After clicking the native bookmark control, the extension verifies the bookmark state actually changed
+- [x] **UNB-03**: A failed unbookmark shows "Saved to <Category>, but failed to remove from X bookmarks", keeps CSV + index + `✓ Saved`, and never rolls back data
 
 ### Hardening & Tests
 
@@ -157,9 +157,9 @@ Deferred to a future release. Tracked but not in the current roadmap.
 | SAVE-05 | Phase 4 | Complete |
 | SAVE-06 | Phase 4 | Complete |
 | SAVE-07 | Phase 4 | Complete |
-| UNB-01 | Phase 5 | Pending |
-| UNB-02 | Phase 5 | Pending |
-| UNB-03 | Phase 5 | Pending |
+| UNB-01 | Phase 5 | Complete |
+| UNB-02 | Phase 5 | Complete |
+| UNB-03 | Phase 5 | Complete |
 | TEST-01 | Phase 6 | Pending |
 | TEST-02 | Phase 6 | Pending |
 | TEST-03 | Phase 6 | Pending |

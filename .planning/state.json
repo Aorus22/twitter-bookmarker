@@ -11,7 +11,7 @@
     {
       "number": "2",
       "name": "Gallery HTTP API",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "3",
@@ -56,8 +56,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step (plan phase 02)",
-    "reason": "Phase 02 of 10 — needs a plan"
+    "label": "Advance to the next step (plan phase 03)",
+    "reason": "Phase 03 of 10 — needs a plan"
   },
-  "updated_at": "2026-09-27T14:43:24.743Z"
+  "updated_at": "2026-09-27T14:51:32.894Z"
 }

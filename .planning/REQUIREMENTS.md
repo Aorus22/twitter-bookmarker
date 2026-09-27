@@ -31,13 +31,13 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### API — Gallery HTTP API (Phase 2, PRD §36–§41, §54)
 
-- [ ] **API-01**: `GET /api/gallery/collections` returns `{"collections":[{filename,name,post_count,media_count,last_saved_at,cover_media}]}` for all valid collections
-- [ ] **API-02**: `GET /api/gallery/collections/{filename}/posts` accepts `cursor`, `limit`, `q`, `tweet_from`, `tweet_to`, `saved_from`, `saved_to`, and `sort`
-- [ ] **API-03**: The posts response shape is `{"items":[{tweet_id,url,media,author,username,tweet_date,saved_at,text}],"next_cursor","has_more"}`, with `next_cursor: null` and `has_more: false` at the end
-- [ ] **API-04**: `limit` is validated with a default of 30 and a maximum of 100; invalid query values return `400`
-- [ ] **API-05**: An unknown collection returns `404`; filesystem/internal failures return `500`; error bodies are `{"status":"error","reason":"..."}` and never expose absolute home paths or sensitive filesystem information
-- [ ] **API-06**: Existing `GET /health`, `GET /v1/index`, and `POST /v1/bookmarks` keep their exact v1.0 contracts
-- [ ] **API-07**: The gallery API is read-only — no gallery route mutates CSVs, the index, or user data
+- [x] **API-01**: `GET /api/gallery/collections` returns `{"collections":[{filename,name,post_count,media_count,last_saved_at,cover_media}]}` for all valid collections
+- [x] **API-02**: `GET /api/gallery/collections/{filename}/posts` accepts `cursor`, `limit`, `q`, `tweet_from`, `tweet_to`, `saved_from`, `saved_to`, and `sort`
+- [x] **API-03**: The posts response shape is `{"items":[{tweet_id,url,media,author,username,tweet_date,saved_at,text}],"next_cursor","has_more"}`, with `next_cursor: null` and `has_more: false` at the end
+- [x] **API-04**: `limit` is validated with a default of 30 and a maximum of 100; invalid query values return `400`
+- [x] **API-05**: An unknown collection returns `404`; filesystem/internal failures return `500`; error bodies are `{"status":"error","reason":"..."}` and never expose absolute home paths or sensitive filesystem information
+- [x] **API-06**: Existing `GET /health`, `GET /v1/index`, and `POST /v1/bookmarks` keep their exact v1.0 contracts
+- [x] **API-07**: The gallery API is read-only — no gallery route mutates CSVs, the index, or user data
 
 ### WEB — Web Scaffold, Theme & API Client (Phase 3, PRD §13, §14, §55, §72)
 
@@ -169,13 +169,13 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | GAL-14 | 1 — Gallery Read Layer | Complete |
 | GAL-15 | 1 — Gallery Read Layer | Complete |
 | GAL-16 | 1 — Gallery Read Layer | Complete |
-| API-01 | 2 — Gallery HTTP API | Pending |
-| API-02 | 2 — Gallery HTTP API | Pending |
-| API-03 | 2 — Gallery HTTP API | Pending |
-| API-04 | 2 — Gallery HTTP API | Pending |
-| API-05 | 2 — Gallery HTTP API | Pending |
-| API-06 | 2 — Gallery HTTP API | Pending |
-| API-07 | 2 — Gallery HTTP API | Pending |
+| API-01 | 2 — Gallery HTTP API | Complete |
+| API-02 | 2 — Gallery HTTP API | Complete |
+| API-03 | 2 — Gallery HTTP API | Complete |
+| API-04 | 2 — Gallery HTTP API | Complete |
+| API-05 | 2 — Gallery HTTP API | Complete |
+| API-06 | 2 — Gallery HTTP API | Complete |
+| API-07 | 2 — Gallery HTTP API | Complete |
 | WEB-01 | 3 — Web Scaffold, Theme & API Client | Pending |
 | WEB-02 | 3 — Web Scaffold, Theme & API Client | Pending |
 | WEB-03 | 3 — Web Scaffold, Theme & API Client | Pending |

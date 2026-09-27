@@ -24,7 +24,7 @@ The backend and the web app are deliberately kept in separate phases so each can
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: Gallery Read Layer** - A dedicated `backend/internal/gallery/` module that turns CSVs into collection summaries and paginated, filtered, searched, sorted posts (completed 2026-09-27)
-- [ ] **Phase 2: Gallery HTTP API** - `GET /api/gallery/collections` and `GET /api/gallery/collections/{filename}/posts` with validation, 404/400/500 semantics, and path-traversal rejection, alongside an unchanged `/v1/*` (PRD §2.2; PRD §36–§41, §54)
+- [x] **Phase 2: Gallery HTTP API** - `GET /api/gallery/collections` and `GET /api/gallery/collections/{filename}/posts` with validation, 404/400/500 semantics, and path-traversal rejection, alongside an unchanged `/v1/*` (PRD §2.2; PRD §36–§41, §54) (completed 2026-09-27)
 - [ ] **Phase 3: Web Scaffold, Theme & API Client** - The `web/` app created with the official shadcn Vite CLI, wired with routing, the v2 Editorial design tokens, light/dark/system theme, the Vite `/api` proxy, and a typed relative-URL API client (PRD §2.3; PRD §13, §14, §55, §72)
 - [ ] **Phase 4: Gallery Homepage** - Collection cards with cover collages, counts, last-bookmarked dates, empty/no-media/broken-image handling, skeletons and retry (PRD §2.4; PRD §16, §17, §38, §59, §61, §62)
 - [ ] **Phase 5: Collection Gallery** - Pinterest-style masonry of post cards with adaptive multi-media grids, text-only cards, full metadata, and Open on X (PRD §2.5; PRD §18–§25, §60, §73)
@@ -191,7 +191,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gallery Read Layer | 1/1 | Complete    | 2026-09-27 |
-| 2. Gallery HTTP API | 0/TBD | Not started | - |
+| 2. Gallery HTTP API | 1/1 | Complete    | 2026-09-27 |
 | 3. Web Scaffold, Theme & API Client | 0/TBD | Not started | - |
 | 4. Gallery Homepage | 0/TBD | Not started | - |
 | 5. Collection Gallery | 0/TBD | Not started | - |

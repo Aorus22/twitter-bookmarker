@@ -142,6 +142,12 @@
   --destructive: #ff8b7d;
   --destructive-foreground: #161319;
   --sidebar-primary-foreground: #161319;
+
+  /* The spec's --grad-hero is a light cream panel (spec §2.6). On the dark page
+   * that would put white `--ink` text on cream, so the derived dark frame (§2.2)
+   * needs a dark hero panel; this is the one token the dark mockup does not
+   * define. Kept as a violet-tinted elevation of the dark surface. */
+  --grad-hero: linear-gradient(135deg, #2a2230, #3a2940);
 }
 
 /* ============================================================================

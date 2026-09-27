@@ -7,6 +7,7 @@
  * backend (`web/vite.config.ts`); in production the Go server serves both the
  * SPA and the API from the same origin (PRD-2 §56).
  */
+import { COULD_NOT_CONNECT_MESSAGE } from "@/lib/messages"
 import type {
   GalleryCollection,
   GalleryCollectionListResponse,
@@ -17,10 +18,6 @@ import { ApiError } from "./errors"
 
 /** Relative mount point of the gallery API. */
 export const GALLERY_API_BASE = "/api/gallery"
-
-/** Copy from PRD-2 §61 for the "backend down" case. */
-const BACKEND_UNREACHABLE_REASON =
-  "Could not connect to Twitter Bookmarker backend"
 
 const MALFORMED_RESPONSE_REASON = "Backend returned an unexpected response"
 
@@ -60,7 +57,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(path, init)
   } catch (cause) {
-    throw new ApiError(BACKEND_UNREACHABLE_REASON, 0, { cause })
+    throw new ApiError(COULD_NOT_CONNECT_MESSAGE, 0, { cause })
   }
 
   if (!response.ok) {

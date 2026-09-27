@@ -1,6 +1,6 @@
 ---
 gsd_state_version: "1.0"
-milestone: "1.0"
+milestone: 1.0
 current_phase: 6
 current_phase_name: Hardening, Tests & Docs
 status: completed
@@ -13,7 +13,7 @@ progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 16
-  completed_plans: 6
+  completed_plans: 16
   percent: 100
 milestone_name: MVP
 ---

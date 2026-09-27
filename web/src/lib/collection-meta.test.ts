@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { formatCollectionMeta, formatCount } from "./collection-meta"
+import {
+  formatCollectionCounts,
+  formatCollectionMeta,
+  formatCount,
+} from "./collection-meta"
 
 const NOW = new Date(2026, 8, 28, 12, 0, 0)
 const SAVED_AT = new Date(2026, 8, 27, 12, 0, 0).toISOString()
@@ -49,5 +53,25 @@ describe("formatCollectionMeta", () => {
         { now: NOW, locale: "en-US" }
       )
     ).toBe("1 post · 1 media · Last saved Sep 27")
+  })
+})
+
+describe("formatCollectionCounts", () => {
+  it("renders the collection-header counts line (design spec §3.3)", () => {
+    expect(
+      formatCollectionCounts({ post_count: 186, media_count: 220 })
+    ).toBe("186 posts ◫ 220 media")
+  })
+
+  it("singularises a one-post, one-media collection", () => {
+    expect(formatCollectionCounts({ post_count: 1, media_count: 1 })).toBe(
+      "1 post ◫ 1 media"
+    )
+  })
+
+  it("renders zeros for a postless collection without a date segment", () => {
+    expect(formatCollectionCounts({ post_count: 0, media_count: 0 })).toBe(
+      "0 posts ◫ 0 media"
+    )
   })
 })

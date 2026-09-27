@@ -38,3 +38,27 @@ export function formatCollectionMeta(
     formatLastSaved(collection.last_saved_at, options),
   ].join(" · ")
 }
+
+/** The subset of a collection the header counts line needs. */
+export type CollectionCountsSource = Pick<
+  GalleryCollection,
+  "post_count" | "media_count"
+>
+
+/**
+ * The collection-page header meta (design spec §3.3, frame `6:121`):
+ *
+ *   `186 posts ◫ 220 media`
+ *
+ * The mockup's `◫` glyph separates the two counts and the design's third
+ * (description) line is omitted by spec §7, so the header shows only counts.
+ * Reuses {@link formatCount} so `1 post` never becomes `1 posts`.
+ */
+export function formatCollectionCounts(
+  collection: CollectionCountsSource
+): string {
+  return [
+    formatCount(collection.post_count, "post"),
+    formatCount(collection.media_count, "media", "media"),
+  ].join(" ◫ ")
+}

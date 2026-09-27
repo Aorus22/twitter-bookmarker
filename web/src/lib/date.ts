@@ -52,6 +52,29 @@ export function formatLocalDate(
   ).format(date)
 }
 
+/**
+ * `Mar 12, 2026` — local date with the year always present.
+ *
+ * The post-card meta row (design spec §3.3) shows the tweet date with its year
+ * (`Mar 12, 2026`) while the bookmark date stays compact (`Saved Apr 3`), so
+ * this sibling of {@link formatLocalDate} forces the year instead of inferring
+ * it. Returns `""` for a missing/invalid value.
+ */
+export function formatLocalFullDate(
+  value: string | Date | null | undefined,
+  options: DateFormatOptions = {}
+): string {
+  const date = toLocalDate(value)
+  if (date === null) {
+    return ""
+  }
+
+  return new Intl.DateTimeFormat(options.locale, {
+    ...MONTH_DAY,
+    year: "numeric",
+  }).format(date)
+}
+
 /** `Sep 27, 2025, 2:31 PM` — local date + time, for Phases 5–8 metadata rows. */
 export function formatLocalDateTime(
   value: string | Date | null | undefined,

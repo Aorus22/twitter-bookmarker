@@ -23,3 +23,34 @@ export const NO_COLLECTIONS_MESSAGE =
 
 /** PRD-2 §61 — the retry action label. */
 export const RETRY_LABEL = "Retry"
+
+/** PRD-2 §60 — a valid collection that contains no posts. */
+export const EMPTY_COLLECTION_TITLE = "This collection is empty"
+
+/** Design spec §3.6 — the supporting line for the empty-collection state. */
+export const EMPTY_COLLECTION_MESSAGE =
+  "This folder is quiet. The next bookmark will bring it to life."
+
+/** PRD-2 §60 — zero results because the active filters match nothing. */
+export const NO_FILTER_MATCH_TITLE = "No posts match your filters"
+
+/** PRD-2 §60 — the action that clears the active filters. */
+export const CLEAR_FILTERS_LABEL = "Clear filters"
+
+/** Design spec §3.3 — the collection page back link. */
+export const BACK_TO_COLLECTIONS_LABEL = "← Collections"
+
+/** Design spec §3.3 — the collection toolbar search placeholder. */
+export const COLLECTION_SEARCH_PLACEHOLDER = "⌕ Search this collection…"
+
+/** Design spec §3.3 — the filter control label. */
+export const FILTER_LABEL = "Filter"
+
+/** PRD-2 §24 — the link that opens the original post on X. */
+export const OPEN_ON_X_LABEL = "Open on X ↗"
+
+/** PRD-2 §23 — the controlled-clamp affordance. */
+export const SHOW_MORE_LABEL = "Show more"
+
+/** The inverse of {@link SHOW_MORE_LABEL}, once the text is expanded. */
+export const SHOW_LESS_LABEL = "Show less"

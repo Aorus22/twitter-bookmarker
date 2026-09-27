@@ -4,6 +4,7 @@ import {
   formatLastSaved,
   formatLocalDate,
   formatLocalDateTime,
+  formatLocalFullDate,
   NO_SAVES_YET,
 } from "./date"
 
@@ -74,5 +75,18 @@ describe("formatLocalDateTime", () => {
 
   it("returns an empty string for an invalid value", () => {
     expect(formatLocalDateTime("nope")).toBe("")
+  })
+})
+
+describe("formatLocalFullDate", () => {
+  it("always includes the year, even for the current year (design spec §3.3)", () => {
+    expect(
+      formatLocalFullDate(new Date(2026, 2, 12, 12, 0, 0), { locale: "en-US" })
+    ).toBe("Mar 12, 2026")
+  })
+
+  it("returns an empty string for a missing or invalid value", () => {
+    expect(formatLocalFullDate(null)).toBe("")
+    expect(formatLocalFullDate("not-a-date")).toBe("")
   })
 })

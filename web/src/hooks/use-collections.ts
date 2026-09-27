@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 
-import { fetchCollections, isApiError } from "@/lib/api"
+import { fetchCollections } from "@/lib/api"
 import { orderCollections } from "@/lib/collection-order"
-import {
-  COULD_NOT_CONNECT_MESSAGE,
-  COULD_NOT_LOAD_COLLECTION_MESSAGE,
-} from "@/lib/messages"
+import { describeGalleryError } from "@/lib/error-message"
 import type { GalleryCollection } from "@/types"
 
 /**
@@ -46,24 +43,9 @@ const INITIAL_STATE: CollectionsState = {
 }
 
 /**
- * Map a failure to the exact PRD-2 §61 copy.
- *
- * A transport failure (status `0`, i.e. the backend is not running) carries the
- * §61 connection message from the API client. Every other gallery API failure
- * renders the §61 gallery-error copy. Anything that is not an `ApiError` at all
- * still renders that same copy rather than leaking an internal message.
+ * Map a failure to the exact PRD-2 §61 copy (shared with the posts hook so the
+ * two pages cannot drift).
  */
-function describeError(error: unknown): string {
-  if (isApiError(error)) {
-    if (error.isNetworkError) {
-      return error.reason.trim() !== ""
-        ? error.reason
-        : COULD_NOT_CONNECT_MESSAGE
-    }
-    return COULD_NOT_LOAD_COLLECTION_MESSAGE
-  }
-  return COULD_NOT_LOAD_COLLECTION_MESSAGE
-}
 
 export function useCollections(): UseCollectionsResult {
   const [requestId, setRequestId] = useState(0)
@@ -115,7 +97,8 @@ export function useCollections(): UseCollectionsResult {
     collections: state.collections,
     status: state.status,
     error: state.error,
-    errorMessage: state.status === "error" ? describeError(state.error) : "",
+    errorMessage:
+      state.status === "error" ? describeGalleryError(state.error) : "",
     refetch,
   }
 }

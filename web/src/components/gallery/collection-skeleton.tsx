@@ -26,12 +26,17 @@ export function CollectionCardSkeleton() {
 export interface MasonrySkeletonProps {
   /** Number of placeholder cards; the default fills a 1312px row plus slack. */
   count?: number
+  /** Accessible label; the collection page announces `Loading posts`. */
+  label?: string
 }
 
-export function MasonrySkeleton({ count = 8 }: MasonrySkeletonProps) {
+export function MasonrySkeleton({
+  count = 8,
+  label = "Loading collections",
+}: MasonrySkeletonProps) {
   return (
-    <div role="status" aria-label="Loading collections">
-      <span className="sr-only">Loading collections…</span>
+    <div role="status" aria-label={label}>
+      <span className="sr-only">{label}…</span>
       <ul aria-hidden="true" className="flex flex-wrap gap-[18px]">
         {Array.from({ length: count }, (_, index) => (
           <CollectionCardSkeleton key={index} />

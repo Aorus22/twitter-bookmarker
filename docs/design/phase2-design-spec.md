@@ -234,8 +234,31 @@ has no backing CSV column — so it must not be rendered.
    - `Filter` button `86×40` `r12` `surface`+border with a filter glyph
    - `Sort: Newest ▾` control `150×40` `r12`
 4. **Masonry** starting y=448: 4 columns of cards `292` wide, horizontal gap `32px`
-   (388−64−292), vertical gap `~24px`, true masonry (cards start at differing offsets and have
+   (388−64−292), vertical gap `22px` (verified: card tops 448→970 for a 500-tall card, and
+   448→1035 for a 565-tall card), true masonry (cards start at differing offsets and have
    natural heights — the mockup shows tops at 448/900/950/970/1035).
+
+**Spec validated against Figma** (2026-09-27, structural extraction of frames `6:121`
+"02 · Collection / Editorial Desktop" 1440×1440, `6:236` "03 · Filter Open / Editorial", and
+`6:594` "07 · Product States / Editorial" 1440×900):
+
+| Measurement | Figma | This spec |
+|---|---|---|
+| Header: back link / icon / title / meta | `(64,112)` @11 · `96×96 r24` at `(64,144)` · Playfair Bold 38 at `(184,148)` · @11 at `(184,236)` | same |
+| Toolbar controls | search `440×40 r12` at `(64,292)`, Filter `86×40 r12` at `(516,292)`, Sort `150×40 r12` at `(612,292)` | same |
+| Media-type pills | `All/Images/Videos/Links/Text` at y=350, `r999` | **omitted** (§7) |
+| Topic pills | `Terminal ×/Tools ×/Self-hosting ×/Linux Tips ×` at y=394 | **omitted** (§7) |
+| Post cards | `292` wide, `r18`, columns at x = 64/388/712/1036 | 4 columns, **32px** gap |
+| Masonry vertical rhythm | tops 448/900/950/970/1035; gap 22 | **22px** |
+| Post-card padding + media inset | media `272` wide at `(10,10)`, `r14` | padding **10**, media `r14` |
+| Media region heights | 130 / 185 / 260 | adaptive, not fixed |
+| Quote panel (text-only) | `272×210` `r14` at `(10,10)` | kept |
+| Filter popover | `390×470`, `r20` at `(500,340)` | same |
+| State cards | `292×320`, `r20`, 4 across at gap 32 | same |
+
+Two structural notes: the mockup's 4-column pitch leaves the 5-column desktop grid to the
+homepage, and the collection page's toolbar row is `440 + 86 + 150` wide with ~10–12px gaps,
+not a single flex row with equal spacing.
 
 **Post card** — width `292`, radius `r18`, `surface`, `border`, `shadow-post`, padding `10`:
 

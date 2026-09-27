@@ -758,8 +758,12 @@ Lokasi bisa dipindah lewat environment variable `TWITTER_BOOKMARKER_DIR`
 (absolute atau diawali `~/`); kalau kosong/tidak diset, default di atas dipakai.
 Path relatif ditolak supaya CSV tidak tersebar tergantung working directory.
 
-```bash
-export TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker
+`make run` meneruskan variable ini ke server, jadi nilainya cukup ditaruh di file
+`.env.local` (gitignored) di root repo — tidak perlu di shell profile:
+
+```make
+# .env.local
+TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 ```
 
 Backend membuat directory otomatis jika belum ada, dan mencatat lokasi yang

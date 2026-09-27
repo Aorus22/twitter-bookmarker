@@ -48,22 +48,31 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 ### Where the CSVs live
 
 `<storage dir>` is `~/.twitter-bookmarker` by default and can be relocated with
-the `TWITTER_BOOKMARKER_DIR` environment variable:
+the `TWITTER_BOOKMARKER_DIR` environment variable, which the server reads at
+startup. `make run` passes it for you, so nothing has to live in your shell
+profile — put the path in a gitignored `.env.local` at the repo root:
 
-```bash
-export TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker   # absolute, or ~/...
+```make
+# .env.local
+TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 ```
 
-The server resolves it at startup (a leading `~/` is expanded; a relative path is
-rejected), creates it with mode `0700` if missing, and logs the path it uses:
+`make run` then prints and uses it (a `make run TWITTER_BOOKMARKER_DIR=/tmp/x`
+on the command line wins; with no `.env.local` the default applies):
 
 ```text
-msg="Twitter Bookmarker server started" listening=127.0.0.1:43121 storage=/home/<you>/Personal/twitter-bookmarker
+==> storage: /home/<you>/Personal/twitter-bookmarker
+... msg="Twitter Bookmarker server started" listening=127.0.0.1:43121 storage=/home/<you>/Personal/twitter-bookmarker
 ```
 
+A leading `~/` is expanded, a relative path is rejected, and the directory is
+created with mode `0700` if missing. Running the binary directly
+(`./backend/bin/twitter-bookmarker-server`) bypasses the Makefile, so export the
+variable yourself in that case.
+
 The data-cleaning scripts in the private data repository read the same variable,
-and `make clean-storage` respects it too. The directory may live inside a git
-working tree: the backend only ever touches `*.csv` files matching
+and `make clean-storage` uses the resolved value too. The directory may live
+inside a git working tree: the backend only ever touches `*.csv` files matching
 `^[a-z0-9][a-z0-9-]*\.csv$` plus `index.json`, so `.git/` and any subdirectory
 (such as `Scripts/`) are left alone.
 
@@ -111,12 +120,12 @@ make run
 ```
 
 To keep the CSVs somewhere else (for example the private data repository that
-also holds `Scripts/`), set `TWITTER_BOOKMARKER_DIR` before starting the server —
-see [Where the CSVs live](#where-the-csvs-live).
+also holds `Scripts/`), add `TWITTER_BOOKMARKER_DIR` to a gitignored `.env.local`
+and just use `make run` — see [Where the CSVs live](#where-the-csvs-live).
 
-```bash
-export TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker
-make run
+```make
+# .env.local
+TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 ```
 
 Expected startup output (structured `slog` text on stderr):

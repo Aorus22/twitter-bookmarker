@@ -50,8 +50,8 @@ Set display mode to **Popover** first; switch to **Inline** only for scenario B9
 ### Disk locations and inspection commands
 
 Everything below uses `<storage>`: `$TWITTER_BOOKMARKER_DIR` when that is set,
-`~/.twitter-bookmarker` otherwise (PRD §15). Export the same value you started
-the backend with, e.g. `export TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker`.
+`~/.twitter-bookmarker` otherwise (PRD §15). With `make run` the value comes from
+`.env.local` or the command line, so mirror it here:
 
 | What | Path / command |
 |---|---|

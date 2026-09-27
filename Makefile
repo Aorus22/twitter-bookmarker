@@ -11,10 +11,18 @@
 #
 # `clean` never deletes user CSV/index data; only `clean-storage` does.
 #
-# The storage directory is $TWITTER_BOOKMARKER_DIR when that is set (the value
-# the backend itself reads) and ~/.twitter-bookmarker otherwise.
+# Where the CSVs live: `make run` passes TWITTER_BOOKMARKER_DIR to the server, so
+# the location is a property of this Makefile invocation and never needs a shell
+# profile. The value is resolved in this order:
+#
+#   1. `make run TWITTER_BOOKMARKER_DIR=/somewhere`
+#   2. `.env.local` (gitignored, so a personal path is never committed):
+#          TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
+#   3. the historical default, $(HOME)/.twitter-bookmarker
 
 SHELL := /bin/bash
+
+-include .env.local
 
 BACKEND_BIN := backend/bin/twitter-bookmarker-server
 STORAGE_DIR := $(if $(TWITTER_BOOKMARKER_DIR),$(TWITTER_BOOKMARKER_DIR),$(HOME)/.twitter-bookmarker)
@@ -37,7 +45,8 @@ run: ## Run the built server (build it first with `make build`).
 		echo "error: $(BACKEND_BIN) not found; run 'make build' first" >&2; \
 		exit 1; \
 	fi
-	./$(BACKEND_BIN)
+	@echo "==> storage: $(STORAGE_DIR)"
+	TWITTER_BOOKMARKER_DIR="$(STORAGE_DIR)" ./$(BACKEND_BIN)
 
 fmt: ## Format the backend sources in place.
 	gofmt -w backend

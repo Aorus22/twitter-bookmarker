@@ -1,21 +1,16 @@
 ---
 gsd_state_version: "1.0"
-milestone: 1.0
-milestone_name: MVP
-status: Awaiting next milestone
-stopped_at: Phase 6 complete — all phases complete
-last_updated: "2026-09-27T02:07:46.538Z"
+milestone: v2.0
+milestone_name: Local Web Gallery
+status: planning
+last_updated: "2026-09-27T14:26:58.282Z"
 last_activity: 2026-09-27
-last_activity_desc: Milestone v1.0 completed and archived
-state_head: b7ab036aa5f68c8bb0a87ebc72a052e93ebff649
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 16
-  completed_plans: 16
-  percent: 100
-current_phase: 6
-current_phase_name: Hardening, Tests & Docs
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -29,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-09-27)
 
 ## Current Position
 
-Phase: Milestone v1.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-09-27 — Milestone v1.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-09-27 — Milestone v2.0 started
 
 ## Performance Metrics
 

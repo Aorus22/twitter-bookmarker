@@ -3,162 +3,196 @@
 ## Milestones
 
 - ✅ **v1.0 MVP** — Phases 1-6 (Shipped: 2026-09-27) — archived at `.planning/milestones/v1.0-ROADMAP.md`
+- 🚧 **v2.0 Local Web Gallery** — Phases 1-10 (In progress)
 
-## v1.0 MVP
+## v2.0 Local Web Gallery
 
-**Status:** ✅ Shipped 2026-09-27 · **Audit:** passed (58/58 requirements) · **Archive:** `.planning/milestones/v1.0-phases/`
+**Status:** 🚧 In progress · **Source:** `PRD-2.md` · **Design:** Figma `Gallery Mockups v2 — Editorial`
+**Phase numbering:** reset to 1 for this milestone. Each phase below maps 1:1 to the `PRD-2.md` §85 implementation order (roadmap Phase 1 = PRD Phase 2.1, roadmap Phase 10 = PRD Phase 2.10).
 
-The phase records below are the shipped v1.0 plan of record. New work starts in the next milestone via `$gsd-new-milestone`.
+### Overview
 
-## Overview
+v2.0 makes the CSV archive browsable. It is built in the PRD's recommended order: prove the read layer first (CSV → collections → posts → filter/search/sort/cursor), expose it over `/api/gallery/*` without touching the frozen `/v1/*` contract, then stand up the `web/` app on the official shadcn Vite template, then build the browsing experience outward from the homepage, the masonry collection view, discovery tools, infinite scroll, and the lightbox, then fold the built app back into the single Go process, and finally harden the edge cases, accessibility, and responsive behaviour.
 
-The product is built in the PRD's recommended order: prove the Go persistence layer first (CSV is the source of truth), then stand up the extension's own configuration surface, then integrate with the X DOM, then wire the save flow through the service worker, then add auto-unbookmark on top of a reliable storage path, and finally harden the edge cases and lock the whole thing down with tests and docs.
+The backend and the web app are deliberately kept in separate phases so each can be verified on its own: the read layer with Go tests, the HTTP API with acceptance tests against a seeded storage dir, and each frontend slice by building and exercising it against a live backend.
 
-## Phases
+### Phases
 
 **Phase Numbering:**
 
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-Decimal phases appear between their surrounding integers in numeric order.
+- [ ] **Phase 1: Gallery Read Layer** - A dedicated `backend/internal/gallery/` module that turns CSVs into collection summaries and paginated, filtered, searched, sorted posts (PRD §2.1; PRD §7, §39, §42, §45–§51)
+- [ ] **Phase 2: Gallery HTTP API** - `GET /api/gallery/collections` and `GET /api/gallery/collections/{filename}/posts` with validation, 404/400/500 semantics, and path-traversal rejection, alongside an unchanged `/v1/*` (PRD §2.2; PRD §36–§41, §54)
+- [ ] **Phase 3: Web Scaffold, Theme & API Client** - The `web/` app created with the official shadcn Vite CLI, wired with routing, the v2 Editorial design tokens, light/dark/system theme, the Vite `/api` proxy, and a typed relative-URL API client (PRD §2.3; PRD §13, §14, §55, §72)
+- [ ] **Phase 4: Gallery Homepage** - Collection cards with cover collages, counts, last-bookmarked dates, empty/no-media/broken-image handling, skeletons and retry (PRD §2.4; PRD §16, §17, §38, §59, §61, §62)
+- [ ] **Phase 5: Collection Gallery** - Pinterest-style masonry of post cards with adaptive multi-media grids, text-only cards, full metadata, and Open on X (PRD §2.5; PRD §18–§25, §60, §73)
+- [ ] **Phase 6: Discovery Tools** - Debounced server-side search, combinable tweet/bookmarked date filters with quick ranges, four sort modes, and URL-backed state (PRD §2.6; PRD §28–§33, §76, §77)
+- [ ] **Phase 7: Infinite Scroll** - IntersectionObserver cursor pagination with skeleton and bottom-loader states, dedupe, and refetch on focus (PRD §2.7; PRD §34, §35, §44, §47, §68)
+- [ ] **Phase 8: Media Lightbox** - Large media plus metadata panel, prev/next across the loaded dataset, focus trap, and Escape/arrow keyboard navigation (PRD §2.8; PRD §26, §27, §67)
+- [ ] **Phase 9: Production Serving** - The Go server serves `web/dist` with API precedence, SPA fallback, a proper API 404, graceful missing-dist handling, and Makefile targets (PRD §2.9; PRD §11, §56–§58, §84)
+- [ ] **Phase 10: Hardening, Accessibility & Responsive** - Malformed-data and large-CSV hardening, error/retry UX, responsive columns and Sheet filter, accessibility, and the PRD §82 integration scenario (PRD §2.10; PRD §61, §62, §66, §67, §82)
 
-- [x] **Phase 1: Go Persistence Layer & HTTP API** - Local loopback Go server that writes tweet metadata to per-category CSVs with a rebuildable duplicate index (completed 2026-09-27)
-- [x] **Phase 2: Extension Foundation & Settings Popup** - MV3 scaffold, `chrome.storage.local` model, popup category CRUD/colors/ordering, and settings (completed 2026-09-27)
-- [x] **Phase 3: X DOM Integration** - Route detection, MutationObserver, tweet extraction, and popover/inline organizer UI on `/i/bookmarks` (completed 2026-09-27)
-- [x] **Phase 4: Save Integration** - Content script → service worker messaging, backend HTTP, saving state, saved marker, and toasts (completed 2026-09-27)
-- [x] **Phase 5: Auto Unbookmark** - Verified native X unbookmark strictly after a confirmed CSV write (completed 2026-09-27)
-- [x] **Phase 6: Hardening, Tests & Docs** - Edge-case hardening, automated tests, build tooling, and documentation (completed 2026-09-27)
+### Phase Details
 
-## Phase Details
+#### Phase 1: Gallery Read Layer
 
-### Phase 1: Go Persistence Layer & HTTP API
-
-**Goal**: A manually runnable Go server binds to `127.0.0.1:43121`, creates `~/.twitter-bookmarker/`, and exposes `/health`, `/v1/index`, and `POST /v1/bookmarks` with validated filenames, canonical URLs, global duplicate detection, valid CSV output, and a rebuildable derived index.
-**Depends on**: Nothing (first phase)
-**Requirements**: BE-01, BE-02, BE-03, BE-04, BE-05, BE-06, BE-07, BE-08, BE-09, BE-10, BE-11, BE-12, BE-13, BE-14, BE-15, BE-16, BE-17, BE-18
+**Goal**: A self-contained `backend/internal/gallery/` package reads the current CSVs and produces collection summaries plus post pages with search, both date filters, all four sorts, and opaque cursor pagination.
+**Depends on**: Nothing (first phase of v2.0; builds on the v1.0 storage layer)
+**Requirements**: GAL-01, GAL-02, GAL-03, GAL-04, GAL-05, GAL-06, GAL-07, GAL-08, GAL-09, GAL-10, GAL-11, GAL-12, GAL-13, GAL-14, GAL-15, GAL-16
 **Success Criteria** (what must be TRUE):
 
-  1. `twitter-bookmarker-server` starts, logs address + storage dir, and serves `GET /health` → `200 {"status":"ok"}`
-  2. `POST /v1/bookmarks` creates a category CSV with the exact header and appends a valid row; a second identical tweet returns `409` with no new row
-  3. `GET /v1/index` lists saved tweet IDs, and deleting/corrupting `index.json` rebuilds it from the CSVs
-  4. Path-traversal filenames are rejected with `400` and the process shuts down cleanly on `Ctrl+C`
+  1. A seeded storage dir yields one collection per `*.csv` with correct `post_count`, `media_count`, `last_saved_at`, and up to four newest `cover_media`, ordered by `last_saved_at` DESC
+  2. Posts carry `tweet_id` derived from the URL, text-only rows are returned with `media: []`, and malformed media JSON or a malformed row is skipped with a warning rather than failing the collection
+  3. Search matches `author`/`username`/`text` case-insensitively; tweet-date and bookmarked-date filters combine inclusively; all four sort modes order correctly
+  4. Cursor pagination walks the whole collection without gaps or repeats, and re-reading after appending a row surfaces the new post without any restart
+  5. Traversal-style filenames (`../x.csv`, `/etc/passwd`, `a/b.csv`, `x.txt`) are rejected
 
-**Plans**: 3 plans
+**Plans**: TBD
 
-Plans:
+#### Phase 2: Gallery HTTP API
 
-- [x] 01-01: Backend model, storage layout, and config/startup
-- [x] 01-02: CSV store, URL normalization, duplicate index
-- [x] 01-03: HTTP API, validation, logging, graceful shutdown
-
-### Phase 2: Extension Foundation & Settings Popup
-
-**Goal**: A Manifest V3 TypeScript extension scaffold with the shared storage model and a popup that manages categories (add/rename/delete/color/reorder), display mode, auto-unbookmark toggle, and backend connection status — all persisted in `chrome.storage.local`.
+**Goal**: The gallery read layer is exposed over read-only `/api/gallery/*` endpoints with the documented response shapes and `400`/`404`/`500` error semantics, while `/health`, `/v1/index`, and `POST /v1/bookmarks` keep their exact v1.0 contracts.
 **Depends on**: Phase 1
-**Requirements**: EXT-01, EXT-02, EXT-03, EXT-04, EXT-05, EXT-06, EXT-07, EXT-08, EXT-09, EXT-10, EXT-11, EXT-12
+**Requirements**: API-01, API-02, API-03, API-04, API-05, API-06, API-07
 **Success Criteria** (what must be TRUE):
 
-  1. Loading the unpacked extension opens a popup showing backend Connected/Disconnected from `GET /health`
-  2. Categories can be added, renamed (filename recomputed), deleted, recolored, and drag-reordered; all changes survive popup close/reopen
-  3. Rename never touches the old CSV and delete never issues a backend call
-  4. `displayMode` and `unbookmarkAfterSave` toggles persist with defaults `popover` / `false`
+  1. `GET /api/gallery/collections` returns the documented JSON for every valid CSV, including media-less collections
+  2. `GET /api/gallery/collections/{filename}/posts` honours `cursor`, `limit`, `q`, `tweet_from`/`tweet_to`, `saved_from`/`saved_to`, and `sort`, returning `items`, `next_cursor`, and `has_more`
+  3. `limit` defaults to 30 and is capped at 100; bad values return `400`; unknown collections return `404` in the `{"status":"error","reason":...}` shape without leaking paths
+  4. The existing v1.0 endpoint contracts still pass their tests unchanged, and no gallery route mutates user data
 
-**Plans**: 3 plans
+**Plans**: TBD
 
-Plans:
+#### Phase 3: Web Scaffold, Theme & API Client
 
-- [x] 02-01: MV3 scaffold, build pipeline, shared types + storage module
-- [x] 02-02: Category manager UI (CRUD, color, drag order, empty state)
-- [x] 02-03: Settings, backend status, and storage-change propagation hook
-
-### Phase 3: X DOM Integration
-
-**Goal**: On `https://x.com/i/bookmarks`, a content script observes the timeline, idempotently injects organizer controls into each tweet's action area, extracts container-scoped metadata (excluding quoted text), and renders popover or inline category controls with correct order/colors and a `✓ Saved` state.
+**Goal**: `web/` exists as a shadcn-CLI-generated Vite + React + TypeScript app with the two required routes, the v2 Editorial design tokens wired for light/dark/system, a `/api` dev proxy, and a typed API client that only ever calls relative URLs.
 **Depends on**: Phase 2
-**Requirements**: XI-01, XI-02, XI-03, XI-04, XI-05, XI-06, XI-07, XI-08, XI-09, XI-10, XI-11, XI-12
+**Requirements**: WEB-01, WEB-02, WEB-03, WEB-04, WEB-05, WEB-06, WEB-07, WEB-08
 **Success Criteria** (what must be TRUE):
 
-  1. Organizer controls appear in the tweet action bar on `/i/bookmarks` and never on other routes; SPA navigation in/out behaves correctly
-  2. Infinite-scrolled rows get controls exactly once, and previously saved tweets show `✓ Saved`
-  3. Popover and inline display modes both honor `order` and show category colors
-  4. Quoted tweet text is excluded, media-only tweets yield empty text, and extraction failure produces no partial record
+  1. `pnpm build` inside `web/` produces `web/dist` and TypeScript typechecks cleanly
+  2. `/` and `/collections/:filename` render through React Router with shared navigation chrome, and a bad route shows a not-found state
+  3. The theme toggle switches light/dark and defaults to following the system, with the Figma palette and Playfair/Inter typography applied through tokens
+  4. The API client contains no hardcoded backend port, and the Vite dev proxy forwards `/api` to `127.0.0.1:43121`
 
-**Plans**: 3 plans
+**Plans**: TBD
 
-Plans:
+#### Phase 4: Gallery Homepage
 
-- [x] 03-01: Route detection, observer, and tweet discovery
-- [x] 03-02: Tweet extractor (scoped selectors, quoted-text exclusion, media-only handling)
-- [x] 03-03: Organizer UI (popover, inline, saved state, rerender on storage change)
-
-### Phase 4: Save Integration
-
-**Goal**: Selecting a category disables the tweet's controls, sends `SAVE_TWEET` through the service worker to the backend, and on success marks `✓ Saved`, updates the local cache, and shows a toast — with graceful handling of `409`, `400`, and backend-unavailable errors.
+**Goal**: The homepage lists every collection as a card with a cover collage, name, post/media counts, and last-bookmarked date, handling media-less collections, broken images, loading, empty, and error states.
 **Depends on**: Phase 3
-**Requirements**: SAVE-01, SAVE-02, SAVE-03, SAVE-04, SAVE-05, SAVE-06, SAVE-07
+**Requirements**: HOME-01, HOME-02, HOME-03, HOME-04, HOME-05, HOME-06, HOME-07, HOME-08, HOME-09
 **Success Criteria** (what must be TRUE):
 
-  1. A category click results in exactly one backend request, with controls disabled and showing "Saving..." until it resolves
-  2. `201` yields `✓ Saved` plus "Saved to <Category>"; `409` yields `✓ Saved` plus "Already saved" and no new CSV row
-  3. Backend-unavailable restores controls and shows "Backend unavailable" without unbookmarking
-  4. Toasts render in-page across success/error/warning/info and auto-dismiss
+  1. Every CSV appears as a card ordered by most recent activity, with counts and last-saved date matching the backend summary
+  2. Cover collages adapt to 4+, 3, 1, and 0 media per the PRD rules, and no avatar is ever used as a cover
+  3. Clicking a card navigates to the collection route
+  4. With no CSVs the "No collections yet" empty state renders; a down backend shows the connection error with a working `Retry`; loading shows skeletons; broken covers degrade without breaking layout
+  5. Returning to the tab refetches the homepage
 
-**Plans**: 2 plans
+**Plans**: TBD
 
-Plans:
+#### Phase 5: Collection Gallery
 
-- [x] 04-01: Service worker messaging + backend HTTP client
-- [x] 04-02: Content save state machine, index cache, and toast system
-
-### Phase 5: Auto Unbookmark
-
-**Goal**: When `unbookmarkAfterSave` is enabled, the extension triggers X's native unbookmark control only after a confirmed `201`, verifies the bookmark state actually changed, and warns without rolling back CSV data on failure.
+**Goal**: Opening a collection renders a responsive Pinterest-style masonry of post cards — adaptive multi-media grids, text-only cards, complete metadata, and an Open on X link — with correct empty and broken-media behaviour.
 **Depends on**: Phase 4
-**Requirements**: UNB-01, UNB-02, UNB-03
+**Requirements**: COLL-01, COLL-02, COLL-03, COLL-04, COLL-05, COLL-06, COLL-07, COLL-08, COLL-09, COLL-10, COLL-11
 **Success Criteria** (what must be TRUE):
 
-  1. With the setting off, no unbookmark is ever attempted
-  2. With the setting on and a successful save, the tweet is removed from X Bookmarks and the CSV row persists
-  3. If the unbookmark click fails or the state does not change, a warning toast is shown and CSV/index/saved state remain intact
+  1. The header shows back navigation, the collection name, and `posts · media` counts above the toolbar
+  2. Cards flow in 1/2-3/4-5 columns by viewport with natural, non-uniform heights, and one tweet with four images renders as a single card showing all four
+  3. Text-only posts render as compact cards and every card exposes author, username, text, tweet date, saved date, and Open on X with `rel="noopener noreferrer"`
+  4. Long text clamps with a `Show more` affordance, images lazy-load straight from `pbs.twimg.com`, broken media degrades gracefully, and a postless collection shows "This collection is empty"
 
-**Plans**: 2 plans
+**Plans**: TBD
 
-Plans:
+#### Phase 6: Discovery Tools
 
-- [x] 05-01: Native unbookmark trigger + state-change verification
-- [x] 05-02: Failure handling, warning toast, and invariant guards
-
-### Phase 6: Hardening, Tests & Docs
-
-**Goal**: Lock in every PRD invariant with automated Go tests, cover the extension edge cases, and ship build tooling plus setup/manual-test documentation.
+**Goal**: The collection page gains debounced server-side search, a filter popover (Sheet on narrow viewports) with tweet-date and bookmarked-date ranges plus quick presets, four sort modes, and URL-backed state that resets pagination on change.
 **Depends on**: Phase 5
-**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05, TEST-06
+**Requirements**: DISC-01, DISC-02, DISC-03, DISC-04, DISC-05, DISC-06, DISC-07, DISC-08
 **Success Criteria** (what must be TRUE):
 
-  1. `make test` runs the Go suite green, covering CSV edge cases, index rebuild, and duplicate races
-  2. Every backend acceptance criterion has a corresponding automated test
-  3. Extension hardening scenarios have an executable manual test checklist
-  4. `make build` produces the server binary and the loadable extension `dist/`, and the README explains setup + run
+  1. Typing in search filters results after ~300 ms with no submit button, matching text, author, and username case-insensitively
+  2. Tweet-date and bookmarked-date filters can be applied together and the result satisfies both inclusive ranges, with local pickers converted to RFC3339 UTC boundaries
+  3. Quick presets (Today, Last 7 Days, Last 30 Days, This Year) target the bookmarked date and remain manually editable, and `Reset`/`Apply` behave as specified
+  4. All four sort modes are selectable with Newest Bookmarked as default; search/filter/sort live in the URL and changing any of them clears pages, resets the cursor, and scrolls near the top
 
-**Plans**: 3 plans
+**Plans**: TBD
 
-Plans:
+#### Phase 7: Infinite Scroll
 
-- [x] 06-01: Backend test suite (API, CSV, index, concurrency)
-- [x] 06-02: Extension hardening + manual test checklist
-- [x] 06-03: Build tooling, README, and final verification sweep
+**Goal**: The collection gallery loads 30-post pages through an IntersectionObserver sentinel and an opaque cursor, accumulating pages without duplicates and showing skeletons and a bottom loader instead of blank screens.
+**Depends on**: Phase 6
+**Requirements**: SCROLL-01, SCROLL-02, SCROLL-03, SCROLL-04, SCROLL-05
+**Success Criteria** (what must be TRUE):
+
+  1. Scrolling near the end fetches the next page automatically, with no pagination control and no primary Load More button
+  2. Skeletons render on first load and a small bottom loader on subsequent loads; the page is never blank mid-fetch
+  3. Appended pages contain no duplicate `tweet_id`s, requests stop when `has_more` is false, and a row appended mid-scroll does not produce obvious repeats
+  4. Route entry, filter/search/sort changes, window focus, and manual refresh all refetch without aggressive polling
+
+**Plans**: TBD
+
+#### Phase 8: Media Lightbox
+
+**Goal**: Clicking media opens an accessible lightbox with a large media area and a metadata panel, prev/next navigation across the loaded dataset, focus trapping, and Escape/arrow keyboard control that preserves gallery scroll on close.
+**Depends on**: Phase 7
+**Requirements**: LIGHT-01, LIGHT-02, LIGHT-03, LIGHT-04, LIGHT-05, LIGHT-06
+**Success Criteria** (what must be TRUE):
+
+  1. The lightbox shows the active image large with author, username, text, dates, and Open on X; desktop places metadata beside the media and mobile places it below
+  2. Next/previous moves within the tweet's media and continues into the neighbouring tweets' media
+  3. Escape closes, ArrowLeft/ArrowRight navigate, focus is trapped while open and restored on close, and all controls are keyboard reachable
+  4. Closing the lightbox returns the user to the same gallery scroll position
+
+**Plans**: TBD
+
+#### Phase 9: Production Serving
+
+**Goal**: The single Go process serves the built `web/dist` at `/` with API routes taking precedence, an SPA fallback for client routes, a proper API 404, graceful behaviour when `dist` is missing, and Makefile targets for the web app.
+**Depends on**: Phase 8
+**Requirements**: PROD-01, PROD-02, PROD-03, PROD-04, PROD-05, PROD-06
+**Success Criteria** (what must be TRUE):
+
+  1. `pnpm build` in `web/` followed by running the server serves the gallery at `http://127.0.0.1:43121` with no Vite process
+  2. `/api/*`, `/v1/*`, and `/health` are never swallowed by the SPA fallback, and an unknown `/api/*` path returns the API error JSON with `404`
+  3. A direct browser refresh on `/collections/linux.csv` serves `index.html` and the route renders
+  4. A missing `web/dist` logs a clear message instead of crashing; the Makefile exposes web/dev targets and `make build` still builds the server binary and extension `dist/`
+
+**Plans**: TBD
+
+#### Phase 10: Hardening, Accessibility & Responsive
+
+**Goal**: Lock in the edge cases — malformed data, large CSVs, backend failures with retry, responsive columns and Sheet filtering, accessibility — and prove the PRD §82 integration scenario end-to-end.
+**Depends on**: Phase 9
+**Requirements**: HARD-01, HARD-02, HARD-03, HARD-04, HARD-05, HARD-06
+**Success Criteria** (what must be TRUE):
+
+  1. Automated tests cover malformed media JSON, malformed rows, and a large CSV without taking down a collection or the server
+  2. Backend-down and API-error states show the specified messages with a working `Retry`
+  3. The layout works on desktop/tablet/mobile with the specified column counts and the filter control becoming a Sheet on narrow viewports
+  4. Controls are keyboard reachable with visible focus, images have contextual `alt` text, dialogs trap focus and close on Escape, and contrast is adequate
+  5. The §82 integration scenario passes against a seeded storage dir, including a bookmark appended while the server runs appearing after a window-focus refetch
+
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Go Persistence Layer & HTTP API | 3/3 | Complete    | 2026-09-27 |
-| 2. Extension Foundation & Settings Popup | 3/3 | Complete    | 2026-09-27 |
-| 3. X DOM Integration | 3/3 | Complete    | 2026-09-27 |
-| 4. Save Integration | 2/2 | Complete    | 2026-09-27 |
-| 5. Auto Unbookmark | 2/2 | Complete    | 2026-09-27 |
-| 6. Hardening, Tests & Docs | 3/3 | Complete    | 2026-09-27 |
+| 1. Gallery Read Layer | 0/TBD | Not started | - |
+| 2. Gallery HTTP API | 0/TBD | Not started | - |
+| 3. Web Scaffold, Theme & API Client | 0/TBD | Not started | - |
+| 4. Gallery Homepage | 0/TBD | Not started | - |
+| 5. Collection Gallery | 0/TBD | Not started | - |
+| 6. Discovery Tools | 0/TBD | Not started | - |
+| 7. Infinite Scroll | 0/TBD | Not started | - |
+| 8. Media Lightbox | 0/TBD | Not started | - |
+| 9. Production Serving | 0/TBD | Not started | - |
+| 10. Hardening, Accessibility & Responsive | 0/TBD | Not started | - |

@@ -71,6 +71,17 @@ test: ## Run the Go suite under -race, then the extension suite, then the web su
 	cd extension && npm test
 	cd web && pnpm test
 
+verify-http: ## PRD §80 acceptance over HTTP only (no browser).
+	bash scripts/check-gallery-acceptance.sh
+
+verify-web: ## Real-browser acceptance for the SPA (agent-browser; needs `make build`).
+	bash scripts/check-web-acceptance.sh
+
+verify-trace: ## Check every PRD requirement has a traceability row.
+	bash scripts/check-requirement-traceability.sh
+
+verify: verify-http verify-trace verify-web ## Run every acceptance gate. Needs `make build`.
+
 dev-web: ## Run the Vite dev server for the SPA (proxies /api to 127.0.0.1:43121).
 	@echo "==> pair with 'make dev-backend' in another shell"
 	cd web && pnpm dev

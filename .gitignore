@@ -12,6 +12,9 @@ web/dist/
 backend/bin/
 twitter-bookmarker-server
 
+# Browser-acceptance screenshots (scripts/check-web-acceptance.sh)
+artifacts/
+
 # OS / editor
 .DS_Store
 *.swp

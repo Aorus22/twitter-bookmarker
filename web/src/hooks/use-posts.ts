@@ -1,36 +1,48 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { fetchCollections, fetchPosts } from "@/lib/api"
 import { DEFAULT_SORT } from "@/lib/collection-sort"
 import { describeGalleryError } from "@/lib/error-message"
 import { COULD_NOT_LOAD_COLLECTION_MESSAGE } from "@/lib/messages"
+import {
+  clampPageLimit,
+  mergeUniquePosts,
+  resolveNextPage,
+} from "@/lib/pagination"
 import type { PostsStatus } from "@/lib/posts-state"
 import type { GalleryCollection, GalleryPost, GallerySort } from "@/types"
 
 /**
- * Collection posts hook — first page only (PRD-2 §40, design spec §3.3).
+ * Collection posts hook — first page plus cursor paging (PRD-2 §34/§40/§44).
  *
- * - One `GET /api/gallery/collections/{filename}/posts?limit=30&sort=saved_desc`
- *   on mount and per `refetch()`; Phase 5 never consumes the cursor.
- * - One `GET /api/gallery/collections` alongside it purely to join the header
- *   counts (the posts response carries no totals). **No new endpoint** is added.
- *   A summary-only failure leaves the posts intact — the header just falls back
- *   to the filename with no counts — while a posts failure is the page error.
- * - `nextCursor` / `hasMore` are held in state from day one, so Phase 7 adds
- *   `loadMore` (append `items`, advance the cursor) without restructuring.
- * - Stale resolutions are dropped with a per-effect `cancelled` flag, and a
- *   `window` `focus` listener refetches (PRD-2 §47/§78).
+ * - One page-1 `GET /api/gallery/collections/{filename}/posts?limit=30&sort=…`
+ *   on mount and per `refetch()`; {@link UsePostsResult.loadMore} appends the
+ *   next page with the **opaque** `next_cursor` echoed back verbatim.
+ * - Pages accumulate in {@link UsePostsResult.posts}; an overlapping `tweet_id`
+ *   is dropped by `mergeUniquePosts`, keeping the first-seen instance and
+ *   position (PRD-2 §44's defensive dedupe).
+ * - Paging stops when `has_more` is false and when `has_more` is true with no
+ *   usable cursor (`resolveNextPage`); the same cursor is never requested twice
+ *   in a row, and a second `loadMore` while one is in flight is a no-op — a
+ *   sentinel can fire repeatedly without issuing duplicate requests.
+ * - One `GET /api/gallery/collections` alongside the first page purely to join
+ *   the header counts (the posts response carries no totals). **No new endpoint**
+ *   is added. A summary-only failure leaves the posts intact.
  * - State is **keyed by the request signature**: the moment a search/filter/sort
  *   change alters the query, the hook returns `loading` with no posts and a null
  *   cursor (PRD-2 §77's "clear current pages, reset cursor") while a same-query
- *   refetch (focus, Retry) keeps the current posts on screen.
+ *   refetch (focus, Retry) keeps the current posts on screen. A monotonic request
+ *   *generation* additionally discards an in-flight page that a query change or
+ *   refetch has superseded, so a stale page can never be appended to the new list.
+ * - `window` `focus` refetches page 1 (PRD-2 §47/§78). Nothing polls: no timer
+ *   is ever scheduled by this hook to drive a request.
  *
  * `options` is intentionally a set of primitive fields rather than a params
  * object: an object literal rebuilt on every render would either churn the
  * effect or force an eslint suppression.
  */
 
-/** First-page size; PRD-2 §40's API default. */
+/** First-page size; PRD-2 §34's API default. */
 export const POSTS_PAGE_LIMIT = 30
 
 export interface UsePostsOptions {
@@ -44,6 +56,7 @@ export interface UsePostsOptions {
 }
 
 export interface UsePostsResult {
+  /** Every loaded page, in order, deduped by `tweet_id`. */
   posts: GalleryPost[]
   status: PostsStatus
   /** The raw failure, for logging/debugging; may be a non-`ApiError`. */
@@ -55,7 +68,11 @@ export interface UsePostsResult {
   /** Opaque cursor for the next page (Phase 7); `null` at the end. */
   nextCursor: string | null
   hasMore: boolean
-  /** Re-run the first-page request (the `Retry` action). */
+  /** True while an additional page (never the first) is in flight. */
+  isLoadingMore: boolean
+  /** Append the next page. No-op at the end, while in flight, or after reset. */
+  loadMore: () => void
+  /** Re-run the first-page request and reset paging (focus, Retry). */
   refetch: () => void
 }
 
@@ -67,6 +84,7 @@ interface PostsState {
   error: unknown
   nextCursor: string | null
   hasMore: boolean
+  loadingMore: boolean
 }
 
 const EMPTY_POSTS_STATE = {
@@ -75,6 +93,7 @@ const EMPTY_POSTS_STATE = {
   error: null,
   nextCursor: null,
   hasMore: false,
+  loadingMore: false,
 }
 
 export function usePosts(
@@ -91,11 +110,14 @@ export function usePosts(
     saved_to,
   } = options
 
+  // PRD-2 §34: never ask the backend for more than its maximum page size.
+  const effectiveLimit = clampPageLimit(limit)
+
   // The signature of the query this render wants. A change to any part of it
   // means the view's pages and cursor no longer belong to the current query.
   const requestKey = [
     filename ?? "",
-    limit,
+    effectiveLimit,
     sort,
     q ?? "",
     tweet_from ?? "",
@@ -115,6 +137,19 @@ export function usePosts(
 
   const hasFilename = filename !== undefined && filename !== ""
 
+  // Mirrors the committed state so `loadMore` can read the current cursor
+  // without re-creating itself on every page.
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  // Bumped at the start of every page-1 request. A `loadMore` response whose
+  // generation is stale (query changed, focus/Retry refetched) is discarded.
+  const generationRef = useRef(0)
+  const loadingMoreRef = useRef(false)
+  const lastRequestedCursorRef = useRef<string | null>(null)
+
   const refetch = useCallback(() => {
     setRequestId((current) => current + 1)
   }, [])
@@ -126,10 +161,17 @@ export function usePosts(
       return
     }
 
+    // A new page-1 request supersedes any in-flight page request and resets the
+    // paging bookkeeping atomically with the query key.
+    generationRef.current += 1
+    const generation = generationRef.current
+    loadingMoreRef.current = false
+    lastRequestedCursorRef.current = null
+
     let cancelled = false
 
     fetchPosts(filename, {
-      limit,
+      limit: effectiveLimit,
       sort,
       q,
       tweet_from,
@@ -138,20 +180,22 @@ export function usePosts(
       saved_to,
     }).then(
       (response) => {
-        if (cancelled) {
+        if (cancelled || generationRef.current !== generation) {
           return
         }
+        const { nextCursor, hasMore } = resolveNextPage(response)
         setState({
           key: requestKey,
           posts: response.items,
           status: "success",
           error: null,
-          nextCursor: response.next_cursor,
-          hasMore: response.has_more,
+          nextCursor,
+          hasMore,
+          loadingMore: false,
         })
       },
       (error: unknown) => {
-        if (cancelled) {
+        if (cancelled || generationRef.current !== generation) {
           return
         }
         setState({
@@ -161,6 +205,7 @@ export function usePosts(
           error,
           nextCursor: null,
           hasMore: false,
+          loadingMore: false,
         })
       }
     )
@@ -191,7 +236,91 @@ export function usePosts(
     filename,
     requestId,
     requestKey,
-    limit,
+    effectiveLimit,
+    sort,
+    q,
+    tweet_from,
+    tweet_to,
+    saved_from,
+    saved_to,
+  ])
+
+  const loadMore = useCallback(() => {
+    const current = stateRef.current
+
+    // The page-1 data for the current query must be committed before paging.
+    if (!hasFilename || current.key !== requestKey) {
+      return
+    }
+    // Stop at the end and on the defensive `has_more: true` + null-cursor case.
+    if (!current.hasMore || current.nextCursor === null) {
+      return
+    }
+    // One page request at a time: a repeatedly-firing sentinel is coalesced.
+    if (loadingMoreRef.current) {
+      return
+    }
+    // Never request the same cursor twice in a row.
+    if (lastRequestedCursorRef.current === current.nextCursor) {
+      return
+    }
+
+    const cursor = current.nextCursor
+    const generation = generationRef.current
+    loadingMoreRef.current = true
+    lastRequestedCursorRef.current = cursor
+    setState((prev) =>
+      prev.key === requestKey ? { ...prev, loadingMore: true } : prev
+    )
+
+    fetchPosts(filename, {
+      limit: effectiveLimit,
+      sort,
+      q,
+      tweet_from,
+      tweet_to,
+      saved_from,
+      saved_to,
+      cursor,
+    }).then(
+      (response) => {
+        loadingMoreRef.current = false
+        if (generationRef.current !== generation) {
+          return
+        }
+        const { nextCursor, hasMore } = resolveNextPage(response)
+        setState((prev) => {
+          if (prev.key !== requestKey) {
+            return prev
+          }
+          return {
+            ...prev,
+            posts: mergeUniquePosts(prev.posts, response.items),
+            status: "success",
+            error: null,
+            nextCursor,
+            hasMore,
+            loadingMore: false,
+          }
+        })
+      },
+      () => {
+        // A page failure is non-fatal: the loaded cards stay, the loader clears,
+        // and the next sentinel intersection can retry the same cursor.
+        loadingMoreRef.current = false
+        if (generationRef.current !== generation) {
+          return
+        }
+        setState((prev) =>
+          prev.key === requestKey ? { ...prev, loadingMore: false } : prev
+        )
+      }
+    )
+  }, [
+    hasFilename,
+    filename,
+    requestKey,
+    effectiveLimit,
     sort,
     q,
     tweet_from,
@@ -220,6 +349,8 @@ export function usePosts(
       collection: undefined,
       nextCursor: null,
       hasMore: false,
+      isLoadingMore: false,
+      loadMore,
       refetch,
     }
   }
@@ -240,6 +371,8 @@ export function usePosts(
     collection,
     nextCursor: isCurrent ? state.nextCursor : null,
     hasMore: isCurrent ? state.hasMore : false,
+    isLoadingMore: isCurrent ? state.loadingMore : false,
+    loadMore,
     refetch,
   }
 }

@@ -286,3 +286,406 @@ describe("usePosts — a query change resets the pages (PRD-2 §77, DISC-08)", (
     expect(result.current.hasMore).toBe(false)
   })
 })
+
+/**
+ * SCROLL-01/03/04/05 cursor paging: `loadMore` appends pages in order with the
+ * opaque cursor echoed verbatim, dedupes by `tweet_id`, refuses to loop, and
+ * resets cleanly on a focus refetch. Every fetch is mocked; nothing polls.
+ */
+
+function postsUrls(fetchMock: ReturnType<typeof stubGalleryFetch>) {
+  return fetchMock.mock.calls
+    .map((call) => String(call[0]))
+    .filter((url) => url.includes("/posts"))
+}
+
+function cursorOf(url: string): string | null {
+  return new URL(url, "http://gallery.test").searchParams.get("cursor")
+}
+
+describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
+  it("appends the next page in order and echoes the opaque cursor verbatim", async () => {
+    const opaque = "opaque+/=cursor"
+    const fetchMock = stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: [makePost({ tweet_id: "1" }), makePost({ tweet_id: "2" })],
+              next_cursor: opaque,
+              has_more: true,
+            })
+          : jsonResponse({
+              items: [makePost({ tweet_id: "3" }), makePost({ tweet_id: "4" })],
+              next_cursor: null,
+              has_more: false,
+            }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+    expect(result.current.hasMore).toBe(true)
+    expect(result.current.nextCursor).toBe(opaque)
+
+    act(() => {
+      result.current.loadMore()
+    })
+
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(4)
+    })
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+    ])
+    expect(result.current.hasMore).toBe(false)
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.isLoadingMore).toBe(false)
+
+    const urls = postsUrls(fetchMock)
+    expect(urls).toHaveLength(2)
+    expect(urls[0]).not.toContain("cursor=")
+    expect(urls[1]).toContain("limit=30")
+    expect(urls[1]).toContain(`cursor=${encodeURIComponent(opaque)}`)
+    expect(urls[1]).not.toContain("limit=100")
+  })
+
+  it("keeps the first page size within the API maximum", async () => {
+    const fetchMock = stubGalleryFetch()
+
+    renderHook(() => usePosts("linux.csv", { limit: 500 }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled()
+    })
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("limit=100")
+  })
+
+  it("stops requesting once has_more is false", async () => {
+    const fetchMock = stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: [makePost({ tweet_id: "1" })],
+              next_cursor: "c1",
+              has_more: true,
+            })
+          : jsonResponse({
+              items: [makePost({ tweet_id: "2" })],
+              next_cursor: null,
+              has_more: false,
+            }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      result.current.loadMore()
+    })
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(2)
+    })
+
+    act(() => {
+      result.current.loadMore()
+      result.current.loadMore()
+    })
+
+    expect(postsUrls(fetchMock)).toHaveLength(2)
+    expect(result.current.hasMore).toBe(false)
+  })
+
+  it("does not loop when has_more is true but next_cursor is null", async () => {
+    const fetchMock = stubGalleryFetch({
+      posts: () =>
+        jsonResponse({
+          items: [makePost({ tweet_id: "1" })],
+          next_cursor: null,
+          has_more: true,
+        }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    expect(result.current.hasMore).toBe(false)
+    expect(result.current.nextCursor).toBeNull()
+
+    act(() => {
+      result.current.loadMore()
+      result.current.loadMore()
+    })
+
+    expect(postsUrls(fetchMock)).toHaveLength(1)
+  })
+
+  it("coalesces repeated sentinel firings into exactly one in-flight page request", async () => {
+    let resolvePage!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => {
+      resolvePage = resolve
+    })
+    const fetchMock = stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: [makePost({ tweet_id: "1" })],
+              next_cursor: "c1",
+              has_more: true,
+            })
+          : pending,
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      result.current.loadMore()
+      result.current.loadMore()
+      result.current.loadMore()
+    })
+
+    expect(postsUrls(fetchMock)).toHaveLength(2)
+    expect(result.current.isLoadingMore).toBe(true)
+
+    await act(async () => {
+      resolvePage(
+        jsonResponse({
+          items: [makePost({ tweet_id: "2" })],
+          next_cursor: null,
+          has_more: false,
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(2)
+    })
+    expect(postsUrls(fetchMock)).toHaveLength(2)
+    expect(result.current.isLoadingMore).toBe(false)
+  })
+
+  it("does not render an overlapping tweet_id twice and keeps its first position", async () => {
+    stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: [
+                makePost({ tweet_id: "1" }),
+                makePost({ tweet_id: "2" }),
+                makePost({ tweet_id: "3", text: "first-seen three" }),
+              ],
+              next_cursor: "c1",
+              has_more: true,
+            })
+          : jsonResponse({
+              items: [
+                makePost({ tweet_id: "3", text: "drifted duplicate" }),
+                makePost({ tweet_id: "4" }),
+              ],
+              next_cursor: null,
+              has_more: false,
+            }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      result.current.loadMore()
+    })
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(4)
+    })
+
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+    ])
+    expect(result.current.posts[2].text).toBe("first-seen three")
+  })
+
+  it("never requests the same cursor twice in a row", async () => {
+    const fetchMock = stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: [makePost({ tweet_id: "1" })],
+              next_cursor: "c1",
+              has_more: true,
+            })
+          : jsonResponse({
+              // A malformed backend repeats the cursor while claiming more.
+              items: [makePost({ tweet_id: "2" })],
+              next_cursor: "c1",
+              has_more: true,
+            }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      result.current.loadMore()
+    })
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(2)
+    })
+    expect(result.current.nextCursor).toBe("c1")
+
+    act(() => {
+      result.current.loadMore()
+      result.current.loadMore()
+    })
+
+    expect(postsUrls(fetchMock)).toHaveLength(2)
+  })
+
+  it("drops an in-flight page when the query changes mid-flight", async () => {
+    let resolvePage!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => {
+      resolvePage = resolve
+    })
+    stubGalleryFetch({
+      posts: (url) => {
+        const params = new URL(url, "http://gallery.test").searchParams
+        if (params.get("cursor") === "c1") {
+          return pending
+        }
+        if (params.get("q") === "wayland") {
+          return jsonResponse({
+            items: [makePost({ tweet_id: "new" })],
+            next_cursor: null,
+            has_more: false,
+          })
+        }
+        return jsonResponse({
+          items: [makePost({ tweet_id: "1" })],
+          next_cursor: "c1",
+          has_more: true,
+        })
+      },
+    })
+
+    const { result, rerender } = renderHook(
+      ({ q }: { q: string | undefined }) => usePosts("linux.csv", { q }),
+      { initialProps: { q: undefined as string | undefined } }
+    )
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      result.current.loadMore()
+    })
+    rerender({ q: "wayland" })
+
+    await waitFor(() => {
+      expect(result.current.posts.map((post) => post.tweet_id)).toEqual(["new"])
+    })
+
+    await act(async () => {
+      resolvePage(
+        jsonResponse({
+          items: [makePost({ tweet_id: "2" })],
+          next_cursor: null,
+          has_more: false,
+        })
+      )
+    })
+
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual(["new"])
+    expect(result.current.hasMore).toBe(false)
+  })
+})
+
+describe("usePosts — refresh resets paging, nothing polls (SCROLL-05)", () => {
+  it("resets to page one on a window focus refetch without duplicating posts", async () => {
+    stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: [makePost({ tweet_id: "1" }), makePost({ tweet_id: "2" })],
+              next_cursor: "c1",
+              has_more: true,
+            })
+          : jsonResponse({
+              items: [makePost({ tweet_id: "3" })],
+              next_cursor: null,
+              has_more: false,
+            }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux.csv"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      result.current.loadMore()
+    })
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(3)
+    })
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(2)
+    })
+
+    const ids = result.current.posts.map((post) => post.tweet_id)
+    expect(ids).toEqual(["1", "2"])
+    expect(new Set(ids).size).toBe(2)
+    expect(result.current.hasMore).toBe(true)
+  })
+
+  it("issues no request when wall-clock timers advance", async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = stubGalleryFetch({
+        posts: () =>
+          jsonResponse({
+            items: [makePost({ tweet_id: "1" })],
+            next_cursor: null,
+            has_more: false,
+          }),
+      })
+
+      const { result } = renderHook(() => usePosts("linux.csv"))
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(result.current.status).toBe("success")
+      expect(postsUrls(fetchMock)).toHaveLength(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000)
+      })
+
+      expect(postsUrls(fetchMock)).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

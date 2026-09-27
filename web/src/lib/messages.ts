@@ -85,3 +85,9 @@ export const SHOW_MORE_LABEL = "Show more"
 
 /** The inverse of {@link SHOW_MORE_LABEL}, once the text is expanded. */
 export const SHOW_LESS_LABEL = "Show less"
+
+/** PRD-2 §35 — announced while the first page of a collection is in flight. */
+export const LOADING_POSTS_LABEL = "Loading posts"
+
+/** PRD-2 §35 — announced while an additional page is being appended. */
+export const LOADING_MORE_POSTS_LABEL = "Loading more posts"

@@ -3,6 +3,11 @@ import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
 import { afterEach, vi } from "vitest"
 
+import {
+  installIntersectionObserver,
+  resetIntersectionObservers,
+} from "./intersection-observer"
+
 /**
  * Test setup entry point — referenced by `vitest.config.ts` `setupFiles`.
  *
@@ -15,6 +20,7 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  resetIntersectionObservers()
 })
 
 // jsdom has no layout engine and therefore no `scrollIntoView`; the hero CTA
@@ -52,3 +58,9 @@ if (typeof Element.prototype.setPointerCapture !== "function") {
 if (typeof Element.prototype.releasePointerCapture !== "function") {
   Element.prototype.releasePointerCapture = () => {}
 }
+
+// Phase 7's infinite scroll observes a sentinel with `IntersectionObserver`,
+// which jsdom does not implement at all. Installed unconditionally so the suite
+// never depends on a future jsdom gaining a real (and untriggerable) one; the
+// stub exposes `emit()` for tests and is reset in `afterEach` above.
+installIntersectionObserver()

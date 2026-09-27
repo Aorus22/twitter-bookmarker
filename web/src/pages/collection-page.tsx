@@ -7,14 +7,19 @@ import {
   CollectionFilterEmptyState,
   CollectionToolbar,
   FilterControl,
+  GalleryBottomLoader,
   GalleryErrorState,
   GalleryMasonry,
+  InfiniteSentinel,
   MasonrySkeleton,
   PostCard,
 } from "@/components/gallery"
 import { useGalleryQuery, usePosts } from "@/hooks"
 import { formatCollectionCounts } from "@/lib/collection-meta"
-import { BACK_TO_COLLECTIONS_LABEL } from "@/lib/messages"
+import {
+  BACK_TO_COLLECTIONS_LABEL,
+  LOADING_POSTS_LABEL,
+} from "@/lib/messages"
 import { pickPlaceholderGradient } from "@/lib/placeholder"
 import { selectPostsViewState } from "@/lib/posts-state"
 import { scrollNearTop } from "@/lib/scroll"
@@ -31,12 +36,21 @@ import { scrollNearTop } from "@/lib/scroll"
  * Discovery (Phase 6): `useGalleryQuery` owns search/filter/sort in the URL and
  * derives the exact request params, `usePosts` resets pages/cursor the moment
  * the query key changes, and a query-change effect scrolls near the top
- * (PRD-2 §76/§77). Exactly one content state renders:
+ * (PRD-2 §76/§77).
+ *
+ * Paging (Phase 7): `usePosts` accumulates pages of 30 and exposes
+ * `loadMore`/`hasMore`/`isLoadingMore`. An `InfiniteSentinel` after the masonry
+ * requests the next page ~600px before the bottom; the already-loaded cards stay
+ * mounted while a page loads and only the small `GalleryBottomLoader` appears
+ * below them (never a full-page skeleton). `loadMore` never scrolls.
+ *
+ * Exactly one content state renders:
  *   loading          → `MasonrySkeleton` (never a blank page, PRD-2 §35)
  *   error            → `GalleryErrorState` with the PRD-2 §61 copy + Retry
  *   empty collection → `This collection is empty` (PRD-2 §60)
  *   empty filters    → `No posts match your filters` + a working `Clear filters`
- *   posts            → `GalleryMasonry` of `PostCard`s
+ *   posts            → `GalleryMasonry` of `PostCard`s, the bottom loader while
+ *                      a page is in flight, and the sentinel
  */
 export function CollectionPage() {
   const { filename } = useParams<{ filename: string }>()
@@ -53,10 +67,16 @@ export function CollectionPage() {
     requestParams,
   } = useGalleryQuery()
 
-  const { posts, status, errorMessage, collection, refetch } = usePosts(
-    filename,
-    requestParams
-  )
+  const {
+    posts,
+    status,
+    errorMessage,
+    collection,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    refetch,
+  } = usePosts(filename, requestParams)
 
   // PRD-2 §77: on any search/filter/sort change the loaded pages and cursor are
   // already reset by `usePosts`' request key; this adds the "scroll near the
@@ -137,7 +157,9 @@ export function CollectionPage() {
         data-testid="collection-content"
         data-view-state={viewState}
       >
-        {viewState === "loading" ? <MasonrySkeleton label="Loading posts" /> : null}
+        {viewState === "loading" ? (
+          <MasonrySkeleton label={LOADING_POSTS_LABEL} />
+        ) : null}
 
         {viewState === "error" ? (
           <GalleryErrorState message={errorMessage} onRetry={refetch} />
@@ -150,11 +172,18 @@ export function CollectionPage() {
         ) : null}
 
         {viewState === "posts" ? (
-          <GalleryMasonry>
-            {posts.map((post) => (
-              <PostCard key={post.tweet_id} post={post} />
-            ))}
-          </GalleryMasonry>
+          <>
+            <GalleryMasonry>
+              {posts.map((post) => (
+                <PostCard key={post.tweet_id} post={post} />
+              ))}
+            </GalleryMasonry>
+            {/* A page load never hides the cards above: only this compact row
+                appears (PRD-2 §35). */}
+            {isLoadingMore ? <GalleryBottomLoader /> : null}
+            {/* Decorative scroll trigger; disconnects once `has_more` is false. */}
+            <InfiniteSentinel onIntersect={loadMore} disabled={!hasMore} />
+          </>
         ) : null}
       </div>
     </div>

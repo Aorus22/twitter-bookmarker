@@ -5,6 +5,9 @@ npm-debug.log*
 # Extension build output
 extension/dist/
 
+# Web build output
+web/dist/
+
 # Go build output
 backend/bin/
 twitter-bookmarker-server

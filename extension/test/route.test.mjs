@@ -9,7 +9,23 @@ import assert from "node:assert/strict";
 
 import { ROUTE_POLL_INTERVAL_MS, isBookmarksRoute, watchRoute } from "../src/content/route.ts";
 
-test("isBookmarksRoute accepts only /i/bookmarks (with trailing slash/query/origin)", () => {
+test("isBookmarksRoute accepts /i/history (canonical) with trailing slash/query/origin", () => {
+  const accepted = [
+    "/i/history",
+    "/i/history/",
+    "/i/history?foo=1",
+    "/i/history/?x=1&y=2",
+    "/i/history#section",
+    "https://x.com/i/history",
+    "https://x.com/i/history/",
+    "https://x.com/i/history/?a=b#c",
+  ];
+  for (const pathname of accepted) {
+    assert.equal(isBookmarksRoute(pathname), true, `expected ${pathname} to be accepted`);
+  }
+});
+
+test("isBookmarksRoute still accepts the legacy /i/bookmarks alias", () => {
   const accepted = [
     "/i/bookmarks",
     "/i/bookmarks/",
@@ -37,6 +53,9 @@ test("isBookmarksRoute rejects every excluded route", () => {
     "/i/lists",
     "/i/lists/123",
     "/search?q=typescript",
+    "/i/history-extra",
+    "/i/history/extra",
+    "/i/histor",
     "/i/bookmarks-extra",
     "/i/bookmarks/extra",
     "/i/bookmark",

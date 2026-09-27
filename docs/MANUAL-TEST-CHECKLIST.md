@@ -18,7 +18,7 @@ an observable expected result, and what to inspect on disk.
 | Node ≥ 20 + npm | `node --version && npm --version` |
 | Chrome / Chromium | any recent stable |
 | `python3` (CSV/JSON inspection) | `python3 --version` |
-| A signed-in X account with at least 6 bookmarks | `https://x.com/i/bookmarks` |
+| A signed-in X account with at least 6 bookmarks | `https://x.com/i/history` |
 
 ### Build and run
 
@@ -107,7 +107,7 @@ Set display mode to **Popover** first; switch to **Inline** only for scenario B9
 **Steps**
 1. `make run` (the server logs `listening=127.0.0.1:43121` and the storage dir
    as structured `slog` text).
-2. Open `https://x.com/i/bookmarks`; wait for organizers to appear.
+2. Open `https://x.com/i/history`; wait for organizers to appear.
 3. Click **Linux** on any tweet.
 
 **Expected**
@@ -249,7 +249,7 @@ cat ~/.twitter-bookmarker/linux-stuff.csv   # unchanged
 ### B3 — Browser reload shows `✓ Saved`  ·  PRD §68 *Browser reload*
 
 **Steps**
-1. Save a tweet, then hard-reload `https://x.com/i/bookmarks` (F5).
+1. Save a tweet, then hard-reload `https://x.com/i/history` (F5).
 2. Wait for the timeline and organizers to render.
 
 **Expected**
@@ -269,7 +269,7 @@ cat ~/.twitter-bookmarker/linux-stuff.csv   # unchanged
 1. Stop the server. Delete only the derived index:
    `rm ~/.twitter-bookmarker/index.json`
 2. `make run` again.
-3. Reload `https://x.com/i/bookmarks`.
+3. Reload `https://x.com/i/history`.
 
 **Expected**
 - Startup log reports an index rebuild; the server starts normally.
@@ -308,7 +308,7 @@ python3 -m json.tool ~/.twitter-bookmarker/index.json   # valid again
 ### B6 — Popup live reorder without reload  ·  PRD §51 / §64
 
 **Steps**
-1. Keep `https://x.com/i/bookmarks` open with organizers visible.
+1. Keep `https://x.com/i/history` open with organizers visible.
 2. In the popup, drag **Design** above **AI**.
 3. Without reloading X, look at an organizer (popover or inline).
 
@@ -420,9 +420,9 @@ python3 -c "import csv; print(repr(list(csv.reader(open('$HOME/.twitter-bookmark
 ### D1 — SPA navigation away/back  ·  PRD §64 *navigates away / returns*
 
 **Steps**
-1. On `https://x.com/i/bookmarks`, confirm organizers are present.
+1. On `https://x.com/i/history`, confirm organizers are present.
 2. Click a tweet or a nav item to leave Bookmarks (same tab, no reload).
-3. Return to `https://x.com/i/bookmarks` via X's own navigation.
+3. Return to `https://x.com/i/history` via X's own navigation.
 
 **Expected**
 - Leaving removes all injected controls; unrelated timelines never get
@@ -436,7 +436,7 @@ python3 -c "import csv; print(repr(list(csv.reader(open('$HOME/.twitter-bookmark
 ### D2 — Infinite scroll  ·  PRD §64 *Infinite scrolling*
 
 **Steps**
-1. Scroll `https://x.com/i/bookmarks` to load several pages of older tweets.
+1. Scroll `https://x.com/i/history` to load several pages of older tweets.
 
 **Expected**
 - Every newly loaded row receives controls exactly once.

@@ -15,7 +15,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://x.com/i/bookmarks*"],
+      "matches": [
+        "https://x.com/i/history*",
+        "https://x.com/i/bookmarks*"
+      ],
       "js": ["content/content.js"],
       "run_at": "document_idle"
     }

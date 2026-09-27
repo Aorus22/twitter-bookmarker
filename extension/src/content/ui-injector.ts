@@ -146,7 +146,7 @@ export function removeOrganizer(article: HTMLElement): void {
 
 /**
  * Remove every injected root and every injection marker. Called when the route
- * leaves `/i/bookmarks` so returning can inject fresh (XI-02).
+ * leaves the bookmarks timeline so returning can inject fresh (XI-02).
  */
 export function removeAllOrganizers(doc: Document = defaultDocument()): void {
   for (const root of queryAll<HTMLElement>(doc, "organizerRoot")) root.remove();

@@ -50,6 +50,23 @@ async function verifyManifest() {
   assert.deepEqual(manifest.background, { service_worker: "background/service-worker.js", type: "module" });
   pass("background service worker is an ES module");
 
+  // The Bookmarks timeline moved from /i/bookmarks to /i/history; the manifest
+  // match list and the route matcher must agree, or the content script either
+  // never loads or never activates. This catches drift between the two.
+  assert.deepEqual(manifest.content_scripts[0].matches, [
+    "https://x.com/i/history*",
+    "https://x.com/i/bookmarks*",
+  ]);
+  pass("content script matches the canonical /i/history plus the legacy /i/bookmarks alias");
+  const contentBundle = await readFile(
+    path.join(DIST, manifest.content_scripts[0].js[0]),
+    "utf8",
+  );
+  for (const route of ["/i/history", "/i/bookmarks"]) {
+    assert.ok(contentBundle.includes(route), `content bundle is missing route literal ${route}`);
+  }
+  pass("content bundle contains both accepted route literals");
+
   const referenced = [
     manifest.background.service_worker,
     manifest.action.default_popup,

@@ -8,15 +8,24 @@
  * both (XI-02).
  */
 
-/** The only path the organizer may activate on (PRD §26). */
-const BOOKMARKS_PATH = "/i/bookmarks";
+/**
+ * Paths the organizer may activate on (PRD §26, XI-01).
+ *
+ * X moved the Bookmarks timeline from `/i/bookmarks` to `/i/history`. The new
+ * canonical path is listed first; the legacy one is kept as a tolerated alias so
+ * that a client-side redirect from an old link, or an account still served the
+ * old route, does not leave the page without an active organizer. Remove the
+ * legacy entry once `/i/bookmarks` is fully retired.
+ */
+export const BOOKMARKS_PATHS = ["/i/history", "/i/bookmarks"] as const;
 
 /** How often the fallback watcher re-checks `location.href`. */
 export const ROUTE_POLL_INTERVAL_MS = 500;
 
 /**
- * True only for `https://x.com/i/bookmarks` and `/i/bookmarks/`, with or
- * without a query string/hash, and with or without an origin (XI-01).
+ * True only for the Bookmarks timeline — `/i/history` (canonical) or
+ * `/i/bookmarks` (legacy alias) — with or without a trailing slash, query
+ * string, hash, or origin (XI-01).
  */
 export function isBookmarksRoute(pathname?: string): boolean {
   const input = pathname ?? currentPathname();
@@ -37,7 +46,9 @@ export function isBookmarksRoute(pathname?: string): boolean {
   const queryIndex = path.search(/[?#]/);
   if (queryIndex >= 0) path = path.slice(0, queryIndex);
 
-  return path === BOOKMARKS_PATH || path === `${BOOKMARKS_PATH}/`;
+  return BOOKMARKS_PATHS.some(
+    (candidate) => path === candidate || path === `${candidate}/`,
+  );
 }
 
 function currentPathname(): string {

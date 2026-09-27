@@ -3,7 +3,7 @@
 A single-user Chrome (Manifest V3) extension plus a small local Go server that
 turns X bookmarks into per-category CSV files.
 
-Open `https://x.com/i/bookmarks`, click a category on a tweet, and the extension
+Open `https://x.com/i/history`, click a category on a tweet, and the extension
 extracts the tweet metadata and appends it to
 `~/.twitter-bookmarker/<category>.csv`. Optionally, the tweet is removed from X
 Bookmarks **after** the CSV write is confirmed.
@@ -27,7 +27,7 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 
 ```text
 ┌────────────────────────── Chrome ──────────────────────────┐
-│  Content script (x.com/i/bookmarks)                        │
+│  Content script (x.com/i/history)                        │
 │    route watcher → single MutationObserver → organizer UI  │
 │    save controller ──message──▶ MV3 service worker ──HTTP──┼──▶ 127.0.0.1:43121
 │  Popup: categories, colors, order, settings                 │      (Go server)
@@ -116,7 +116,7 @@ reload.
 
 ### 5. Use it
 
-1. Open `https://x.com/i/bookmarks`
+1. Open `https://x.com/i/history`
 2. Each tweet gets an organizer (`[Organize]` in popover mode, category chips in
    inline mode)
 3. Click **Linux** on a tweet → success toast `Saved to Linux`, controls become
@@ -314,6 +314,22 @@ The saved state comes from `GET /v1/index` at page entry. Confirm the backend is
 running and `index.json` is valid, then reload the Bookmarks page. If the entry
 fetch failed while the backend was down, the extension re-fetches once when a
 save next confirms the backend is reachable.
+
+### Organizer controls stop appearing (X changed its route)
+
+X moved the Bookmarks timeline from `/i/bookmarks` to **`/i/history`**. The
+accepted paths live in two places that must stay in sync:
+
+| File | What it controls |
+|---|---|
+| `extension/src/content/route.ts` → `BOOKMARKS_PATHS` | when the organizer activates |
+| `extension/manifest.json` → `content_scripts[0].matches` | when the script is injected at all |
+
+`/i/bookmarks` is still accepted as a legacy alias so an old link or a
+client-side redirect does not leave the page without the organizer. If X moves
+the timeline again, add the new path to both files, then
+`cd extension && npm run build` and reload the unpacked extension.
+`npm run verify` asserts the two lists agree.
 
 ### Organizer controls stop appearing (X changed its DOM)
 

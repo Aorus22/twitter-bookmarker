@@ -328,11 +328,11 @@ Supporting guarantees:
 ## Development
 
 ```bash
-make build          # backend binary + extension dist/
-make test           # go test ./... -race, then npm test
-make lint           # gofmt check + go vet + tsc --noEmit
+make build          # backend binary + extension dist/ + web/dist
+make test           # go test ./... -race, then npm test, then pnpm test
+make lint           # gofmt check + go vet + extension tsc + web tsc
 make fmt            # gofmt -w backend
-make clean          # remove backend/bin + extension/dist (never user data)
+make clean          # remove backend/bin + extension/dist + web/dist (never user data)
 make clean-storage  # DESTRUCTIVE: delete ~/.twitter-bookmarker (all CSVs)
 ```
 
@@ -346,9 +346,53 @@ npm test            # node --test test/*.test.mjs (147 tests)
 npm run verify      # post-build dist/ verification
 ```
 
+### Phase 2 workflow (backend + web gallery)
+
+The SPA in `web/` is a second, optional surface: the extension still writes the
+CSVs and the Go backend still serves them. Develop the SPA with Vite HMR in two
+terminals — the dev server proxies `/api` to the backend, so no CORS setup and no
+rebuild between edits:
+
+```bash
+# terminal 1 — the Go API + web/dist (also picks up a rebuild of web/dist)
+make dev-backend
+# terminal 2 — the Vite dev server (http://localhost:5173, proxies /api → :43121)
+make dev-web
+```
+
+For a production run, build everything and use the single origin:
+
+```bash
+make build   # backend binary + extension/dist + web/dist
+make run     # http://127.0.0.1:43121/ serves the built SPA and the API
+```
+
+- Gallery home: `http://127.0.0.1:43121/`
+- One collection: `http://127.0.0.1:43121/collections/linux.csv`
+- Health: `http://127.0.0.1:43121/health`
+
+Web-only scripts (`cd web`):
+
+```bash
+pnpm test           # Vitest + Testing Library
+pnpm run typecheck  # tsc --noEmit
+pnpm build          # one-shot production bundle into web/dist/
+```
+
+Acceptance gates (`make build` first, so `web/dist` exists):
+
+```bash
+make verify          # every gate below, in order
+make verify-http     # scripts/check-gallery-acceptance.sh — PRD §80 + §82 over HTTP
+make verify-trace    # scripts/check-requirement-traceability.sh
+make verify-web      # scripts/check-web-acceptance.sh — real browser (agent-browser):
+                     # responsive 390/768/1440, axe-core a11y, keyboard/focus,
+                     # lightbox, and the live-CSV window-focus refetch
+```
+
 The full manual test procedure — every PRD §68 scenario with exact steps,
-expected observations, and disk checks — lives in
-**[`docs/MANUAL-TEST-CHECKLIST.md`](docs/MANUAL-TEST-CHECKLIST.md)**.
+expected observations, and disk checks, plus the PRD §82 end-to-end scenario —
+lives in **[`docs/MANUAL-TEST-CHECKLIST.md`](docs/MANUAL-TEST-CHECKLIST.md)**.
 
 ---
 

@@ -110,6 +110,7 @@ export STORAGE="${TWITTER_BOOKMARKER_DIR:-$HOME/.twitter-bookmarker}"
 | D2 | Infinite scroll | Browser |
 | D3 | DOM re-render (no duplicate controls) | Browser |
 | E1 | Toast visuals / stacking / click-through | Browser |
+| F1 | PRD §82 end-to-end gallery scenario (24 steps) | Backend + browser |
 
 ---
 
@@ -514,13 +515,92 @@ root.querySelector('[data-twitter-bookmarker-toast]').style.pointerEvents; // 'a
 
 ---
 
-## 4. Sign-off
+## 4. PRD §82 — end-to-end acceptance scenario (F1)
+
+The full integration walkthrough, in PRD order. Steps **1–15 and 22–24** are
+locked automatically by `bash scripts/check-gallery-acceptance.sh` (HTTP) and
+steps **16–21** by `bash scripts/check-web-acceptance.sh` (browser, axe and
+keyboard); both run under `make verify`. Do this by hand only when you need to
+see the pixels, or when the scripts are unavailable.
+
+Seed a disposable storage dir first (never the real one):
+
+```bash
+FIXTURE="$(mktemp -d)"
+bash scripts/seed-gallery-fixture.sh "$FIXTURE"
+TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
+  ./backend/bin/twitter-bookmarker-server &
+```
+
+### Steps 1–4 — start and open the gallery
+
+| # | Step | Expected |
+|---|---|---|
+| 1 | `curl -s http://127.0.0.1:43121/health` | `{"status":"ok"}` |
+| 2 | `ls "$FIXTURE"` | `ai.csv`, `linux.csv`, `design.csv` present |
+| 3 | Open `http://127.0.0.1:43121/` | Homepage hero + **My Collections** |
+| 4 | Look at the collection cards | **AI**, **Linux**, **Design**, each with post/media counts and a cover |
+
+### Steps 5–8 — open a collection
+
+| # | Step | Expected |
+|---|---|---|
+| 5 | Click **Linux** | URL becomes `/collections/linux.csv` |
+| 6 | Look at the masonry | 8 post cards, 1–4 columns by viewport width |
+| 7 | Find the 4-image tweet | Four tiles in a 2×2 grid, all decoded |
+| 8 | Find the text-only tweet | A text card with no media region — it is not dropped |
+
+### Steps 9–15 — search, filter, sort, paginate
+
+| # | Step | Expected |
+|---|---|---|
+| 9 | Type `wayland` in search | Results narrow to 2 cards |
+| 10 | Clear search, click **Filter** | Desktop: Popover; ≤767 px: bottom Sheet |
+| 11 | Bookmark Date → **Last 7 Days** | The saved-date window is set (7 of the 8 rows) |
+| 12 | Add a **Tweet Date** from-bound | Both ranges are now active |
+| 13 | Click **Apply** | Results shrink to the rows satisfying **both** ranges (5); every visible card matches |
+| 14 | Sort → **Newest Posted** | The newest tweet is first |
+| 15 | Scroll to the bottom | The next page loads via cursor; no duplicates, no full reload |
+
+### Steps 16–21 — lightbox, keyboard, original tweet
+
+| # | Step | Expected |
+|---|---|---|
+| 16 | Click an image tile | Lightbox dialog opens for that tweet |
+| 17 | Look at the media area | The clicked tweet's image, plus author/handle meta and a `n / total` counter |
+| 18 | Press `→` | The counter advances to the next media |
+| 19 | Press `←` | The counter returns to the previous media |
+| 20 | Inspect **Open on X** | `href` is the canonical `https://x.com/<user>/status/<id>`; `target="_blank"` + `rel="noopener noreferrer"` |
+| 21 | Click **Open on X** | The original tweet opens in a new tab (requires network); `Esc` closes the lightbox and returns focus to the tile |
+
+### Steps 22–24 — live data, no restart
+
+| # | Step | Expected |
+|---|---|---|
+| 22 | Save a new tweet through the extension (or `POST /v1/bookmarks` with `{"filename":"scenario.csv", ...}`) | `201 Created`; the row is appended to the live CSV |
+| 23 | Return to the gallery (or refocus the window) | The collection list and the open collection re-read the CSVs on `focus` |
+| 24 | Look at the gallery | The new collection/post appears **without restarting the backend**; `/health` still answers from the same process |
+
+**Accessibility sub-check (HARD-04).** Repeat steps 3–21 with a keyboard only
+(`Tab` / `Shift+Tab` / `Enter` / `Space` / arrows / `Esc`): every control is
+reachable, paints a visible focus ring, the lightbox traps `Tab`, `Esc` restores
+focus to the originating tile, and images carry an author-derived `alt`. With a
+screen reader, the nav, toolbar and lightbox announce meaningful names.
+
+**Responsive sub-check (HARD-03).** At 390 / 768 / 1440 px the masonry shows
+1 / 2 / 4 columns; **Filter** is a Sheet at 390 and a Popover at 1440; the
+wordmark is hidden at 390 px (the logo and the accessible name stay).
+
+---
+
+## 5. Sign-off
 
 - [ ] A1–A5 pass
 - [ ] B1–B8 pass
 - [ ] C1–C4 pass
 - [ ] D1–D3 pass
 - [ ] E1 passes
+- [ ] F1 (PRD §82, steps 1–24) passes
 - [ ] No server process left running (`pgrep -f twitter-bookmarker-server` is empty)
 
 **Residual automated coverage (do not re-test manually):** PRD §65 items 1–20

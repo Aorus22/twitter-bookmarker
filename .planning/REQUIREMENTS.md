@@ -89,11 +89,11 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### SCROLL — Infinite Scroll (Phase 7, PRD §34, §35, §44, §47, §68)
 
-- [ ] **SCROLL-01**: The collection gallery loads pages of 30 posts via an IntersectionObserver sentinel as the user approaches the end, with no numbered pagination and no primary "Load More" button
-- [ ] **SCROLL-02**: Initial collection loading renders masonry skeleton cards; subsequent page loads show a small bottom loader; the page is never blank during a fetch
-- [ ] **SCROLL-03**: Pages accumulate without duplicates, with `tweet_id` dedupe as a defensive measure; new bookmarks appended mid-scroll do not cause obvious repeated rows
-- [ ] **SCROLL-04**: The frontend consumes the opaque `next_cursor` and stops requesting when `has_more` is false
-- [ ] **SCROLL-05**: The collection route refetches on route entry, filter/sort/search change, window focus, and manual refresh — with no aggressive polling
+- [x] **SCROLL-01**: The collection gallery loads pages of 30 posts via an IntersectionObserver sentinel as the user approaches the end, with no numbered pagination and no primary "Load More" button
+- [x] **SCROLL-02**: Initial collection loading renders masonry skeleton cards; subsequent page loads show a small bottom loader; the page is never blank during a fetch
+- [x] **SCROLL-03**: Pages accumulate without duplicates, with `tweet_id` dedupe as a defensive measure; new bookmarks appended mid-scroll do not cause obvious repeated rows
+- [x] **SCROLL-04**: The frontend consumes the opaque `next_cursor` and stops requesting when `has_more` is false
+- [x] **SCROLL-05**: The collection route refetches on route entry, filter/sort/search change, window focus, and manual refresh — with no aggressive polling
 
 ### LIGHT — Media Lightbox (Phase 8, PRD §26, §27, §67)
 
@@ -212,11 +212,11 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | DISC-06 | 6 — Discovery Tools | Complete |
 | DISC-07 | 6 — Discovery Tools | Complete |
 | DISC-08 | 6 — Discovery Tools | Complete |
-| SCROLL-01 | 7 — Infinite Scroll | Pending |
-| SCROLL-02 | 7 — Infinite Scroll | Pending |
-| SCROLL-03 | 7 — Infinite Scroll | Pending |
-| SCROLL-04 | 7 — Infinite Scroll | Pending |
-| SCROLL-05 | 7 — Infinite Scroll | Pending |
+| SCROLL-01 | 7 — Infinite Scroll | Complete |
+| SCROLL-02 | 7 — Infinite Scroll | Complete |
+| SCROLL-03 | 7 — Infinite Scroll | Complete |
+| SCROLL-04 | 7 — Infinite Scroll | Complete |
+| SCROLL-05 | 7 — Infinite Scroll | Complete |
 | LIGHT-01 | 8 — Media Lightbox | Pending |
 | LIGHT-02 | 8 — Media Lightbox | Pending |
 | LIGHT-03 | 8 — Media Lightbox | Pending |

@@ -1,7 +1,7 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v2.0",
+  "milestone": "v2.0 — Local Web Gallery",
   "phases": [
     {
       "number": "1",
@@ -11,7 +11,7 @@
     {
       "number": "2",
       "name": "Gallery HTTP API",
-      "status": "in_progress"
+      "status": "pending"
     },
     {
       "number": "3",
@@ -55,9 +55,9 @@
     }
   ],
   "next": {
-    "command": "/gsd:execute-phase 2",
-    "label": "Execute phase 2",
-    "reason": "Phase 1 complete and verified; phase 2 is next"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (plan phase 02)",
+    "reason": "Phase 02 of 10 — needs a plan"
   },
-  "updated_at": "2026-09-27T15:00:00.000Z"
+  "updated_at": "2026-09-27T14:43:24.743Z"
 }

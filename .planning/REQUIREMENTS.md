@@ -12,22 +12,22 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### GAL — Gallery Read Layer (Phase 1, PRD §7, §39, §42, §45–§51)
 
-- [ ] **GAL-01**: The backend discovers every valid `*.csv` under the storage directory as one collection, and only `*.csv` (no `index.json`, backups, temp files, or hidden files)
-- [ ] **GAL-02**: A collection's display name is derived from its filename (`ai-and-llm.csv` → `AI And LLM`), with no matching against extension category config and no merging of renamed categories
-- [ ] **GAL-03**: Collections are ordered by `last_saved_at` descending, with empty or timestamp-less collections after those that have data
-- [ ] **GAL-04**: For each collection the backend computes `post_count` (bookmark rows), `media_count` (total items across all JSON `media` arrays), `last_saved_at` (maximum `saved_at`), and `cover_media` (up to four newest media by bookmarked timestamp)
-- [ ] **GAL-05**: CSV is parsed with `encoding/csv`, correctly handling commas, quoted fields, multiline text, unicode, emoji, and the JSON `media` field
-- [ ] **GAL-06**: The `media` column is parsed as a JSON string array; malformed JSON yields `media = []` for that row plus a warning log, and never crashes the server or hides the post
-- [ ] **GAL-07**: A malformed row is skipped with a warning log and parsing continues; `url`, `author`, `username`, `tweet_date`, and `saved_at` are required for a gallery item, while `text` and `media` may be empty
-- [ ] **GAL-08**: `tweet_id` is derived from the canonical tweet URL (reusing existing normalization/extraction) without adding a CSV column
-- [ ] **GAL-09**: Search is case-insensitive normalized substring matching over `author`, `username`, and `text`; query whitespace is trimmed; an empty query means no search; no fuzzy matching, full-text index, or client-supplied regex
-- [ ] **GAL-10**: Tweet-date and bookmarked-date ranges are supported independently, are combinable, and are inclusive; the backend makes no timezone assumptions about the caller
-- [ ] **GAL-11**: Four sort modes are supported — `saved_desc` (default), `saved_asc`, `tweet_desc`, `tweet_asc`
-- [ ] **GAL-12**: Pagination is cursor-based and opaque to the frontend, carrying the selected sort timestamp plus tweet ID as tie-breaker; numeric page offsets are never the public contract
-- [ ] **GAL-13**: Search, both date filters, and sort are all applied before pagination
-- [ ] **GAL-14**: Every request reads current CSV state — no persistent cache may hide a freshly appended bookmark until restart
-- [ ] **GAL-15**: A collection filename from the request resolves only inside the storage directory; `../`, `/`, `\`, and `~` are rejected along with any non-`*.csv` name, reusing existing SafeJoin/filename validation
-- [ ] **GAL-16**: Gallery parsing and query logic lives in its own module (`backend/internal/gallery/`), not stacked inside HTTP handlers
+- [x] **GAL-01**: The backend discovers every valid `*.csv` under the storage directory as one collection, and only `*.csv` (no `index.json`, backups, temp files, or hidden files)
+- [x] **GAL-02**: A collection's display name is derived from its filename (`ai-and-llm.csv` → `AI And LLM`), with no matching against extension category config and no merging of renamed categories
+- [x] **GAL-03**: Collections are ordered by `last_saved_at` descending, with empty or timestamp-less collections after those that have data
+- [x] **GAL-04**: For each collection the backend computes `post_count` (bookmark rows), `media_count` (total items across all JSON `media` arrays), `last_saved_at` (maximum `saved_at`), and `cover_media` (up to four newest media by bookmarked timestamp)
+- [x] **GAL-05**: CSV is parsed with `encoding/csv`, correctly handling commas, quoted fields, multiline text, unicode, emoji, and the JSON `media` field
+- [x] **GAL-06**: The `media` column is parsed as a JSON string array; malformed JSON yields `media = []` for that row plus a warning log, and never crashes the server or hides the post
+- [x] **GAL-07**: A malformed row is skipped with a warning log and parsing continues; `url`, `author`, `username`, `tweet_date`, and `saved_at` are required for a gallery item, while `text` and `media` may be empty
+- [x] **GAL-08**: `tweet_id` is derived from the canonical tweet URL (reusing existing normalization/extraction) without adding a CSV column
+- [x] **GAL-09**: Search is case-insensitive normalized substring matching over `author`, `username`, and `text`; query whitespace is trimmed; an empty query means no search; no fuzzy matching, full-text index, or client-supplied regex
+- [x] **GAL-10**: Tweet-date and bookmarked-date ranges are supported independently, are combinable, and are inclusive; the backend makes no timezone assumptions about the caller
+- [x] **GAL-11**: Four sort modes are supported — `saved_desc` (default), `saved_asc`, `tweet_desc`, `tweet_asc`
+- [x] **GAL-12**: Pagination is cursor-based and opaque to the frontend, carrying the selected sort timestamp plus tweet ID as tie-breaker; numeric page offsets are never the public contract
+- [x] **GAL-13**: Search, both date filters, and sort are all applied before pagination
+- [x] **GAL-14**: Every request reads current CSV state — no persistent cache may hide a freshly appended bookmark until restart
+- [x] **GAL-15**: A collection filename from the request resolves only inside the storage directory; `../`, `/`, `\`, and `~` are rejected along with any non-`*.csv` name, reusing existing SafeJoin/filename validation
+- [x] **GAL-16**: Gallery parsing and query logic lives in its own module (`backend/internal/gallery/`), not stacked inside HTTP handlers
 
 ### API — Gallery HTTP API (Phase 2, PRD §36–§41, §54)
 
@@ -149,20 +149,94 @@ Explicit exclusions with reasoning (see `PROJECT.md` Out of Scope for the full l
 
 ## Traceability
 
+One row per requirement. `phase.complete` flips `Pending` → `Complete` automatically.
+
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GAL-01 … GAL-16 | 1 — Gallery Read Layer | Pending |
-| API-01 … API-07 | 2 — Gallery HTTP API | Pending |
-| WEB-01 … WEB-08 | 3 — Web Scaffold, Theme & API Client | Pending |
-| HOME-01 … HOME-09 | 4 — Gallery Homepage | Pending |
-| COLL-01 … COLL-11 | 5 — Collection Gallery | Pending |
-| DISC-01 … DISC-08 | 6 — Discovery Tools | Pending |
-| SCROLL-01 … SCROLL-05 | 7 — Infinite Scroll | Pending |
-| LIGHT-01 … LIGHT-06 | 8 — Media Lightbox | Pending |
-| PROD-01 … PROD-06 | 9 — Production Serving | Pending |
-| HARD-01 … HARD-06 | 10 — Hardening, Accessibility & Responsive | Pending |
+| GAL-01 | 1 — Gallery Read Layer | Complete |
+| GAL-02 | 1 — Gallery Read Layer | Complete |
+| GAL-03 | 1 — Gallery Read Layer | Complete |
+| GAL-04 | 1 — Gallery Read Layer | Complete |
+| GAL-05 | 1 — Gallery Read Layer | Complete |
+| GAL-06 | 1 — Gallery Read Layer | Complete |
+| GAL-07 | 1 — Gallery Read Layer | Complete |
+| GAL-08 | 1 — Gallery Read Layer | Complete |
+| GAL-09 | 1 — Gallery Read Layer | Complete |
+| GAL-10 | 1 — Gallery Read Layer | Complete |
+| GAL-11 | 1 — Gallery Read Layer | Complete |
+| GAL-12 | 1 — Gallery Read Layer | Complete |
+| GAL-13 | 1 — Gallery Read Layer | Complete |
+| GAL-14 | 1 — Gallery Read Layer | Complete |
+| GAL-15 | 1 — Gallery Read Layer | Complete |
+| GAL-16 | 1 — Gallery Read Layer | Complete |
+| API-01 | 2 — Gallery HTTP API | Pending |
+| API-02 | 2 — Gallery HTTP API | Pending |
+| API-03 | 2 — Gallery HTTP API | Pending |
+| API-04 | 2 — Gallery HTTP API | Pending |
+| API-05 | 2 — Gallery HTTP API | Pending |
+| API-06 | 2 — Gallery HTTP API | Pending |
+| API-07 | 2 — Gallery HTTP API | Pending |
+| WEB-01 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-02 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-03 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-04 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-05 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-06 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-07 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-08 | 3 — Web Scaffold, Theme & API Client | Pending |
+| HOME-01 | 4 — Gallery Homepage | Pending |
+| HOME-02 | 4 — Gallery Homepage | Pending |
+| HOME-03 | 4 — Gallery Homepage | Pending |
+| HOME-04 | 4 — Gallery Homepage | Pending |
+| HOME-05 | 4 — Gallery Homepage | Pending |
+| HOME-06 | 4 — Gallery Homepage | Pending |
+| HOME-07 | 4 — Gallery Homepage | Pending |
+| HOME-08 | 4 — Gallery Homepage | Pending |
+| HOME-09 | 4 — Gallery Homepage | Pending |
+| COLL-01 | 5 — Collection Gallery | Pending |
+| COLL-02 | 5 — Collection Gallery | Pending |
+| COLL-03 | 5 — Collection Gallery | Pending |
+| COLL-04 | 5 — Collection Gallery | Pending |
+| COLL-05 | 5 — Collection Gallery | Pending |
+| COLL-06 | 5 — Collection Gallery | Pending |
+| COLL-07 | 5 — Collection Gallery | Pending |
+| COLL-08 | 5 — Collection Gallery | Pending |
+| COLL-09 | 5 — Collection Gallery | Pending |
+| COLL-10 | 5 — Collection Gallery | Pending |
+| COLL-11 | 5 — Collection Gallery | Pending |
+| DISC-01 | 6 — Discovery Tools | Pending |
+| DISC-02 | 6 — Discovery Tools | Pending |
+| DISC-03 | 6 — Discovery Tools | Pending |
+| DISC-04 | 6 — Discovery Tools | Pending |
+| DISC-05 | 6 — Discovery Tools | Pending |
+| DISC-06 | 6 — Discovery Tools | Pending |
+| DISC-07 | 6 — Discovery Tools | Pending |
+| DISC-08 | 6 — Discovery Tools | Pending |
+| SCROLL-01 | 7 — Infinite Scroll | Pending |
+| SCROLL-02 | 7 — Infinite Scroll | Pending |
+| SCROLL-03 | 7 — Infinite Scroll | Pending |
+| SCROLL-04 | 7 — Infinite Scroll | Pending |
+| SCROLL-05 | 7 — Infinite Scroll | Pending |
+| LIGHT-01 | 8 — Media Lightbox | Pending |
+| LIGHT-02 | 8 — Media Lightbox | Pending |
+| LIGHT-03 | 8 — Media Lightbox | Pending |
+| LIGHT-04 | 8 — Media Lightbox | Pending |
+| LIGHT-05 | 8 — Media Lightbox | Pending |
+| LIGHT-06 | 8 — Media Lightbox | Pending |
+| PROD-01 | 9 — Production Serving | Pending |
+| PROD-02 | 9 — Production Serving | Pending |
+| PROD-03 | 9 — Production Serving | Pending |
+| PROD-04 | 9 — Production Serving | Pending |
+| PROD-05 | 9 — Production Serving | Pending |
+| PROD-06 | 9 — Production Serving | Pending |
+| HARD-01 | 10 — Hardening, Accessibility & Responsive | Pending |
+| HARD-02 | 10 — Hardening, Accessibility & Responsive | Pending |
+| HARD-03 | 10 — Hardening, Accessibility & Responsive | Pending |
+| HARD-04 | 10 — Hardening, Accessibility & Responsive | Pending |
+| HARD-05 | 10 — Hardening, Accessibility & Responsive | Pending |
+| HARD-06 | 10 — Hardening, Accessibility & Responsive | Pending |
 
-**Coverage:** 87 requirements, 87 mapped, 0 unmapped, 0 duplicated.
+**Coverage:** 82 requirements, 82 mapped, 0 unmapped, 0 duplicated.
 
 ---
 *Created: 2026-09-27 — milestone v2.0 from PRD-2.md*

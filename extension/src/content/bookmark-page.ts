@@ -10,8 +10,15 @@ import { sendExtensionMessage } from "../shared/messages.ts";
 import type { GetSavedIndexResponse } from "../shared/messages.ts";
 import { getStore } from "../shared/storage.ts";
 import type { Category, Settings, Store } from "../shared/types.ts";
+import {
+  createResilientObserver,
+  createSavedIndexRefresher,
+  runBoundedCleanup,
+} from "./hardening.ts";
+import type { ResilientObserver, SavedIndexRefresher } from "./hardening.ts";
 import { closeStalePopover } from "./organizer.ts";
 import type { OrganizerCallbacks } from "./organizer.ts";
+import { dismissAllToasts } from "./toast.ts";
 import { EXTRACTION_ERROR, extractTweet } from "./tweet-extractor.ts";
 import type { ExtractionResult } from "./tweet-extractor.ts";
 import { injectOrganizer, removeAllOrganizers, rerenderAll, setSaved, setSaving } from "./ui-injector.ts";
@@ -68,6 +75,8 @@ export interface BookmarksPageDeps {
   onSelect?: OrganizerCallbacks["onSelect"];
   /** Surfaces extraction failures (defaults to `console.warn`). */
   onExtractionError?: (article: HTMLElement, reason: string) => void;
+  /** Removes every visible toast on route leave (defaults to `dismissAllToasts`). */
+  dismissToasts?: () => void;
   /** Debounce override, default {@link SWEEP_DEBOUNCE_MS}. */
   sweepDebounceMs?: number;
 }
@@ -87,6 +96,7 @@ interface ResolvedDeps {
   setSavingState: (doc: Document, tweetId: string, saving: boolean) => void;
   onSelect: OrganizerCallbacks["onSelect"];
   onExtractionError: (article: HTMLElement, reason: string) => void;
+  dismissToasts: () => void;
   sweepDebounceMs: number;
 }
 
@@ -94,11 +104,13 @@ interface PageState {
   /** Identity token, so a stop/restart during an `await` cannot cross wires. */
   token: object;
   deps: ResolvedDeps;
-  observer: MutationObserverLike | null;
+  observer: ResilientObserver | null;
   timer: number | null;
   categories: Category[];
   settings: Settings;
   savedIds: Set<string>;
+  /** Coalescing saved-index fetch (PRD §54). */
+  refresher: SavedIndexRefresher;
 }
 
 let state: PageState | null = null;
@@ -140,6 +152,21 @@ export async function loadSavedIndexFromServiceWorker(): Promise<ReadonlySet<str
   }
 }
 
+/**
+ * Strict variant used by the page lifecycle: a failed fetch **throws** so the
+ * saved-index refresher stays stale and can retry once the backend is back
+ * (PRD §64 "backend stopped", TEST-05). {@link loadSavedIndexFromServiceWorker}
+ * remains the lenient, never-throwing variant for callers that cannot handle a
+ * rejection.
+ */
+export async function fetchSavedIndex(): Promise<ReadonlySet<string>> {
+  const response = await sendExtensionMessage<GetSavedIndexResponse>({ type: "GET_SAVED_INDEX" });
+  if (!response.ok || response.index === null) {
+    throw new Error(response.error ?? "saved_index_unavailable");
+  }
+  return new Set<string>(Object.keys(response.index.items));
+}
+
 function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
   return {
     document: user.document ?? document,
@@ -147,7 +174,7 @@ function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
     setTimeout: user.setTimeout ?? ((handler, timeout) => globalThis.setTimeout(handler, timeout)),
     clearTimeout: user.clearTimeout ?? ((id) => globalThis.clearTimeout(id)),
     loadStore: user.loadStore ?? getStore,
-    loadSavedIndex: user.loadSavedIndex ?? loadSavedIndexFromServiceWorker,
+    loadSavedIndex: user.loadSavedIndex ?? fetchSavedIndex,
     extract: user.extract ?? ((article) => extractTweet(article)),
     inject: user.inject ?? injectOrganizer,
     removeAll: user.removeAll ?? removeAllOrganizers,
@@ -156,6 +183,7 @@ function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
     setSavingState: user.setSavingState ?? ((doc, tweetId, saving) => setSaving(tweetId, saving, doc)),
     onSelect: user.onSelect ?? defaultOnSelect,
     onExtractionError: user.onExtractionError ?? defaultOnExtractionError,
+    dismissToasts: user.dismissToasts ?? dismissAllToasts,
     sweepDebounceMs: user.sweepDebounceMs ?? SWEEP_DEBOUNCE_MS,
   };
 }
@@ -248,38 +276,36 @@ function scheduleSweep(current: PageState): void {
 
 /**
  * The one and only observer callback. Mutations originating inside our own
- * roots are ignored, and the whole body is guarded so one bad tweet cannot kill
- * observation (XI-03).
+ * roots are ignored. The body is deliberately **not** wrapped in its own
+ * try/catch: it runs behind the resilient observer from `hardening.ts`, which
+ * contains any unexpected throw, re-arms observation, and reschedules a sweep
+ * so a bad mutation set cannot kill observation (XI-03, TEST-05).
  */
 function handleMutations(records: MutationRecord[]): void {
   const current = state;
   if (!current) return;
 
-  try {
-    let needsSweep = false;
-    for (const record of records) {
-      if (isElement(record.target) && closestAny(record.target, "organizerRoot")) continue;
+  let needsSweep = false;
+  for (const record of records) {
+    if (isElement(record.target) && closestAny(record.target, "organizerRoot")) continue;
 
-      // A removed tweet may have owned the open popover.
-      if (record.removedNodes !== undefined && record.removedNodes.length > 0) closeStalePopover();
+    // A removed tweet may have owned the open popover.
+    if (record.removedNodes !== undefined && record.removedNodes.length > 0) closeStalePopover();
 
-      for (const node of Array.from(record.addedNodes ?? [])) {
-        if (!isElement(node)) continue;
-        if (closestAny(node, "organizerRoot")) continue;
-        needsSweep = true;
+    for (const node of Array.from(record.addedNodes ?? [])) {
+      if (!isElement(node)) continue;
+      if (closestAny(node, "organizerRoot")) continue;
+      needsSweep = true;
 
-        if (matchesAny(node, "tweetArticle")) {
-          processArticle(node as HTMLElement, current);
-        } else {
-          for (const article of queryAll<HTMLElement>(node, "tweetArticle")) processArticle(article, current);
-        }
+      if (matchesAny(node, "tweetArticle")) {
+        processArticle(node as HTMLElement, current);
+      } else {
+        for (const article of queryAll<HTMLElement>(node, "tweetArticle")) processArticle(article, current);
       }
     }
-
-    if (needsSweep) scheduleSweep(current);
-  } catch (error) {
-    console.warn("[twitter-bookmarker] observer callback failed", error);
   }
+
+  if (needsSweep) scheduleSweep(current);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -296,6 +322,25 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
 
   const deps = resolveDeps(userDeps);
   const token = {};
+  // One coalescing index fetch per page entry. `apply` is guarded by the token
+  // so a fetch that resolves after a route change cannot touch dead state.
+  const refresher = createSavedIndexRefresher({
+    load: deps.loadSavedIndex,
+    apply: (savedIds) => {
+      const current = state;
+      if (!current || current.token !== token) return;
+      current.savedIds = new Set<string>(savedIds);
+      current.deps.rerenderAll(current.deps.document, {
+        categories: current.categories,
+        settings: current.settings,
+        savedIds: current.savedIds,
+        callbacks: callbacksFor(current),
+      });
+    },
+    onError: (error) => {
+      console.warn("[twitter-bookmarker] saved index unavailable; treating every tweet as unsaved", error);
+    },
+  });
   state = {
     token,
     deps,
@@ -304,6 +349,7 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
     categories: [],
     settings: { ...DEFAULT_SETTINGS },
     savedIds: new Set<string>(),
+    refresher,
   };
 
   const running = (): boolean => state !== null && state.token === token;
@@ -319,21 +365,26 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
     state.categories = [...store.categories];
     state.settings = { ...store.settings };
 
-    let saved: ReadonlySet<string> = new Set<string>();
-    try {
-      saved = await deps.loadSavedIndex();
-    } catch (error) {
-      console.warn("[twitter-bookmarker] saved index unavailable; treating every tweet as unsaved", error);
-    }
+    // A failed fetch stays stale, so a later retry can re-fetch exactly once
+    // without any per-tweet GET (PRD §54, TEST-05).
+    await refresher.refreshIfStale();
     if (!running()) return;
-    state.savedIds = new Set<string>(saved);
 
     const target = deps.document.body ?? deps.document.documentElement;
     if (!target) return;
 
     // Attach the single observer *before* the initial sweep so tweets added
-    // while we scan cannot slip through the gap between scan and observe.
-    const observer = deps.createObserver(handleMutations);
+    // while we scan cannot slip through the gap between scan and observe. The
+    // resilient wrapper keeps observation alive if a mutation callback throws.
+    const observer = createResilientObserver({
+      createObserver: deps.createObserver,
+      handler: handleMutations,
+      onError: (error) => console.warn("[twitter-bookmarker] observer callback failed", error),
+      onReschedule: () => {
+        const current = state;
+        if (current !== null && current.token === token) scheduleSweep(current);
+      },
+    });
     observer.observe(target, { childList: true, subtree: true });
     if (!running()) {
       observer.disconnect();
@@ -349,32 +400,53 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
 }
 
 /**
- * Leave the Bookmarks page: disconnect the observer, cancel pending work, and
- * remove every injected control + marker so returning injects fresh (XI-02).
+ * Explicit "backend became available" retry (PRD §54, TEST-05): re-fetch the
+ * saved index once when the entry fetch failed, then re-render every visible
+ * organizer in place. A no-op while off-route, fresh, or already fetching, so
+ * it never degrades into a `GET /v1/index` per tweet.
+ */
+export function refreshSavedIndexIfStale(): Promise<boolean> {
+  const current = state;
+  if (!current) return Promise.resolve(false);
+  return current.refresher.refreshIfStale();
+}
+
+/**
+ * Leave the Bookmarks page: one bounded teardown pass that disconnects the
+ * observer, cancels pending work, removes every injected control + marker, and
+ * dismisses any toasts. Every step is attempted even if an earlier one throws,
+ * so returning to the page always injects fresh (XI-02, TEST-05).
  */
 export function stopBookmarksPage(): void {
   const current = state;
   if (!current) return;
+  // Null the state first so a timer already queued sees a dead token and no-ops.
   state = null;
 
-  try {
-    current.observer?.disconnect();
-  } catch (error) {
-    console.warn("[twitter-bookmarker] failed to disconnect observer", error);
-  }
-  if (current.timer !== null) {
-    try {
-      current.deps.clearTimeout(current.timer);
-    } catch {
-      /* Defensive: teardown must not throw. */
-    }
-    current.timer = null;
-  }
+  const result = runBoundedCleanup(
+    [
+      { name: "disconnect-observer", run: () => current.observer?.disconnect() },
+      {
+        name: "clear-sweep-timer",
+        run: () => {
+          if (current.timer === null) return;
+          const timer = current.timer;
+          current.timer = null;
+          current.deps.clearTimeout(timer);
+        },
+      },
+      { name: "remove-organizers", run: () => current.deps.removeAll(current.deps.document) },
+      { name: "dismiss-toasts", run: () => current.deps.dismissToasts() },
+      { name: "clear-saved-index", run: () => current.savedIds.clear() },
+    ],
+    (error) => console.warn("[twitter-bookmarker] route-leave cleanup step failed", error),
+  );
 
-  try {
-    current.deps.removeAll(current.deps.document);
-  } catch (error) {
-    console.warn("[twitter-bookmarker] failed to remove organizers", error);
+  if (result.failures.length > 0) {
+    console.warn(
+      "[twitter-bookmarker] route-leave cleanup finished with failures",
+      result.failures.map((failure) => failure.name),
+    );
   }
 }
 

@@ -76,12 +76,12 @@ Requirements for the initial MVP. Each maps to a roadmap phase.
 
 ### Hardening & Tests
 
-- [ ] **TEST-01**: Go unit/integration tests cover all backend acceptance criteria (BE-01..BE-18)
-- [ ] **TEST-02**: Tests cover CSV edge cases: comma, quotes, emoji, unicode, multiline text
-- [ ] **TEST-03**: Tests cover index rebuild from CSV with missing and corrupted `index.json`
-- [ ] **TEST-04**: A concurrency test proves parallel duplicate requests yield exactly one row
-- [ ] **TEST-05**: Hardening scenarios are exercised: SPA navigation, DOM re-render, duplicate race, quoted tweets, backend downtime, index recovery
-- [ ] **TEST-06**: Repository ships build tooling (Makefile / npm scripts), a README with setup + run instructions, and a manual test checklist
+- [x] **TEST-01**: Go unit/integration tests cover all backend acceptance criteria (BE-01..BE-18)
+- [x] **TEST-02**: Tests cover CSV edge cases: comma, quotes, emoji, unicode, multiline text
+- [x] **TEST-03**: Tests cover index rebuild from CSV with missing and corrupted `index.json`
+- [x] **TEST-04**: A concurrency test proves parallel duplicate requests yield exactly one row
+- [x] **TEST-05**: Hardening scenarios are exercised: SPA navigation, DOM re-render, duplicate race, quoted tweets, backend downtime, index recovery
+- [x] **TEST-06**: Repository ships build tooling (Makefile / npm scripts), a README with setup + run instructions, and a manual test checklist
 
 ## v2 Requirements
 
@@ -160,12 +160,12 @@ Deferred to a future release. Tracked but not in the current roadmap.
 | UNB-01 | Phase 5 | Complete |
 | UNB-02 | Phase 5 | Complete |
 | UNB-03 | Phase 5 | Complete |
-| TEST-01 | Phase 6 | Pending |
-| TEST-02 | Phase 6 | Pending |
-| TEST-03 | Phase 6 | Pending |
-| TEST-04 | Phase 6 | Pending |
-| TEST-05 | Phase 6 | Pending |
-| TEST-06 | Phase 6 | Pending |
+| TEST-01 | Phase 6 | Complete |
+| TEST-02 | Phase 6 | Complete |
+| TEST-03 | Phase 6 | Complete |
+| TEST-04 | Phase 6 | Complete |
+| TEST-05 | Phase 6 | Complete |
+| TEST-06 | Phase 6 | Complete |
 
 **Coverage:**
 

@@ -16,6 +16,7 @@ import { getStore, onStoreChanged } from "../shared/storage.ts";
 import type { Settings, Store } from "../shared/types.ts";
 import {
   refreshBookmarksPage,
+  refreshSavedIndexIfStale,
   startBookmarksPage,
   stopBookmarksPage,
 } from "./bookmark-page.ts";
@@ -93,11 +94,17 @@ const runSavedHook = createSavedHook({
  * Post-success hook — invoked by the save controller exactly once, only after a
  * confirmed `201` (UNB-01). The save is logged, then the gated unbookmark runs;
  * the controller does not await it.
+ *
+ * A confirmed `201` also proves the backend is reachable, so it is the natural
+ * "backend became available" retry point for a saved-index fetch that failed at
+ * page entry (PRD §54, TEST-05). The refresh is stale-gated and coalesced, so
+ * the normal case costs zero extra requests.
  */
 function onSaved(context: SavedTweetContext): Promise<void> {
   console.info(
     `[twitter-bookmarker] saved tweet ${context.tweetId} to "${context.category.name}" at ${context.savedAt}`,
   );
+  void refreshSavedIndexIfStale();
   return runSavedHook(context);
 }
 

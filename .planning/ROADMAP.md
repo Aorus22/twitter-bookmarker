@@ -24,7 +24,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: X DOM Integration** - Route detection, MutationObserver, tweet extraction, and popover/inline organizer UI on `/i/bookmarks` (completed 2026-09-27)
 - [x] **Phase 4: Save Integration** - Content script → service worker messaging, backend HTTP, saving state, saved marker, and toasts (completed 2026-09-27)
 - [x] **Phase 5: Auto Unbookmark** - Verified native X unbookmark strictly after a confirmed CSV write (completed 2026-09-27)
-- [ ] **Phase 6: Hardening, Tests & Docs** - Edge-case hardening, automated tests, build tooling, and documentation
+- [x] **Phase 6: Hardening, Tests & Docs** - Edge-case hardening, automated tests, build tooling, and documentation (completed 2026-09-27)
 
 ## Phase Details
 
@@ -141,9 +141,9 @@ Plans:
 
 Plans:
 
-- [ ] 06-01: Backend test suite (API, CSV, index, concurrency)
-- [ ] 06-02: Extension hardening + manual test checklist
-- [ ] 06-03: Build tooling, README, and final verification sweep
+- [x] 06-01: Backend test suite (API, CSV, index, concurrency)
+- [x] 06-02: Extension hardening + manual test checklist
+- [x] 06-03: Build tooling, README, and final verification sweep
 
 ## Progress
 
@@ -157,4 +157,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. X DOM Integration | 3/3 | Complete    | 2026-09-27 |
 | 4. Save Integration | 2/2 | Complete    | 2026-09-27 |
 | 5. Auto Unbookmark | 2/2 | Complete    | 2026-09-27 |
-| 6. Hardening, Tests & Docs | 0/3 | Not started | - |
+| 6. Hardening, Tests & Docs | 3/3 | Complete    | 2026-09-27 |

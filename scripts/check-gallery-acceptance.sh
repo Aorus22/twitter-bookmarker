@@ -41,8 +41,16 @@ hdr()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 # ---------------------------------------------------------------- setup
 hdr "Setup"
+# The backend port is a hardcoded constant (config.Port), so a dev server started
+# with `make run` legitimately owns 43121. Re-exec inside a private network
+# namespace to get an isolated loopback on the same port instead of stopping it.
 if curl -fsS --max-time 2 "$BASE/health" >/dev/null 2>&1; then
-  echo "port $PORT is already in use — stop the running server first" >&2
+  if [ -z "${TWBM_ACCEPTANCE_NS:-}" ] && command -v unshare >/dev/null 2>&1; then
+    echo "  port $PORT is busy — re-running in a private network namespace (unshare -rn)"
+    export TWBM_ACCEPTANCE_NS=1
+    exec unshare -rn bash -c 'ip link set lo up 2>/dev/null || true; exec "$0" "$@"' "$0" "$@"
+  fi
+  echo "port $PORT is already in use and network-namespace isolation is unavailable" >&2
   exit 2
 fi
 
@@ -78,9 +86,11 @@ check "$(jq -r '.status == "ok"' <<<"$h" 2>/dev/null || echo false)" \
   "§80.1 /health returns {\"status\":\"ok\"}" "$h"
 
 idx_code="$(code "$BASE/v1/index")"
-idx_shape="$(j "$BASE/v1/index" | jq -r 'has("tweets") or has("entries") or (type=="array")' 2>/dev/null || echo false)"
+# v1.0 contract is {"items":{...}} (model.IndexResponse.Items). `tweets` is the
+# on-disk index.json key, not the HTTP response key.
+idx_shape="$(j "$BASE/v1/index" | jq -r 'has("items") and (.items|type=="object")' 2>/dev/null || echo false)"
 check "$([ "$idx_code" = "200" ] && echo true || echo false)" "§80.2 /v1/index returns 200" "got $idx_code"
-check "$idx_shape" "§80.2 /v1/index returns the v1 index shape"
+check "$idx_shape" "§80.2 /v1/index returns {\"items\":{...}}" 
 
 save_code="$(code -X POST "$BASE/v1/bookmarks" -H 'Content-Type: application/json' \
   -d '{"filename":"smoke.csv","tweet":{"url":"https://x.com/smoke/status/9990000000000000001","media":[],"author":"Smoke","username":"@smoke","tweet_date":"2026-09-01T00:00:00Z","text":"acceptance smoke"}}')"
@@ -161,18 +171,41 @@ qa="$(j "$BASE/api/gallery/collections/linux.csv/posts?q=LINUXGUY" 2>/dev/null |
 qan="$(jq -r '.items | length' <<<"$qa" 2>/dev/null || echo x)"
 check "$([ "$qan" = "4" ] && echo true || echo false)" "§80.14 search covers username (LINUXGUY → 4)" "got $qan"
 
-tf="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_from=2026-09-15T00:00:00Z" 2>/dev/null || echo '{}')"
+# The fixture generates timestamps RELATIVE to seed time (tweet_date = now-1d…
+# now-8d, saved_at = now…now-7d), so absolute dates cannot be used here. Use a
+# cutoff half a day off any fixture boundary so the expected counts are exact
+# and immune to the few seconds between seeding and querying.
+CUT="$(date -u -d '-5 days -12 hours' +%Y-%m-%dT%H:%M:%SZ)"
+
+tf="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_from=$CUT" 2>/dev/null || echo '{}')"
 tfn="$(jq -r '.items | length' <<<"$tf" 2>/dev/null || echo x)"
-check "$([ "$tfn" != "8" ] && [ "$tfn" != "0" ] && echo true || echo false)" "§80.15 tweet_from filter applied" "got $tfn of 8"
+check "$([ "$tfn" = "5" ] && echo true || echo false)" \
+  "§80.15 tweet_from lower bound inclusive (>= $CUT → 5 of 8)" "got $tfn of 8"
 
-sf="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=2026-09-24T00:00:00Z" 2>/dev/null || echo '{}')"
+tto="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_to=$CUT" 2>/dev/null || echo '{}')"
+tton="$(jq -r '.items | length' <<<"$tto" 2>/dev/null || echo x)"
+check "$([ "$tton" = "3" ] && echo true || echo false)" \
+  "§80.15 tweet_to upper bound inclusive (<= $CUT → 3 of 8)" "got $tton of 8"
+
+sf="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$CUT" 2>/dev/null || echo '{}')"
 sfn="$(jq -r '.items | length' <<<"$sf" 2>/dev/null || echo x)"
-check "$([ "$sfn" != "8" ] && [ "$sfn" != "0" ] && echo true || echo false)" "§80.15 saved_from filter applied" "got $sfn of 8"
+check "$([ "$sfn" = "6" ] && echo true || echo false)" \
+  "§80.15 saved_from lower bound inclusive (>= $CUT → 6 of 8)" "got $sfn of 8"
 
-both="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=2026-09-24T00:00:00Z&tweet_from=2026-09-15T00:00:00Z" 2>/dev/null || echo '{}')"
+sto="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_to=$CUT" 2>/dev/null || echo '{}')"
+ston="$(jq -r '.items | length' <<<"$sto" 2>/dev/null || echo x)"
+check "$([ "$ston" = "2" ] && echo true || echo false)" \
+  "§80.15 saved_to upper bound inclusive (<= $CUT → 2 of 8)" "got $ston of 8"
+
+both="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$CUT&tweet_from=$CUT" 2>/dev/null || echo '{}')"
 bn="$(jq -r '.items | length' <<<"$both" 2>/dev/null || echo x)"
-check "$([ "$bn" -le "$tfn" ] 2>/dev/null && [ "$bn" -le "$sfn" ] 2>/dev/null && [ "$bn" != "0" ] && echo true || echo false)" \
-  "§80.16 both date filters combine (AND)" "combined=$bn tweet=$tfn saved=$sfn"
+check "$([ "$bn" = "5" ] && [ "$bn" -le "$tfn" ] 2>/dev/null && [ "$bn" -le "$sfn" ] 2>/dev/null && echo true || echo false)" \
+  "§80.16 both date filters combine (AND → 5, <= each alone)" "combined=$bn tweet=$tfn saved=$sfn"
+
+win="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_from=$CUT&tweet_to=$CUT" 2>/dev/null || echo '{}')"
+winn="$(jq -r '.items | length' <<<"$win" 2>/dev/null || echo x)"
+check "$([ "$winn" = "0" ] && echo true || echo false)" \
+  "§80.16 an empty date window returns [] not a fallback to all" "got $winn"
 
 asc="$(j "$BASE/api/gallery/collections/linux.csv/posts?sort=saved_asc" 2>/dev/null || echo '{}')"
 asc_first="$(jq -r '.items[0].tweet_id' <<<"$asc" 2>/dev/null || echo x)"

@@ -90,33 +90,54 @@ await withBrowser(async (browser) => {
     return text.slice(0, 80)
   })
 
-  // 2. Theme (WEB-06 / HARD-04)
-  await check("theme resolves and toggles, and persists across reload", async () => {
-    const before = await browser.eval(
-      `document.querySelector('[data-theme-resolved]')?.getAttribute('data-theme-resolved')`
-    )
-    if (!["light", "dark"].includes(before)) throw new Error(`unexpected resolved theme: ${before}`)
-    const htmlClass = await browser.eval(`document.documentElement.className`)
-    if (!htmlClass.includes(before)) throw new Error(`<html> class "${htmlClass}" does not match resolved "${before}"`)
+  // 2. Theme (WEB-06 / PRD §64 / HARD-04)
+  await check("theme defaults to system, cycles light → dark → system, and persists", async () => {
+    const prefOf = () =>
+      browser.eval(
+        `document.querySelector('[data-theme-preference]')?.getAttribute('data-theme-preference')`
+      )
+    const resolvedOf = () =>
+      browser.eval(
+        `document.querySelector('[data-theme-preference]')?.getAttribute('data-theme-resolved')`
+      )
+    const appliedOf = () =>
+      browser.eval(`document.documentElement.classList.contains('dark') ? 'dark' : 'light'`)
 
-    await browser.click("[data-theme-preference]")
-    const after = await browser.eval(`document.documentElement.className`)
-    if (after.includes(before) && (before === "dark") === after.includes("dark")) {
-      throw new Error(`toggling did not change the applied theme (still ${after})`)
+    const initial = await prefOf()
+    if (initial !== "system") {
+      throw new Error(`expected the default preference to be "system", got ${initial}`)
     }
-    await shot(browser, `theme-${after.includes("dark") ? "dark" : "light"}`)
+    const resolved0 = await resolvedOf()
+    if (!["light", "dark"].includes(resolved0)) throw new Error(`unexpected resolved theme: ${resolved0}`)
+    if ((await appliedOf()) !== resolved0) {
+      throw new Error(`applied class does not match resolved theme (${await appliedOf()} vs ${resolved0})`)
+    }
 
+    // system → light  (applied theme may legitimately not change, since the OS is light)
+    await browser.click("[data-theme-preference]")
+    await waitFor(async () => (await prefOf()) === "light", { label: "preference to become light" })
+
+    // light → dark  (now the applied theme must actually change)
+    await browser.click("[data-theme-preference]")
+    await waitFor(async () => (await prefOf()) === "dark", { label: "preference to become dark" })
+    if ((await appliedOf()) !== "dark") throw new Error("selecting dark did not apply the dark class")
+    if ((await resolvedOf()) !== "dark") throw new Error("data-theme-resolved did not become dark")
+    await shot(browser, "theme-dark")
+
+    // persistence across a full reload
     await browser.goto(`${BASE}/`)
     await browser.waitForExpr(exists("[data-theme-preference]"), { label: "theme toggle" })
-    const persisted = await browser.eval(
-      `document.querySelector('[data-theme-resolved]')?.getAttribute('data-theme-resolved')`
-    )
-    if (persisted !== (after.includes("dark") ? "dark" : "light")) {
-      throw new Error(`theme did not persist: applied ${after}, after reload ${persisted}`)
+    if ((await prefOf()) !== "dark") throw new Error(`preference did not persist (got ${await prefOf()})`)
+    if ((await appliedOf()) !== "dark") throw new Error("dark class did not survive the reload")
+
+    // dark → system, then confirm the applied theme tracks the OS setting again
+    await browser.click("[data-theme-preference]")
+    await waitFor(async () => (await prefOf()) === "system", { label: "preference to return to system" })
+    if ((await appliedOf()) !== (await resolvedOf())) {
+      throw new Error("system preference stopped tracking the resolved theme")
     }
-    // restore light for the remaining visual checks
-    await browser.eval(`document.documentElement.classList.remove('dark'); document.documentElement.classList.add('light'); true`)
-    return `${before} → toggled → persisted`
+    await shot(browser, "homepage-light")
+    return "system → light → dark (persisted) → system"
   })
 
   // 3. Direct deep-link load (PROD-03 / §82 step 3)
@@ -140,9 +161,11 @@ await withBrowser(async (browser) => {
 
   // 4. Search (DISC-01 / §82 step 7)
   await check("search narrows results server-side and writes q= to the URL", async () => {
+    await browser.waitForExpr(exists('[data-testid="collection-search"]'), { label: "search input" })
     const before = await browser.eval(countOf('[data-testid="post-card"]'))
     await browser.eval(`(() => {
       const el = document.querySelector('[data-testid="collection-search"]');
+      if (!el) throw new Error('search input disappeared');
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
       setter.call(el, 'a');
       el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -165,6 +188,7 @@ await withBrowser(async (browser) => {
       browser.eval(
         `document.querySelector('[data-testid="post-card"] [data-testid="open-on-x"]')?.getAttribute('href') ?? ""`
       )
+    await browser.waitForExpr(exists('[data-testid="collection-sort"]'), { label: "sort control" })
     const before = await firstHref()
     await browser.eval(`(() => {
       const el = document.querySelector('[data-testid="collection-sort"]');
@@ -181,7 +205,7 @@ await withBrowser(async (browser) => {
 
   // 6. Filter (DISC-02/03 / §82 steps 10-12)
   await check("filter opens a popover on desktop and applies a quick range", async () => {
-    await browser.click('[data-testid="collection-filter"]')
+    await browser.clickReal('[data-testid="collection-filter"]')
     await browser.waitForExpr(exists('[data-testid="filter-popover"]'), { label: "filter popover" })
     await shot(browser, "filter-popover")
     // pick the "Last 7 Days" quick range, then Apply
@@ -191,7 +215,7 @@ await withBrowser(async (browser) => {
       if (!btn) return false; btn.click(); return true;
     })()`)
     if (!presetClicked) throw new Error("quick-range preset not found in the panel")
-    await browser.click('[data-testid="filter-apply"]')
+    await browser.clickReal('[data-testid="filter-apply"]')
     await waitFor(async () => (await browser.eval("location.search")).includes("saved_from"), {
       label: "saved_from in the URL after Apply",
     })
@@ -219,7 +243,7 @@ await withBrowser(async (browser) => {
     await browser.eval(`window.scrollTo(0, 0); true`)
     const hasMedia = await browser.eval(exists('[data-testid="post-media-trigger"]'))
     if (!hasMedia) throw new Error("no media trigger on the page")
-    await browser.click('[data-testid="post-media-trigger"]')
+    await browser.clickReal('[data-testid="post-media-trigger"]')
     await browser.waitForExpr(exists('[data-testid="media-lightbox"]'), { label: "lightbox dialog" })
     const counter = await browser.eval(textOf('[data-testid="lightbox-counter"]'))
     if (!/^\d+\s*\/\s*\d+$/.test(counter)) throw new Error(`unexpected counter text: ${counter}`)
@@ -296,7 +320,7 @@ await withBrowser(async (browser) => {
   await check("filter becomes a Sheet on a narrow viewport", async () => {
     await browser.viewport(390, 900)
     await new Promise((r) => setTimeout(r, 250))
-    await browser.click('[data-testid="collection-filter"]')
+    await browser.clickReal('[data-testid="collection-filter"]')
     await browser.waitForExpr(exists('[data-testid="filter-sheet"]'), { label: "filter sheet" })
     const hasPopover = await browser.eval(exists('[data-testid="filter-popover"]'))
     if (hasPopover) throw new Error("desktop popover rendered at mobile width")

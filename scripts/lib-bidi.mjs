@@ -160,6 +160,40 @@ async function openSession(port) {
       return api
     },
 
+    /**
+     * Click with a real pointer sequence at the element's on-screen centre.
+     *
+     * Needed for Radix primitives: `PopoverTrigger`/`DropdownMenuTrigger` open on
+     * `pointerdown`, so a synthetic `element.click()` (which only fires a `click`
+     * event) never opens them. This drives the same input path a user does.
+     */
+    async clickReal(selector) {
+      const box = await api.eval(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return null;
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      })()`)
+      if (!box) throw new Error(`clickReal target not found: ${selector}`)
+      await send("input.performActions", {
+        context,
+        actions: [
+          {
+            type: "pointer",
+            id: "mouse",
+            parameters: { pointerType: "mouse" },
+            actions: [
+              { type: "pointerMove", x: Math.round(box.x), y: Math.round(box.y), origin: "viewport" },
+              { type: "pointerDown", button: 0 },
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      return api
+    },
+
     /** Press a key (or a chord) via input.performActions — real key events. */
     async press(key, { times = 1 } = {}) {
       const value = KEYS[key] ?? key

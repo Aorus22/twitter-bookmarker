@@ -12,9 +12,10 @@ import {
   GalleryMasonry,
   InfiniteSentinel,
   MasonrySkeleton,
+  MediaLightbox,
   PostCard,
 } from "@/components/gallery"
-import { useGalleryQuery, usePosts } from "@/hooks"
+import { useGalleryQuery, useMediaLightbox, usePosts } from "@/hooks"
 import { formatCollectionCounts } from "@/lib/collection-meta"
 import {
   BACK_TO_COLLECTIONS_LABEL,
@@ -51,6 +52,13 @@ import { scrollNearTop } from "@/lib/scroll"
  *   empty filters    → `No posts match your filters` + a working `Clear filters`
  *   posts            → `GalleryMasonry` of `PostCard`s, the bottom loader while
  *                      a page is in flight, and the sentinel
+ *
+ * Lightbox (Phase 8, LIGHT-01…LIGHT-06): media tiles are focusable triggers
+ * whose click hands `(postIndex, mediaIndex)` to `useMediaLightbox`, which holds
+ * the position in the flattened media sequence of the **accumulated** `posts`
+ * array. Navigation therefore walks within a tweet and on into the next loaded
+ * tweet, and is bounded by what is loaded (no fetch is triggered by the
+ * lightbox). One `MediaLightbox` renders the active post beside its media.
  */
 export function CollectionPage() {
   const { filename } = useParams<{ filename: string }>()
@@ -77,6 +85,11 @@ export function CollectionPage() {
     loadMore,
     refetch,
   } = usePosts(filename, requestParams)
+
+  // The lightbox is driven entirely by the accumulated loaded list: its
+  // flattened media sequence is derived from `posts`, so it can never request a
+  // page of its own (LIGHT-03).
+  const lightbox = useMediaLightbox(posts)
 
   // PRD-2 §77: on any search/filter/sort change the loaded pages and cursor are
   // already reset by `usePosts`' request key; this adds the "scroll near the
@@ -174,8 +187,14 @@ export function CollectionPage() {
         {viewState === "posts" ? (
           <>
             <GalleryMasonry>
-              {posts.map((post) => (
-                <PostCard key={post.tweet_id} post={post} />
+              {posts.map((post, postIndex) => (
+                <PostCard
+                  key={post.tweet_id}
+                  post={post}
+                  onOpenMedia={(mediaIndex, trigger) => {
+                    lightbox.open(postIndex, mediaIndex, trigger)
+                  }}
+                />
               ))}
             </GalleryMasonry>
             {/* A page load never hides the cards above: only this compact row
@@ -186,6 +205,17 @@ export function CollectionPage() {
           </>
         ) : null}
       </div>
+
+      {/* Rendered from the page so it survives the masonry's re-renders, and
+          closed (unmounted) whenever no media slot is active. */}
+      <MediaLightbox
+        posts={posts}
+        index={lightbox.index}
+        collectionName={displayName}
+        onPrev={lightbox.goPrev}
+        onNext={lightbox.goNext}
+        onClose={lightbox.close}
+      />
     </div>
   )
 }

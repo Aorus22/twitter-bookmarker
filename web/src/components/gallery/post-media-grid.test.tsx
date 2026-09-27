@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
 
 import { PostMediaGrid } from "./post-media-grid"
 import { pbsUrl } from "@/test/fixtures"
@@ -123,5 +124,114 @@ describe("PostMediaGrid — rendering contract", () => {
     expect(placeholder.className).toContain("rounded-md")
     expect(grid).toHaveAttribute("data-media-layout", "duo")
     expect(within(grid).getAllByTestId("media-image")).toHaveLength(1)
+  })
+})
+
+/**
+ * LIGHT-01 (PRD-2 §67): with an `onOpenMedia` handler every tile is a real
+ * focusable button carrying the author-derived accessible name, so the media is
+ * openable by keyboard and never only by clicking a bare image. Without the
+ * handler the grid is unchanged (the suite above).
+ */
+describe("PostMediaGrid — lightbox triggers (LIGHT-01)", () => {
+  function renderTriggers(count: number, onOpenMedia = vi.fn()) {
+    render(
+      <PostMediaGrid
+        media={media(count)}
+        seed="tweet-1"
+        describeAlt={(index, total) => `Media ${index + 1} of ${total}`}
+        onOpenMedia={onOpenMedia}
+      />
+    )
+    return onOpenMedia
+  }
+
+  it("renders each tile as a named button, not a bare image", () => {
+    renderTriggers(4)
+
+    const triggers = screen.getAllByTestId("post-media-trigger")
+    expect(triggers).toHaveLength(4)
+    for (const trigger of triggers) {
+      expect(trigger.tagName).toBe("BUTTON")
+    }
+    expect(
+      screen.getByRole("button", { name: "Media 2 of 4" })
+    ).toHaveAttribute("aria-haspopup", "dialog")
+    expect(triggers[1]).toHaveAttribute("data-media-index", "1")
+  })
+
+  it("moves the name onto the trigger and makes the inner image decorative", () => {
+    renderTriggers(2)
+
+    // Exactly one accessible name per tile: the button's.
+    expect(screen.getByRole("button", { name: "Media 1 of 2" })).toBeVisible()
+    for (const image of screen.getAllByTestId("media-image")) {
+      expect(image).toHaveAttribute("alt", "")
+      expect(image).toHaveAttribute("aria-hidden", "true")
+    }
+  })
+
+  it("reports the zero-based index of the clicked media and its trigger", async () => {
+    const user = userEvent.setup()
+    const onOpenMedia = renderTriggers(4)
+
+    const trigger = screen.getByRole("button", { name: "Media 3 of 4" })
+    await user.click(trigger)
+
+    expect(onOpenMedia).toHaveBeenCalledWith(2, trigger)
+  })
+
+  it("opens from the keyboard with Enter and Space", async () => {
+    const user = userEvent.setup()
+    const onOpenMedia = renderTriggers(2)
+
+    const first = screen.getByRole("button", { name: "Media 1 of 2" })
+    first.focus()
+    expect(first).toHaveFocus()
+
+    await user.keyboard("{Enter}")
+    expect(onOpenMedia).toHaveBeenCalledWith(0, first)
+
+    await user.keyboard(" ")
+    expect(onOpenMedia).toHaveBeenCalledWith(0, first)
+    expect(onOpenMedia).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the adaptive geometry on the trigger so the grid never reflows", () => {
+    renderTriggers(3)
+
+    const triggers = screen.getAllByTestId("post-media-trigger")
+    expect(triggers[0].className).toContain("col-span-2")
+    expect(triggers[1].className).not.toContain("col-span-2")
+    expect(triggers[0].className).toContain("aspect-[16/10]")
+    expect(triggers[1].className).toContain("rounded-md")
+    expect(screen.getByTestId("post-media-grid")).toHaveAttribute(
+      "data-media-layout",
+      "trio"
+    )
+  })
+
+  it("keeps a broken tile's placeholder inside the trigger", () => {
+    renderTriggers(2)
+
+    fireEvent.error(screen.getAllByTestId("media-image")[0])
+
+    const trigger = screen.getAllByTestId("post-media-trigger")[0]
+    expect(within(trigger).getByTestId("media-placeholder")).toBeInTheDocument()
+    expect(within(trigger).getByTestId("media-placeholder").className).toContain(
+      "size-full"
+    )
+    expect(screen.getByTestId("post-media-grid")).toHaveAttribute(
+      "data-media-layout",
+      "duo"
+    )
+  })
+
+  it("stays a static, non-interactive grid when no handler is provided", () => {
+    renderGrid(2)
+
+    expect(screen.queryByTestId("post-media-trigger")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    expect(screen.getByAltText("Media 1 of 2")).toBeInTheDocument()
   })
 })

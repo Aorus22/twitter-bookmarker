@@ -15,7 +15,8 @@ import type { GalleryPost } from "@/types"
  *
  * Layout, top to bottom:
  *   1. media region (`272` wide, r14) — `PostMediaGrid`, or the gradient quote
- *      panel from `TextPostCard` when `media` is empty;
+ *      panel from `TextPostCard` when `media` is empty. With `onOpenMedia` each
+ *      tile is a named, focusable lightbox trigger (Phase 8, LIGHT-01);
  *   2. avatar `28×28` r14 (deterministic gradient seeded from `username`; the
  *      CSV has no avatar URL, spec §5) + author Inter SemiBold 11 + `@username`
  *      Inter Regular 9 muted. The row is inset 4px inside the 10px padding, which
@@ -35,9 +36,15 @@ export interface PostCardProps {
   post: GalleryPost
   /** Reference "today" for the year-aware date format; defaults to the clock. */
   now?: Date
+  /**
+   * Phase 8 (LIGHT-01/LIGHT-05): makes each media tile a keyboard-reachable
+   * lightbox trigger and hands back the trigger element so focus can be
+   * restored to it when the lightbox closes. Omit for a non-interactive card.
+   */
+  onOpenMedia?: (mediaIndex: number, trigger: HTMLButtonElement) => void
 }
 
-export function PostCard({ post, now }: PostCardProps) {
+export function PostCard({ post, now, onOpenMedia }: PostCardProps) {
   const isTextOnly = post.media.length === 0
   const meta = formatPostMeta(post, now === undefined ? {} : { now })
   const avatar = pickPlaceholderGradient(post.username)
@@ -60,6 +67,7 @@ export function PostCard({ post, now }: PostCardProps) {
           media={post.media}
           seed={post.tweet_id}
           describeAlt={describeAlt}
+          onOpenMedia={onOpenMedia}
         />
       )}
 

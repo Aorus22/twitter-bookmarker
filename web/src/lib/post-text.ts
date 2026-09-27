@@ -21,6 +21,12 @@ export const BODY_TEXT_CLAMP_CLASS = "line-clamp-5"
 /** Lines shown inside the text-only gradient quote panel (5). */
 export const QUOTE_TEXT_CLAMP_CLASS = "line-clamp-5"
 
+/** Lines shown in the lightbox info panel (5). */
+export const LIGHTBOX_TEXT_CLAMP_CLASS = "line-clamp-5"
+
+/** The three text treatments the controlled clamp supports. */
+export type PostTextVariant = "body" | "quote" | "lightbox"
+
 /** True when the tweet text is long enough to need the clamp affordance. */
 export function isLongPostText(text: string): boolean {
   return text.trim().length > POST_TEXT_CLAMP_CHARS
@@ -28,11 +34,16 @@ export function isLongPostText(text: string): boolean {
 
 /** The clamp class for a variant, or `""` once the text is expanded. */
 export function clampClassName(
-  variant: "body" | "quote",
+  variant: PostTextVariant,
   expanded: boolean
 ): string {
   if (expanded) {
     return ""
   }
-  return variant === "quote" ? QUOTE_TEXT_CLAMP_CLASS : BODY_TEXT_CLAMP_CLASS
+  if (variant === "quote") {
+    return QUOTE_TEXT_CLAMP_CLASS
+  }
+  return variant === "lightbox"
+    ? LIGHTBOX_TEXT_CLAMP_CLASS
+    : BODY_TEXT_CLAMP_CLASS
 }

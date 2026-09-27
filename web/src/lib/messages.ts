@@ -91,3 +91,31 @@ export const LOADING_POSTS_LABEL = "Loading posts"
 
 /** PRD-2 §35 — announced while an additional page is being appended. */
 export const LOADING_MORE_POSTS_LABEL = "Loading more posts"
+
+/** Design spec §3.5 — the lightbox panel's three meta-line prefixes. */
+export const POSTED_META_LABEL = "Posted"
+export const SAVED_META_LABEL = "Saved"
+export const COLLECTION_META_LABEL = "Collection"
+
+/** Design spec §3.5 — the lightbox navigation controls' accessible names. */
+export const LIGHTBOX_PREVIOUS_LABEL = "Previous media"
+export const LIGHTBOX_NEXT_LABEL = "Next media"
+
+/** Design spec §3.5 — the info panel's `×` close control. */
+export const LIGHTBOX_CLOSE_LABEL = "Close lightbox"
+
+/**
+ * Design spec §3.5 — the dialog's accessible-name prefix. Composed with the
+ * active post's author and username so the dialog announces *whose* media is
+ * open rather than a generic "dialog".
+ */
+export const LIGHTBOX_TITLE_PREFIX = "Post media by"
+
+/** PRD-2 §27 — the keyboard hint exposed as the dialog's description. */
+export const LIGHTBOX_KEYBOARD_HINT =
+  "Use the left and right arrow keys to browse media. Press Escape to close."
+
+/** Builds the lightbox counter's assistive-tech name (`Media 2 of 4`). */
+export function formatLightboxCounter(current: number, total: number): string {
+  return `Media ${current} of ${total}`
+}

@@ -12,3 +12,5 @@ export {
   DESKTOP_MIN_WIDTH,
   useIsDesktop,
 } from "./use-media-query"
+export { useMediaLightbox } from "./use-media-lightbox"
+export type { UseMediaLightboxResult } from "./use-media-lightbox"

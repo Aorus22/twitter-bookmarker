@@ -1,6 +1,6 @@
 ---
 gsd_state_version: "1.0"
-milestone: "1.0"
+milestone: 1.0
 milestone_name: MVP
 status: Awaiting next milestone
 stopped_at: Phase 6 complete — all phases complete

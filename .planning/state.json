@@ -1,7 +1,7 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "\"1.0\"",
+  "milestone": "1.0",
   "phases": [
     {
       "number": "1",

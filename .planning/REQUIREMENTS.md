@@ -52,15 +52,15 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### HOME — Gallery Homepage (Phase 4, PRD §16, §17, §38, §59, §61, §62)
 
-- [ ] **HOME-01**: `GET /` shows every CSV as a collection card, ordered by most recently saved
-- [ ] **HOME-02**: Each card shows a cover collage, collection name, post count, media count, and last bookmarked date
-- [ ] **HOME-03**: The cover collage uses up to the four newest media by `saved_at` DESC with a balanced layout for 4+, 3, and 1 media, and a placeholder for 0 media; an avatar is never used as cover
-- [ ] **HOME-04**: A collection with `media_count === 0` is still visible with a placeholder cover
-- [ ] **HOME-05**: Clicking a card navigates to that collection's detail route
-- [ ] **HOME-06**: With no CSVs the homepage shows the "No collections yet" empty state with the secondary explanatory message
-- [ ] **HOME-07**: Homepage loading shows skeleton cards, and failures show the backend-unavailable message with a `Retry` action
-- [ ] **HOME-08**: Broken remote cover images degrade to a neutral placeholder without collapsing the card layout
-- [ ] **HOME-09**: The homepage refetches when the window regains focus
+- [x] **HOME-01**: `GET /` shows every CSV as a collection card, ordered by most recently saved
+- [x] **HOME-02**: Each card shows a cover collage, collection name, post count, media count, and last bookmarked date
+- [x] **HOME-03**: The cover collage uses up to the four newest media by `saved_at` DESC with a balanced layout for 4+, 3, and 1 media, and a placeholder for 0 media; an avatar is never used as cover
+- [x] **HOME-04**: A collection with `media_count === 0` is still visible with a placeholder cover
+- [x] **HOME-05**: Clicking a card navigates to that collection's detail route
+- [x] **HOME-06**: With no CSVs the homepage shows the "No collections yet" empty state with the secondary explanatory message
+- [x] **HOME-07**: Homepage loading shows skeleton cards, and failures show the backend-unavailable message with a `Retry` action
+- [x] **HOME-08**: Broken remote cover images degrade to a neutral placeholder without collapsing the card layout
+- [x] **HOME-09**: The homepage refetches when the window regains focus
 
 ### COLL — Collection Gallery (Phase 5, PRD §18–§25, §60, §62, §73)
 
@@ -184,15 +184,15 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | WEB-06 | 3 — Web Scaffold, Theme & API Client | Complete |
 | WEB-07 | 3 — Web Scaffold, Theme & API Client | Complete |
 | WEB-08 | 3 — Web Scaffold, Theme & API Client | Complete |
-| HOME-01 | 4 — Gallery Homepage | Pending |
-| HOME-02 | 4 — Gallery Homepage | Pending |
-| HOME-03 | 4 — Gallery Homepage | Pending |
-| HOME-04 | 4 — Gallery Homepage | Pending |
-| HOME-05 | 4 — Gallery Homepage | Pending |
-| HOME-06 | 4 — Gallery Homepage | Pending |
-| HOME-07 | 4 — Gallery Homepage | Pending |
-| HOME-08 | 4 — Gallery Homepage | Pending |
-| HOME-09 | 4 — Gallery Homepage | Pending |
+| HOME-01 | 4 — Gallery Homepage | Complete |
+| HOME-02 | 4 — Gallery Homepage | Complete |
+| HOME-03 | 4 — Gallery Homepage | Complete |
+| HOME-04 | 4 — Gallery Homepage | Complete |
+| HOME-05 | 4 — Gallery Homepage | Complete |
+| HOME-06 | 4 — Gallery Homepage | Complete |
+| HOME-07 | 4 — Gallery Homepage | Complete |
+| HOME-08 | 4 — Gallery Homepage | Complete |
+| HOME-09 | 4 — Gallery Homepage | Complete |
 | COLL-01 | 5 — Collection Gallery | Pending |
 | COLL-02 | 5 — Collection Gallery | Pending |
 | COLL-03 | 5 — Collection Gallery | Pending |

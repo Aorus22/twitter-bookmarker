@@ -34,11 +34,13 @@ verifier: orchestrator (independent re-run)
 | Gate | Result |
 |------|--------|
 | `cd web && pnpm test` | ✓ **8 files, 50 tests, all passing** (vitest 5.0.2, jsdom) |
-| `cd web && pnpm exec tsc --noEmit` | ✓ clean |
+| `cd web && pnpm exec tsc --noEmit` | ⚠️ VACUOUS — see note below. The real type gate was `pnpm build` (`tsc -b`), which passed |
 | `cd web && pnpm lint` | ✓ exit 0 |
 | `cd web && pnpm build` | ✓ `✓ built in 470ms` |
 | `grep -rn 43121 web/src` | ✓ no matches |
 | No stray processes | ✓ `pgrep -af 'vite\|pnpm dev'` → nothing |
+
+> **Correction (added during Phase 6 verification).** `web/tsconfig.json` is solution-style (`"files": []` plus `references`), so `tsc --noEmit` resolved **zero** source files — `tsc --noEmit --listFiles` reported 0 `src/` files, while `tsc -b --listFiles` reports 101. This row was therefore meaningless. It does not change this phase's conclusion: `pnpm build` runs `tsc -b && vite build` and was run and passed here, and `tsc -b` is a genuine typecheck. The `typecheck` script was corrected to `tsc -b` in commit `c68977e`.
 
 ### Requirement coverage
 

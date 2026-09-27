@@ -45,8 +45,10 @@ verifier: orchestrator (independent re-run)
 | Gate | Result |
 |------|--------|
 | `cd web && pnpm build` | ✓ exit 0 |
-| `cd web && pnpm exec tsc --noEmit` | ✓ clean |
+| `cd web && pnpm exec tsc --noEmit` | ⚠️ VACUOUS — see note below. The real type gate was `pnpm build` (`tsc -b`), which passed |
 | `cd web && pnpm lint` | ✓ clean |
+
+> **Correction (added during Phase 6 verification).** `web/tsconfig.json` is solution-style (`"files": []` plus `references`), so `tsc --noEmit` resolved **zero** source files — `tsc --noEmit --listFiles` reported 0 `src/` files, while `tsc -b --listFiles` reports 101. This row was therefore meaningless. It does not change this phase's conclusion: `pnpm build` runs `tsc -b && vite build` and was run and passed here, and `tsc -b` is a genuine typecheck. The `typecheck` script was corrected to `tsc -b` in commit `c68977e`.
 | `grep -rn 43121 web/src` | ✓ no matches |
 | Google Fonts CDN references | ✓ none |
 

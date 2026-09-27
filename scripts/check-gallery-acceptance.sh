@@ -83,9 +83,12 @@ check "$([ "$idx_code" = "200" ] && echo true || echo false)" "§80.2 /v1/index 
 check "$idx_shape" "§80.2 /v1/index returns the v1 index shape"
 
 save_code="$(code -X POST "$BASE/v1/bookmarks" -H 'Content-Type: application/json' \
-  -d '{"filename":"smoke.csv","url":"https://x.com/smoke/status/9990000000000000001","author":"Smoke","username":"@smoke","tweet_date":"2026-09-01T00:00:00Z","text":"acceptance smoke"}')"
+  -d '{"filename":"smoke.csv","tweet":{"url":"https://x.com/smoke/status/9990000000000000001","media":[],"author":"Smoke","username":"@smoke","tweet_date":"2026-09-01T00:00:00Z","text":"acceptance smoke"}}')"
 check "$([ "$save_code" = "201" ] || [ "$save_code" = "409" ] && echo true || echo false)" \
-  "§80.3 POST /v1/bookmarks still accepts a save (201) " "got $save_code"
+  "§80.3 POST /v1/bookmarks still accepts a save (201)" "got $save_code"
+# The save creates a real CSV, which is by design a new collection. Remove it so
+# the collection assertions below still describe the seeded fixture only.
+rm -f "$FIXTURE/smoke.csv"
 
 # ------------------------------------------------------ §80.4-10 collections
 hdr "§80.4-10  GET /api/gallery/collections"

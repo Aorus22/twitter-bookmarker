@@ -97,12 +97,12 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### LIGHT — Media Lightbox (Phase 8, PRD §26, §27, §67)
 
-- [ ] **LIGHT-01**: Clicking media opens a lightbox with a large media area and a metadata panel (author, username, text, dates, `Open on X`)
-- [ ] **LIGHT-02**: On desktop the lightbox is a large media area beside a metadata panel; on mobile the metadata sits below the image
-- [ ] **LIGHT-03**: Next/previous navigation moves within the tweet's media and continues into the next/previous tweet's media in the loaded dataset
-- [ ] **LIGHT-04**: `Escape` closes the lightbox, `ArrowLeft` goes to previous, and `ArrowRight` goes to next
-- [ ] **LIGHT-05**: The lightbox traps focus while open, is keyboard reachable, and restores focus when closed
-- [ ] **LIGHT-06**: Closing the lightbox preserves the gallery scroll position as closely as possible
+- [x] **LIGHT-01**: Clicking media opens a lightbox with a large media area and a metadata panel (author, username, text, dates, `Open on X`)
+- [x] **LIGHT-02**: On desktop the lightbox is a large media area beside a metadata panel; on mobile the metadata sits below the image
+- [x] **LIGHT-03**: Next/previous navigation moves within the tweet's media and continues into the next/previous tweet's media in the loaded dataset
+- [x] **LIGHT-04**: `Escape` closes the lightbox, `ArrowLeft` goes to previous, and `ArrowRight` goes to next
+- [x] **LIGHT-05**: The lightbox traps focus while open, is keyboard reachable, and restores focus when closed
+- [x] **LIGHT-06**: Closing the lightbox preserves the gallery scroll position as closely as possible
 
 ### PROD — Production Serving (Phase 9, PRD §11, §56, §57, §58, §84)
 
@@ -217,12 +217,12 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | SCROLL-03 | 7 — Infinite Scroll | Complete |
 | SCROLL-04 | 7 — Infinite Scroll | Complete |
 | SCROLL-05 | 7 — Infinite Scroll | Complete |
-| LIGHT-01 | 8 — Media Lightbox | Pending |
-| LIGHT-02 | 8 — Media Lightbox | Pending |
-| LIGHT-03 | 8 — Media Lightbox | Pending |
-| LIGHT-04 | 8 — Media Lightbox | Pending |
-| LIGHT-05 | 8 — Media Lightbox | Pending |
-| LIGHT-06 | 8 — Media Lightbox | Pending |
+| LIGHT-01 | 8 — Media Lightbox | Complete |
+| LIGHT-02 | 8 — Media Lightbox | Complete |
+| LIGHT-03 | 8 — Media Lightbox | Complete |
+| LIGHT-04 | 8 — Media Lightbox | Complete |
+| LIGHT-05 | 8 — Media Lightbox | Complete |
+| LIGHT-06 | 8 — Media Lightbox | Complete |
 | PROD-01 | 9 — Production Serving | Pending |
 | PROD-02 | 9 — Production Serving | Pending |
 | PROD-03 | 9 — Production Serving | Pending |

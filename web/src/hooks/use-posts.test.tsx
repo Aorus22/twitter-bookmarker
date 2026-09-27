@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { usePosts } from "./use-posts"
 import {
@@ -197,5 +197,92 @@ describe("usePosts — refresh (PRD-2 §47/§78)", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.length).toBeGreaterThan(before)
     })
+  })
+})
+
+describe("usePosts — a query change resets the pages (PRD-2 §77, DISC-08)", () => {
+  it("shows loading with no posts and no cursor the moment the query changes", async () => {
+    stubGalleryFetch({
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: "abc", has_more: true }),
+    })
+
+    const { result, rerender } = renderHook(
+      ({ q }: { q: string | undefined }) => usePosts("linux.csv", { q }),
+      { initialProps: { q: undefined as string | undefined } }
+    )
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+    expect(result.current.nextCursor).toBe("abc")
+
+    rerender({ q: "wayland" })
+
+    // Synchronously, before the new response lands: the previously loaded page
+    // must never be displayed against the new query.
+    expect(result.current.status).toBe("loading")
+    expect(result.current.posts).toEqual([])
+    expect(result.current.error).toBeNull()
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.hasMore).toBe(false)
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+  })
+
+  it("ignores a stale response that resolves after a newer one", async () => {
+    const pending: Array<(response: Response) => void> = []
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/posts")) {
+        return new Promise<Response>((resolve) => {
+          pending.push(resolve)
+        })
+      }
+      return Promise.resolve(jsonResponse({ collections: [] }))
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const { result, rerender } = renderHook(
+      ({ q }: { q: string }) => usePosts("linux.csv", { q }),
+      { initialProps: { q: "first" } }
+    )
+
+    rerender({ q: "second" })
+    await waitFor(() => {
+      expect(pending).toHaveLength(2)
+    })
+
+    // The newer query resolves first…
+    await act(async () => {
+      pending[1](
+        jsonResponse({
+          items: [makePost({ tweet_id: "new" })],
+          next_cursor: null,
+          has_more: false,
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual(["new"])
+
+    // …and the stale one lands afterwards and must be dropped.
+    await act(async () => {
+      pending[0](
+        jsonResponse({
+          items: [makePost({ tweet_id: "old" })],
+          next_cursor: "stale-cursor",
+          has_more: true,
+        })
+      )
+    })
+
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual(["new"])
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.hasMore).toBe(false)
   })
 })

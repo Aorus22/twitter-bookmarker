@@ -143,6 +143,27 @@ describe("CollectionToolbar — controls (design spec §3.3)", () => {
 
     expect(screen.getByTestId("collection-filter-dot")).toBeInTheDocument()
   })
+
+  it("lets Phase 6 supply the real Filter trigger in the button's place", () => {
+    const onFilterClick = vi.fn()
+    renderToolbar({
+      filterActive: true,
+      onFilterClick,
+      filterControl: (
+        <button type="button" data-testid="collection-filter">
+          Filter
+        </button>
+      ),
+    })
+
+    // The supplied trigger replaces the built-in button (which would still own
+    // the dot); the toolbar's own callback is not wired to it.
+    expect(screen.getAllByTestId("collection-filter")).toHaveLength(1)
+    expect(
+      screen.queryByTestId("collection-filter-dot")
+    ).not.toBeInTheDocument()
+    expect(onFilterClick).not.toHaveBeenCalled()
+  })
 })
 
 describe("CollectionToolbar — omitted mockup elements (design spec §7)", () => {

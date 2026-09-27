@@ -46,6 +46,37 @@ export const COLLECTION_SEARCH_PLACEHOLDER = "⌕ Search this collection…"
 /** Design spec §3.3 — the filter control label. */
 export const FILTER_LABEL = "Filter"
 
+/** Design spec §3.4 — the filter popover/sheet title. */
+export const FILTER_TITLE = "Filter your archive"
+
+/** Design spec §3.4 — the filter popover/sheet subtitle. */
+export const FILTER_SUBTITLE = "Mix posted and bookmarked dates together."
+
+/** Design spec §3.4 — the two date-range section labels. */
+export const TWEET_DATE_LABEL = "Tweet date"
+export const BOOKMARKED_DATE_LABEL = "Bookmarked date"
+
+/** Design spec §3.4 — the quick-preset section label. */
+export const QUICK_RANGES_LABEL = "Quick ranges"
+
+/** Design spec §3.4 — the filter panel actions. */
+export const FILTER_RESET_LABEL = "Reset"
+export const FILTER_APPLY_LABEL = "Apply"
+
+/** Accessible names for the four manually-editable date fields (PRD-2 §30). */
+export const TWEET_DATE_FROM_LABEL = "Tweet date from"
+export const TWEET_DATE_TO_LABEL = "Tweet date to"
+export const BOOKMARKED_DATE_FROM_LABEL = "Bookmarked date from"
+export const BOOKMARKED_DATE_TO_LABEL = "Bookmarked date to"
+export const DATE_RANGE_FROM_LABEL = "From"
+export const DATE_RANGE_TO_LABEL = "To"
+
+/** Neutral range-summary text when neither bound is set (design spec §3.4). */
+export const ANY_DATE_LABEL = "Any date"
+
+/** Shown (and announced) when a `from` date falls after its `to` date. */
+export const INVERTED_RANGE_MESSAGE = "From must be on or before To."
+
 /** PRD-2 §24 — the link that opens the original post on X. */
 export const OPEN_ON_X_LABEL = "Open on X ↗"
 

@@ -16,6 +16,10 @@ import {
  * COLL-01…COLL-11 page integration. Every `fetch` is mocked (URL-routed
  * because the page issues both the posts request and the collections summary);
  * there is no network, no server, and the operator-owned backend is untouched.
+ *
+ * Phase 6 rewired the toolbar to the URL (`useGalleryQuery` + `usePosts`), so
+ * the search/sort assertions here are request-level; the full discovery flow
+ * (URL sync, filters, presets, scroll reset) is `collection-page-discovery.test.tsx`.
  */
 
 const LINUX = makeCollection({
@@ -86,6 +90,15 @@ function renderPage(filename = "linux.csv") {
 
 function postsRoute(items = POSTS) {
   return () => jsonResponse({ items, next_cursor: null, has_more: false })
+}
+
+/** Every URL the mock was asked for; split by endpoint below. */
+function requestedUrls(fetchMock: ReturnType<typeof stubGalleryFetch>) {
+  return fetchMock.mock.calls.map((call) => String(call[0]))
+}
+
+function postsRequests(fetchMock: ReturnType<typeof stubGalleryFetch>) {
+  return requestedUrls(fetchMock).filter((url) => url.includes("/posts"))
 }
 
 /** jsdom reports a 1024px viewport; restore it after the resize test. */
@@ -384,10 +397,10 @@ describe("CollectionPage — states (COLL-10)", () => {
   })
 
   it("renders the filter-no-match branch and its Clear filters branch when filters are active (COLL-10)", async () => {
-    // The filter-empty branch is driven by the *applied* query, which Phase 6
-    // owns; `selectPostsViewState` + `CollectionFilterEmptyState` are tested
-    // directly. Here we prove the page keeps the two states apart: a postless
-    // collection with an empty applied query is the empty-collection state.
+    // DISC-08's end-to-end version (a `?q=` URL over an empty result set, then
+    // `Clear filters`) lives in `collection-page-discovery.test.tsx`. Here we
+    // prove the page keeps the two states apart: a postless collection with an
+    // empty applied query is the empty-collection state.
     stubGalleryFetch({
       posts: postsRoute([]),
       collections: () => jsonResponse({ collections: [LINUX] }),
@@ -448,9 +461,8 @@ describe("CollectionPage — states (COLL-10)", () => {
   })
 })
 
-describe("CollectionPage — Phase 6 seam and recorded deviations", () => {
-  it("does not fake filtering: typing in the search box changes nothing", async () => {
-    const user = userEvent.setup()
+describe("CollectionPage — discovery wiring (DISC-01, DISC-06)", () => {
+  it("debounces the typed search into a single q= request (DISC-01)", async () => {
     const fetchMock = stubGalleryFetch({
       posts: postsRoute(),
       collections: () => jsonResponse({ collections: [LINUX] }),
@@ -458,22 +470,28 @@ describe("CollectionPage — Phase 6 seam and recorded deviations", () => {
 
     renderPage()
     await screen.findByTestId("gallery-masonry")
-    const callsAfterLoad = fetchMock.mock.calls.length
+    const postsBefore = postsRequests(fetchMock).length
 
     const search = screen.getByTestId("collection-search")
-    await user.type(search, "nothing-matches-this")
+    // Two keystrokes in one pause: the controlled input echoes immediately…
+    fireEvent.change(search, { target: { value: "wayl" } })
+    fireEvent.change(search, { target: { value: "wayland" } })
+    expect(search).toHaveValue("wayland")
 
-    expect(search).toHaveValue("nothing-matches-this")
-    // The typed text is draft state only: no new request, no hidden posts and
-    // no "No posts match your filters" while the applied query is empty.
-    expect(fetchMock.mock.calls.length).toBe(callsAfterLoad)
-    expect(screen.getAllByTestId("post-card")).toHaveLength(6)
+    // …and only the settled value is requested (300 ms debounce).
+    await waitFor(() => {
+      expect(
+        postsRequests(fetchMock).some((url) => url.includes("q=wayland"))
+      ).toBe(true)
+    })
+
+    expect(postsRequests(fetchMock).slice(postsBefore)).toHaveLength(1)
     expect(
-      screen.queryByText("No posts match your filters")
-    ).not.toBeInTheDocument()
+      postsRequests(fetchMock).some((url) => /[?&]q=wayl(&|$)/.test(url))
+    ).toBe(false)
   })
 
-  it("sends the default sort and does not resend when the sort control changes", async () => {
+  it("pushes a new request when the sort control changes (DISC-06)", async () => {
     const user = userEvent.setup()
     const fetchMock = stubGalleryFetch({
       posts: postsRoute(),
@@ -483,12 +501,15 @@ describe("CollectionPage — Phase 6 seam and recorded deviations", () => {
     renderPage()
     await screen.findByTestId("gallery-masonry")
 
-    expect(String(fetchMock.mock.calls[0][0])).toContain("sort=saved_desc")
-    const callsAfterLoad = fetchMock.mock.calls.length
+    expect(postsRequests(fetchMock)[0]).toContain("sort=saved_desc")
 
     await user.selectOptions(screen.getByTestId("collection-sort"), "tweet_asc")
 
-    expect(fetchMock.mock.calls.length).toBe(callsAfterLoad)
+    await waitFor(() => {
+      expect(
+        postsRequests(fetchMock).some((url) => url.includes("sort=tweet_asc"))
+      ).toBe(true)
+    })
   })
 
   it("omits the media-type and topic pills (design spec §7)", async () => {

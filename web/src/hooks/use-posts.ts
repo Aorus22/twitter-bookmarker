@@ -20,6 +20,10 @@ import type { GalleryCollection, GalleryPost, GallerySort } from "@/types"
  *   `loadMore` (append `items`, advance the cursor) without restructuring.
  * - Stale resolutions are dropped with a per-effect `cancelled` flag, and a
  *   `window` `focus` listener refetches (PRD-2 §47/§78).
+ * - State is **keyed by the request signature**: the moment a search/filter/sort
+ *   change alters the query, the hook returns `loading` with no posts and a null
+ *   cursor (PRD-2 §77's "clear current pages, reset cursor") while a same-query
+ *   refetch (focus, Retry) keeps the current posts on screen.
  *
  * `options` is intentionally a set of primitive fields rather than a params
  * object: an object literal rebuilt on every render would either churn the
@@ -56,6 +60,8 @@ export interface UsePostsResult {
 }
 
 interface PostsState {
+  /** The request signature this state belongs to. */
+  key: string
   posts: GalleryPost[]
   status: PostsStatus
   error: unknown
@@ -63,9 +69,9 @@ interface PostsState {
   hasMore: boolean
 }
 
-const INITIAL_STATE: PostsState = {
-  posts: [],
-  status: "loading",
+const EMPTY_POSTS_STATE = {
+  posts: [] as GalleryPost[],
+  status: "loading" as PostsStatus,
   error: null,
   nextCursor: null,
   hasMore: false,
@@ -85,8 +91,24 @@ export function usePosts(
     saved_to,
   } = options
 
+  // The signature of the query this render wants. A change to any part of it
+  // means the view's pages and cursor no longer belong to the current query.
+  const requestKey = [
+    filename ?? "",
+    limit,
+    sort,
+    q ?? "",
+    tweet_from ?? "",
+    tweet_to ?? "",
+    saved_from ?? "",
+    saved_to ?? "",
+  ].join("\u0000")
+
   const [requestId, setRequestId] = useState(0)
-  const [state, setState] = useState<PostsState>(INITIAL_STATE)
+  const [state, setState] = useState<PostsState>(() => ({
+    ...EMPTY_POSTS_STATE,
+    key: requestKey,
+  }))
   const [collection, setCollection] = useState<GalleryCollection | undefined>(
     undefined
   )
@@ -120,6 +142,7 @@ export function usePosts(
           return
         }
         setState({
+          key: requestKey,
           posts: response.items,
           status: "success",
           error: null,
@@ -132,6 +155,7 @@ export function usePosts(
           return
         }
         setState({
+          key: requestKey,
           posts: [],
           status: "error",
           error,
@@ -166,6 +190,7 @@ export function usePosts(
     hasFilename,
     filename,
     requestId,
+    requestKey,
     limit,
     sort,
     q,
@@ -199,15 +224,22 @@ export function usePosts(
     }
   }
 
+  // A query change makes the held pages/cursor belong to a superseded request,
+  // so the view immediately reverts to `loading` with no posts and no cursor
+  // (PRD-2 §77). A same-query refetch keeps them until the new page resolves.
+  const isCurrent = state.key === requestKey
+
   return {
-    posts: state.posts,
-    status: state.status,
-    error: state.error,
+    posts: isCurrent ? state.posts : [],
+    status: isCurrent ? state.status : "loading",
+    error: isCurrent ? state.error : null,
     errorMessage:
-      state.status === "error" ? describeGalleryError(state.error) : "",
+      isCurrent && state.status === "error"
+        ? describeGalleryError(state.error)
+        : "",
     collection,
-    nextCursor: state.nextCursor,
-    hasMore: state.hasMore,
+    nextCursor: isCurrent ? state.nextCursor : null,
+    hasMore: isCurrent ? state.hasMore : false,
     refetch,
   }
 }

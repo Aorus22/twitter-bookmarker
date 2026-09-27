@@ -80,7 +80,10 @@ verify-web: ## Real-browser acceptance for the SPA (agent-browser; needs `make b
 verify-trace: ## Check every PRD requirement has a traceability row.
 	bash scripts/check-requirement-traceability.sh
 
-verify: verify-http verify-trace verify-web ## Run every acceptance gate. Needs `make build`.
+verify-extension: ## Check the built extension dist (needs `make build`).
+	cd extension && npm run verify
+
+verify: verify-http verify-trace verify-web verify-extension ## Run every acceptance gate. Needs `make build`.
 
 dev-web: ## Run the Vite dev server for the SPA (proxies /api to 127.0.0.1:43121).
 	@echo "==> pair with 'make dev-backend' in another shell"
@@ -103,7 +106,7 @@ run: ## Run the built server (build it first with `make build`).
 fmt: ## Format the backend sources in place.
 	gofmt -w backend
 
-lint: ## Fail on unformatted Go, vet errors, or extension/web type errors.
+lint: ## Fail on unformatted Go, vet errors, lint errors, or extension/web type errors.
 	@unformatted="$$(gofmt -l backend)"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "gofmt would change:" >&2; \
@@ -113,6 +116,7 @@ lint: ## Fail on unformatted Go, vet errors, or extension/web type errors.
 	cd backend && go vet ./...
 	cd extension && npm run typecheck
 	cd web && pnpm run typecheck
+	cd web && pnpm run lint
 
 clean: ## Remove build outputs. User CSV/index data is never touched.
 	rm -rf backend/bin extension/dist web/dist

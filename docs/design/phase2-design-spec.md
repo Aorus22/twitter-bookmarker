@@ -201,6 +201,26 @@ placeholder with a neutral glyph. Never use an avatar as a cover.
 as the mockup's Inter Medium 11 muted. The mockup's one-line collection *description* is
 dropped — CSV has no description field (§7).
 
+**Spec validated against Figma** (2026-09-27, structural extraction of frame `6:16`
+"01 · Gallery / Editorial Desktop", 1440×1120). Every figure above was confirmed node-for-node:
+
+| Measurement | Figma | This spec |
+|---|---|---|
+| Card box / radius | `244×330`, `r20` | same |
+| Collage tiles | `120×88`, `r14`, at x=0/125, y=0/93 | same → **5px** gaps, region `245×181` |
+| Name | `(18,198)`, Playfair Display Bold 22 | same |
+| Secondary line | `(18,231)`, Inter Regular 11 — a *description* | **dropped** (§7: no CSV field) |
+| Meta | `(18,288)`, Inter Medium 11 | same, plus the PRD §16 last-saved date |
+| `•••` overflow | `(206,288)`, Inter Bold 11 | **omitted** (§7: no card action exists) |
+| Card pitch | x = 64, 326, 588, 850, 1112 | **18px** gap between 244-wide cards |
+| Content column | hero and grid both `1312` at x=64 | same |
+| Section header | `My Collections` y=466 @28; `N collections` y=480 @11 | same |
+| Footer line | y=938, Inter Regular 11 | same |
+
+Two consequences worth flagging for implementation: the grid fits **5 columns** at 1440px
+(5×244 + 4×18 = 1292 ≤ 1312), and the mockup's per-card description text exists in Figma but
+has no backing CSV column — so it must not be rendered.
+
 ### 3.3 Collection page (`/collections/:filename`) — frame `6:121`
 
 1. **Back link** `← Collections` (Inter Medium 11, muted) at y=112.

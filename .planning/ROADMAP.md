@@ -23,7 +23,7 @@ The backend and the web app are deliberately kept in separate phases so each can
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Gallery Read Layer** - A dedicated `backend/internal/gallery/` module that turns CSVs into collection summaries and paginated, filtered, searched, sorted posts (PRD §2.1; PRD §7, §39, §42, §45–§51)
+- [x] **Phase 1: Gallery Read Layer** - A dedicated `backend/internal/gallery/` module that turns CSVs into collection summaries and paginated, filtered, searched, sorted posts (completed 2026-09-27)
 - [ ] **Phase 2: Gallery HTTP API** - `GET /api/gallery/collections` and `GET /api/gallery/collections/{filename}/posts` with validation, 404/400/500 semantics, and path-traversal rejection, alongside an unchanged `/v1/*` (PRD §2.2; PRD §36–§41, §54)
 - [ ] **Phase 3: Web Scaffold, Theme & API Client** - The `web/` app created with the official shadcn Vite CLI, wired with routing, the v2 Editorial design tokens, light/dark/system theme, the Vite `/api` proxy, and a typed relative-URL API client (PRD §2.3; PRD §13, §14, §55, §72)
 - [ ] **Phase 4: Gallery Homepage** - Collection cards with cover collages, counts, last-bookmarked dates, empty/no-media/broken-image handling, skeletons and retry (PRD §2.4; PRD §16, §17, §38, §59, §61, §62)
@@ -49,7 +49,11 @@ The backend and the web app are deliberately kept in separate phases so each can
   4. Cursor pagination walks the whole collection without gaps or repeats, and re-reading after appending a row surfaces the new post without any restart
   5. Traversal-style filenames (`../x.csv`, `/etc/passwd`, `a/b.csv`, `x.txt`) are rejected
 
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+
+- [x] 01-01: Gallery read layer package — CSV discovery, summaries, media parsing, search, date filters, sorts, cursor pagination
 
 #### Phase 2: Gallery HTTP API
 
@@ -186,7 +190,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Gallery Read Layer | 0/TBD | Not started | - |
+| 1. Gallery Read Layer | 1/1 | Complete | 2026-09-27 |
 | 2. Gallery HTTP API | 0/TBD | Not started | - |
 | 3. Web Scaffold, Theme & API Client | 0/TBD | Not started | - |
 | 4. Gallery Homepage | 0/TBD | Not started | - |

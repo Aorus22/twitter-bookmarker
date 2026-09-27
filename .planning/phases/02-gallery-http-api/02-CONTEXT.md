@@ -33,6 +33,27 @@ Expose the Phase 1 `backend/internal/gallery/` read layer over two read-only HTT
 - `media` in the posts response is always a JSON array — `[]`, never `null` (PRD §80.13).
 - Where a `last_saved_at` cannot be determined, emit JSON `null` (PRD §74 types it `string | null`).
 
+### Error mapping discovered during Phase 1 verification (authoritative)
+
+The Phase 1 package rejects invalid input in **two** places, and both must reach `400`:
+
+| Rejection | Raised by | Maps to |
+|-----------|-----------|---------|
+| `limit` non-numeric / `0` / `<1` / `>100`, unknown `sort`, unparseable date | `gallery.RawQuery.Parse()` | `400` |
+| **Malformed/undecodable `cursor`** | `gallery.Reader.Posts()` (as `*storage.ValidationError`) | `400` |
+| Traversal / bad filename | `Reader.Posts()` (via `storage.ValidateFilename`/`SafeJoin`) | `400` |
+| Unknown collection | `Reader.Posts()` (`gallery.ErrCollectionNotFound`) | `404` |
+| Anything else | `Reader.Posts()` / `Collections()` | `500` (sanitised reason) |
+
+Consequences for the handler:
+- Build the query with `gallery.RawQuery{...}.Parse()` — never hand-construct a `gallery.Query`.
+  A hand-built `Query` treats `Limit: 0` as "use the default", so `?limit=0` would silently succeed.
+- An **absent** `limit` must default to 30; an explicit `limit=0` must be a `400`.
+- Catch `*storage.ValidationError` with `errors.As` from **both** the parse step and the `Posts` step,
+  and map both to `400`. Do not only wrap the parse step.
+- Sanitise `500` reasons: wrapped `os` errors can embed the storage path.
+
+
 ### Routing
 
 `internal/api/server.go` uses Go 1.22 `http.ServeMux` method+path patterns. Register:

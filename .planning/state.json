@@ -1,43 +1,63 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "1.0",
+  "milestone": "v2.0",
   "phases": [
     {
       "number": "1",
-      "name": "Go Persistence Layer & HTTP API",
+      "name": "Gallery Read Layer",
       "status": "complete"
     },
     {
       "number": "2",
-      "name": "Extension Foundation & Settings Popup",
-      "status": "complete"
+      "name": "Gallery HTTP API",
+      "status": "in_progress"
     },
     {
       "number": "3",
-      "name": "X DOM Integration",
-      "status": "complete"
+      "name": "Web Scaffold, Theme & API Client",
+      "status": "pending"
     },
     {
       "number": "4",
-      "name": "Save Integration",
-      "status": "complete"
+      "name": "Gallery Homepage",
+      "status": "pending"
     },
     {
       "number": "5",
-      "name": "Auto Unbookmark",
-      "status": "complete"
+      "name": "Collection Gallery",
+      "status": "pending"
     },
     {
       "number": "6",
-      "name": "Hardening, Tests & Docs",
-      "status": "complete"
+      "name": "Discovery Tools",
+      "status": "pending"
+    },
+    {
+      "number": "7",
+      "name": "Infinite Scroll",
+      "status": "pending"
+    },
+    {
+      "number": "8",
+      "name": "Media Lightbox",
+      "status": "pending"
+    },
+    {
+      "number": "9",
+      "name": "Production Serving",
+      "status": "pending"
+    },
+    {
+      "number": "10",
+      "name": "Hardening, Accessibility & Responsive",
+      "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd:progress",
-    "label": "Show progress",
-    "reason": "Unsure of state — showing progress"
+    "command": "/gsd:execute-phase 2",
+    "label": "Execute phase 2",
+    "reason": "Phase 1 complete and verified; phase 2 is next"
   },
-  "updated_at": "2026-09-27T02:07:46.552Z"
+  "updated_at": "2026-09-27T15:00:00.000Z"
 }

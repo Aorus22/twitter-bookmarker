@@ -7,14 +7,17 @@
 #   make fmt            gofmt -w the backend sources
 #   make lint           gofmt check + go vet + extension typecheck
 #   make clean          remove build outputs (never touches user data)
-#   make clean-storage  DESTRUCTIVE: delete ~/.twitter-bookmarker
+#   make clean-storage  DESTRUCTIVE: delete the storage directory
 #
 # `clean` never deletes user CSV/index data; only `clean-storage` does.
+#
+# The storage directory is $TWITTER_BOOKMARKER_DIR when that is set (the value
+# the backend itself reads) and ~/.twitter-bookmarker otherwise.
 
 SHELL := /bin/bash
 
 BACKEND_BIN := backend/bin/twitter-bookmarker-server
-STORAGE_DIR := $(HOME)/.twitter-bookmarker
+STORAGE_DIR := $(if $(TWITTER_BOOKMARKER_DIR),$(TWITTER_BOOKMARKER_DIR),$(HOME)/.twitter-bookmarker)
 
 .DEFAULT_GOAL := build
 
@@ -52,7 +55,7 @@ lint: ## Fail on unformatted Go, vet errors, or extension type errors.
 clean: ## Remove build outputs. User CSV/index data is never touched.
 	rm -rf backend/bin extension/dist
 
-clean-storage: ## DESTRUCTIVE: delete ~/.twitter-bookmarker (all CSVs + index).
+clean-storage: ## DESTRUCTIVE: delete the storage directory (all CSVs + index).
 	@echo ""
 	@echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 	@echo "!!  DESTRUCTIVE COMMAND                                             !!"

@@ -6,7 +6,11 @@ an observable expected result, and what to inspect on disk.
 
 > This file is the manual half of Phase 6. The automated half is
 > `go test ./... -race` (backend, PRD §65 items 1–20) and `npm test`
-> (extension, 147 tests). Anything automated there is **not** repeated here.
+> (extension, 157 tests). Anything automated there is **not** repeated here.
+>
+> A literal `~/.twitter-bookmarker/...` below is the **default** storage path. If
+> you started the backend with `TWITTER_BOOKMARKER_DIR`, substitute that
+> directory — see [Disk locations](#disk-locations-and-inspection-commands).
 
 ---
 
@@ -45,21 +49,30 @@ Set display mode to **Popover** first; switch to **Inline** only for scenario B9
 
 ### Disk locations and inspection commands
 
+Everything below uses `<storage>`: `$TWITTER_BOOKMARKER_DIR` when that is set,
+`~/.twitter-bookmarker` otherwise (PRD §15). Export the same value you started
+the backend with, e.g. `export TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker`.
+
 | What | Path / command |
 |---|---|
-| Category CSV | `~/.twitter-bookmarker/linux.csv` |
-| Derived index | `~/.twitter-bookmarker/index.json` |
-| Storage dir | `ls -la ~/.twitter-bookmarker/` |
+| Category CSV | `$STORAGE/linux.csv` |
+| Derived index | `$STORAGE/index.json` |
+| Storage dir | `ls -la "$STORAGE"` |
 | Health | `curl -s http://127.0.0.1:43121/health` |
 | Index over HTTP | `curl -s http://127.0.0.1:43121/v1/index \| python3 -m json.tool` |
-| Raw CSV | `cat ~/.twitter-bookmarker/linux.csv` |
-| Strict CSV parse | `python3 -c "import csv,sys; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv', newline=''), strict=True)); print(len(rows), rows[0])"` |
-| Index parse | `python3 -m json.tool ~/.twitter-bookmarker/index.json` |
+| Raw CSV | `cat "$STORAGE/linux.csv"` |
+| Strict CSV parse | `python3 -c "import csv,sys; rows=list(csv.reader(open(sys.argv[1], newline=''), strict=True)); print(len(rows), rows[0])" "$STORAGE/linux.csv"` |
+| Index parse | `python3 -m json.tool "$STORAGE/index.json"` |
+
+```bash
+export STORAGE="${TWITTER_BOOKMARKER_DIR:-$HOME/.twitter-bookmarker}"
+```
 
 > **Isolated smoke run (never touches real data):**
-> `HOME=$(mktemp -d) ./backend/bin/twitter-bookmarker-server`
-> The server honours `$HOME`, so CSV/index land in the temp dir. Use this for
-> the pure-backend scenarios (A1–A8) if you do not want to touch real data.
+> `TWITTER_BOOKMARKER_DIR=$(mktemp -d) ./backend/bin/twitter-bookmarker-server`
+> An explicit env var wins over `$HOME`, so CSV/index land in the temp dir. Use
+> this for the pure-backend scenarios (A1–A8) if you do not want to touch real
+> data.
 
 ### Reading the UI
 
@@ -117,7 +130,7 @@ Set display mode to **Popover** first; switch to **Inline** only for scenario B9
 
 **Inspect on disk**
 ```bash
-cat ~/.twitter-bookmarker/linux.csv
+cat "$STORAGE/linux.csv"
 curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 ```
 - CSV has exactly one header row `url,media,author,username,tweet_date,saved_at,text`
@@ -130,7 +143,7 @@ curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
   on a text-only tweet it is exactly `[]`:
 
   ```bash
-  python3 -c "import csv,json; r=list(csv.DictReader(open('$HOME/.twitter-bookmarker/linux.csv',newline=''))); print([json.loads(x['media']) for x in r])"
+  python3 -c "import csv,json; r=list(csv.DictReader(open('$STORAGE/linux.csv',newline=''))); print([json.loads(x['media']) for x in r])"
   ```
 - `index.json` has one `tweets["<id>"]` entry pointing at `linux.csv`.
 
@@ -155,7 +168,7 @@ curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 **Inspect on disk**
 ```bash
 ls -la ~/.twitter-bookmarker/          # ai.csv must NOT exist (or gain a row)
-python3 -c "import csv; print(len(list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv')))))"
+python3 -c "import csv; print(len(list(csv.reader(open('$STORAGE/linux.csv')))))"
 ```
 - Row count in `linux.csv` is unchanged.
 - No `ai.csv` row for that tweet id (the duplicate key is global, across files).
@@ -359,7 +372,7 @@ python3 -m json.tool ~/.twitter-bookmarker/index.json   # valid again
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv'))); print(len(rows))"
+python3 -c "import csv; rows=list(csv.reader(open('$STORAGE/linux.csv'))); print(len(rows))"
 ```
 - Exactly header + 1 row for that tweet.
 
@@ -376,7 +389,7 @@ python3 -c "import csv; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/lin
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv', newline=''), strict=True)); print(len(rows)); print(repr(rows[-1][5]))"
+python3 -c "import csv; rows=list(csv.reader(open('$STORAGE/linux.csv', newline=''), strict=True)); print(len(rows)); print(repr(rows[-1][5]))"
 ```
 - `strict=True` parses without error; the `text` field keeps the internal
   newline and trims only leading/trailing whitespace (PRD §14).
@@ -393,7 +406,7 @@ python3 -c "import csv; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/lin
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; print(repr(list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv', newline='')))[-1][1]))"
+python3 -c "import csv; print(repr(list(csv.reader(open('$STORAGE/linux.csv', newline='')))[-1][1]))"
 file ~/.twitter-bookmarker/linux.csv     # reports UTF-8 text
 ```
 
@@ -426,7 +439,7 @@ grep -c "<distinctive quoted phrase>" ~/.twitter-bookmarker/linux.csv   # -> 0
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; print(repr(list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv', newline='')))[-1][5]))"   # -> ''
+python3 -c "import csv; print(repr(list(csv.reader(open('$STORAGE/linux.csv', newline='')))[-1][5]))"   # -> ''
 ```
 
 ---

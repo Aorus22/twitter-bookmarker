@@ -1,5 +1,5 @@
-// Package config holds the fixed, non-configurable backend settings: the
-// loopback bind address and the storage directory under the user's home.
+// Package config holds the backend settings: the loopback bind address and the
+// storage directory (overridable through the environment).
 package config
 
 import (
@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -19,7 +20,18 @@ const (
 	Host = "127.0.0.1"
 
 	// DirName is the storage directory name inside the user's home directory.
+	// It is only the default: EnvDir overrides it.
 	DirName = ".twitter-bookmarker"
+
+	// EnvDir names the environment variable that relocates the storage
+	// directory anywhere on disk, e.g.
+	//
+	//	TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker
+	//
+	// An empty or unset value keeps the historical ~/.twitter-bookmarker, so
+	// existing installs are unaffected. The data-cleaning scripts in the data
+	// repository read the same variable.
+	EnvDir = "TWITTER_BOOKMARKER_DIR"
 
 	// FileMode is the mode used for the storage directory.
 	FileMode os.FileMode = 0o700
@@ -30,10 +42,11 @@ func Addr() string {
 	return net.JoinHostPort(Host, strconv.Itoa(Port))
 }
 
-// StorageDir resolves ~/.twitter-bookmarker without creating it.
+// StorageDir resolves the storage directory without creating it.
 //
-// It uses os.UserHomeDir (which honours $HOME on Unix), so tests can redirect
-// it with t.Setenv("HOME", t.TempDir()).
+// It honours $TWITTER_BOOKMARKER_DIR when set, and otherwise falls back to
+// ~/.twitter-bookmarker. It uses os.UserHomeDir (which honours $HOME on Unix),
+// so tests can redirect it with t.Setenv("HOME", t.TempDir()).
 func StorageDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -42,7 +55,27 @@ func StorageDir() (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("resolve user home directory: empty home path")
 	}
-	return filepath.Join(home, DirName), nil
+	return resolveStorageDir(os.Getenv(EnvDir), home)
+}
+
+// resolveStorageDir turns the raw environment value into an absolute path.
+//
+// An empty value yields the historical default. A leading "~/" is expanded to
+// the user's home; anything else must already be absolute, because a relative
+// path would depend on the working directory the server happens to be started
+// from and would silently scatter CSVs across the disk.
+func resolveStorageDir(raw, home string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return filepath.Join(home, DirName), nil
+	}
+	if value == "~" || strings.HasPrefix(value, "~"+string(filepath.Separator)) {
+		value = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(value, "~"), string(filepath.Separator)))
+	}
+	if !filepath.IsAbs(value) {
+		return "", fmt.Errorf("%s must be an absolute path or start with ~/ (got %q)", EnvDir, raw)
+	}
+	return filepath.Clean(value), nil
 }
 
 // EnsureStorageDir resolves, creates (mode 0700) and returns the storage dir.

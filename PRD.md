@@ -6,7 +6,7 @@
 **Platform:** Google Chrome / Chromium, Linux  
 **Backend:** Local Go HTTP server  
 **Primary website:** `https://x.com/i/bookmarks`  
-**Persistence:** CSV files under `~/.twitter-bookmarker/`
+**Persistence:** CSV files under `~/.twitter-bookmarker/` (default; lihat §15)
 
 ---
 
@@ -748,13 +748,22 @@ Jangan menyimpan URL image/video di dalam `text`. URL media disimpan di kolom
 
 # 15. Backend Storage Directory
 
-Hardcoded directory:
+Default directory:
 
 ```text
 ~/.twitter-bookmarker/
 ```
 
-Backend membuat directory otomatis jika belum ada.
+Lokasi bisa dipindah lewat environment variable `TWITTER_BOOKMARKER_DIR`
+(absolute atau diawali `~/`); kalau kosong/tidak diset, default di atas dipakai.
+Path relatif ditolak supaya CSV tidak tersebar tergantung working directory.
+
+```bash
+export TWITTER_BOOKMARKER_DIR=~/Personal/twitter-bookmarker
+```
+
+Backend membuat directory otomatis jika belum ada, dan mencatat lokasi yang
+dipakai di log startup.
 
 Recommended permissions:
 
@@ -763,7 +772,8 @@ directory: user-only
 files: user-readable/writable only
 ```
 
-Backend tidak menyediakan setting untuk mengubah lokasi folder pada MVP.
+Backend tidak menyediakan setting lokasi folder di UI extension; hanya lewat
+environment variable di atas.
 
 ---
 

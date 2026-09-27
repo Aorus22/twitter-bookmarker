@@ -42,9 +42,9 @@ func run(args []string) error {
 			fmt.Fprintf(os.Stdout,
 				"Usage: %s [--rebuild-index]\n\n"+
 					"Starts the local Twitter Bookmarker backend on %s.\n"+
-					"Storage directory: ~/%s\n\n"+
+					"Storage directory: $%s, or ~/%s when that is unset.\n\n"+
 					"  --rebuild-index  regenerate index.json from the CSV files and exit\n",
-				serverName, config.Addr(), config.DirName)
+				serverName, config.Addr(), config.EnvDir, config.DirName)
 			return nil
 		case "--rebuild-index":
 			rebuildIndex = true

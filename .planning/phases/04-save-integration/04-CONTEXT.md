@@ -58,15 +58,24 @@ Phase 3 delivered:
 <specifics>
 ## Specific Ideas
 
-### Message envelope
+### Message envelope (ALREADY DEFINED by Phase 2 — extend, do not replace)
+
+`extension/src/shared/messages.ts` already ships the contract; Phase 4 only fills in the service worker's implementations and adds `shared/api.ts`.
 
 ```ts
-type BgResponse<T> = { ok: true; data: T } | { ok: false; error: BgError };
-type BgError = "backend_unavailable" | "invalid" | "internal" | "extraction";
+type MessageType = "HEALTH_CHECK" | "GET_SAVED_INDEX" | "SAVE_TWEET";
+interface SaveTweetMessage { type: "SAVE_TWEET"; payload: SaveRequest }
+// SaveRequest = { filename: string; tweet: { url, author, username, tweet_date, text } }
+
+interface HealthCheckResponse     { ok: boolean; connected: boolean }
+interface GetSavedIndexResponse   { ok: boolean; index: SavedIndex | null; error?: string }
+interface SaveTweetResponse       { ok: boolean; result?: SaveResult; duplicate?: DuplicateResult; error?: string }
 ```
-- `HEALTH_CHECK` → `{ ok: true, data: { connected: boolean } }`
-- `GET_SAVED_INDEX` → `{ ok: true, data: { ids: string[] } }` (ids = keys of `items`)
-- `SAVE_TWEET` `{ filename, tweet: { url, author, username, tweet_date, text } }` → `{ ok: true, data: { status: "saved" | "duplicate", tweet_id, url?, filename?, saved_at? } }`; connection failure → `backend_unavailable`; `400` → `invalid`; `5xx` → `internal`.
+- `GET_SAVED_INDEX` success → `index.items` is `Record<tweetId, {url,filename,saved_at}>`; the content side converts it to `Set<string>` via `Object.keys`.
+- `SAVE_TWEET` success → `{ ok: true, result: { status:"saved", tweet_id, url, filename, saved_at } }`.
+- `SAVE_TWEET` duplicate → `{ ok: true, duplicate: { status:"duplicate", tweet_id } }`.
+- Failures → `{ ok: false, error: "backend_unavailable" | "invalid_request" | "internal" | ... }`.
+- `sendExtensionMessage` **throws** when the worker returns nothing; callers must try/catch and treat a throw as backend-unavailable.
 
 ### Saving state machine (per tweet)
 

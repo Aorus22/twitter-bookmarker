@@ -41,6 +41,10 @@ func NewServer(store BookmarkStore, idx IndexReader, log *logging.Logger) http.H
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /v1/index", s.handleIndex)
 	mux.HandleFunc("POST /v1/bookmarks", s.handleSave)
+	// Read-only gallery API (PRD-2 §36). A non-GET method on either pattern is
+	// answered by the mux's automatic 405, so the API can never be written to.
+	mux.HandleFunc("GET /api/gallery/collections", s.handleGalleryCollections)
+	mux.HandleFunc("GET /api/gallery/collections/{filename}/posts", s.handleGalleryPosts)
 
 	return withExtensionCORS(mux)
 }

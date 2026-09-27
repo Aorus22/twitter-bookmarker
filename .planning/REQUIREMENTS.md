@@ -41,14 +41,14 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### WEB — Web Scaffold, Theme & API Client (Phase 3, PRD §13, §14, §55, §72)
 
-- [ ] **WEB-01**: `web/` is created with the official shadcn CLI Vite template (`pnpm dlx shadcn@latest init -t vite`), not a hand-written shadcn config
-- [ ] **WEB-02**: The app is Vite + React + TypeScript and builds with `pnpm build`, outputting `web/dist`
-- [ ] **WEB-03**: React Router provides the `/` and `/collections/:filename` routes, with a not-found fallback
-- [ ] **WEB-04**: A typed API client requests relative `/api/gallery/...` URLs only and never hardcodes `localhost:43121` or any backend port
-- [ ] **WEB-05**: `web/vite.config.ts` proxies `/api` to `http://127.0.0.1:43121` for development (no CORS configuration needed)
-- [ ] **WEB-06**: The app supports light / dark / system theme with **system** as the default, and exposes a user-visible theme toggle
-- [ ] **WEB-07**: The Figma v2 Editorial design tokens (palette, Playfair Display + Inter typography, radii, shadows) are wired as CSS variables / Tailwind theme tokens, including a dark-mode set
-- [ ] **WEB-08**: Shared layout chrome exists — top navigation, page background, and the app's typographic scale — used by both routes
+- [x] **WEB-01**: `web/` is created with the official shadcn CLI Vite template (`pnpm dlx shadcn@latest init -t vite`), not a hand-written shadcn config
+- [x] **WEB-02**: The app is Vite + React + TypeScript and builds with `pnpm build`, outputting `web/dist`
+- [x] **WEB-03**: React Router provides the `/` and `/collections/:filename` routes, with a not-found fallback
+- [x] **WEB-04**: A typed API client requests relative `/api/gallery/...` URLs only and never hardcodes `localhost:43121` or any backend port
+- [x] **WEB-05**: `web/vite.config.ts` proxies `/api` to `http://127.0.0.1:43121` for development (no CORS configuration needed)
+- [x] **WEB-06**: The app supports light / dark / system theme with **system** as the default, and exposes a user-visible theme toggle
+- [x] **WEB-07**: The Figma v2 Editorial design tokens (palette, Playfair Display + Inter typography, radii, shadows) are wired as CSS variables / Tailwind theme tokens, including a dark-mode set
+- [x] **WEB-08**: Shared layout chrome exists — top navigation, page background, and the app's typographic scale — used by both routes
 
 ### HOME — Gallery Homepage (Phase 4, PRD §16, §17, §38, §59, §61, §62)
 
@@ -176,14 +176,14 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | API-05 | 2 — Gallery HTTP API | Complete |
 | API-06 | 2 — Gallery HTTP API | Complete |
 | API-07 | 2 — Gallery HTTP API | Complete |
-| WEB-01 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-02 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-03 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-04 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-05 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-06 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-07 | 3 — Web Scaffold, Theme & API Client | Pending |
-| WEB-08 | 3 — Web Scaffold, Theme & API Client | Pending |
+| WEB-01 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-02 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-03 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-04 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-05 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-06 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-07 | 3 — Web Scaffold, Theme & API Client | Complete |
+| WEB-08 | 3 — Web Scaffold, Theme & API Client | Complete |
 | HOME-01 | 4 — Gallery Homepage | Pending |
 | HOME-02 | 4 — Gallery Homepage | Pending |
 | HOME-03 | 4 — Gallery Homepage | Pending |

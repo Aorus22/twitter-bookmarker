@@ -27,7 +27,7 @@ The backend and the web app are deliberately kept in separate phases so each can
 - [x] **Phase 2: Gallery HTTP API** - `GET /api/gallery/collections` and `GET /api/gallery/collections/{filename}/posts` with validation, 404/400/500 semantics, and path-traversal rejection, alongside an unchanged `/v1/*` (PRD §2.2; PRD §36–§41, §54) (completed 2026-09-27)
 - [x] **Phase 3: Web Scaffold, Theme & API Client** - The `web/` app created with the official shadcn Vite CLI, wired with routing, the v2 Editorial design tokens, light/dark/system theme, the Vite `/api` proxy, and a typed relative-URL API client (PRD §2.3; PRD §13, §14, §55, §72) (completed 2026-09-27)
 - [x] **Phase 4: Gallery Homepage** - Collection cards with cover collages, counts, last-bookmarked dates, empty/no-media/broken-image handling, skeletons and retry (PRD §2.4; PRD §16, §17, §38, §59, §61, §62) (completed 2026-09-27)
-- [ ] **Phase 5: Collection Gallery** - Pinterest-style masonry of post cards with adaptive multi-media grids, text-only cards, full metadata, and Open on X (PRD §2.5; PRD §18–§25, §60, §73)
+- [x] **Phase 5: Collection Gallery** - Pinterest-style masonry of post cards with adaptive multi-media grids, text-only cards, full metadata, and Open on X (PRD §2.5; PRD §18–§25, §60, §73) (completed 2026-09-27)
 - [ ] **Phase 6: Discovery Tools** - Debounced server-side search, combinable tweet/bookmarked date filters with quick ranges, four sort modes, and URL-backed state (PRD §2.6; PRD §28–§33, §76, §77)
 - [ ] **Phase 7: Infinite Scroll** - IntersectionObserver cursor pagination with skeleton and bottom-loader states, dedupe, and refetch on focus (PRD §2.7; PRD §34, §35, §44, §47, §68)
 - [ ] **Phase 8: Media Lightbox** - Large media plus metadata panel, prev/next across the loaded dataset, focus trap, and Escape/arrow keyboard navigation (PRD §2.8; PRD §26, §27, §67)
@@ -194,7 +194,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Gallery HTTP API | 1/1 | Complete    | 2026-09-27 |
 | 3. Web Scaffold, Theme & API Client | 1/1 | Complete    | 2026-09-27 |
 | 4. Gallery Homepage | 1/1 | Complete    | 2026-09-27 |
-| 5. Collection Gallery | 0/TBD | Not started | - |
+| 5. Collection Gallery | 1/1 | Complete    | 2026-09-27 |
 | 6. Discovery Tools | 0/TBD | Not started | - |
 | 7. Infinite Scroll | 0/TBD | Not started | - |
 | 8. Media Lightbox | 0/TBD | Not started | - |

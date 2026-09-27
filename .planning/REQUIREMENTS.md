@@ -64,17 +64,17 @@ Requirement format: `[CATEGORY]-[NUMBER]`. Every requirement below maps to exact
 
 ### COLL — Collection Gallery (Phase 5, PRD §18–§25, §60, §62, §73)
 
-- [ ] **COLL-01**: The collection page header shows a back link to the gallery, the collection name, and `posts · media` counts, plus the search / filter / sort toolbar
-- [ ] **COLL-02**: Posts render in a Pinterest-style masonry layout: 1 column small, 2–3 medium, 4–5 desktop, with card heights following natural content/media aspect ratio
-- [ ] **COLL-03**: The gallery unit is the tweet/post, not the image — a tweet with four images is one card
-- [ ] **COLL-04**: A multi-media post displays **all** of its media using adaptive layouts (1 single, 2 split, 3 adaptive 2/1, 4+ compact grid)
-- [ ] **COLL-05**: Text-only posts (`media: []`) render as compact text cards with no artificial image placeholder
-- [ ] **COLL-06**: Every card shows author, username, tweet text, tweet date, bookmark date, and an `Open on X` link
-- [ ] **COLL-07**: `Open on X` opens the stored `url` in a new tab with `target="_blank"` and `rel="noopener noreferrer"`
-- [ ] **COLL-08**: Long tweet text uses a controlled clamp with a `Show more` affordance rather than being aggressively truncated
-- [ ] **COLL-09**: Images use browser-native lazy loading and load directly from the stored `pbs.twimg.com` URL (no proxy, download, or cache)
-- [ ] **COLL-10**: A valid but postless collection shows "This collection is empty"; zero filter results show "No posts match your filters" with a `Clear filters` action
-- [ ] **COLL-11**: Broken remote media renders a neutral placeholder while metadata and `Open on X` stay available, without collapsing the card
+- [x] **COLL-01**: The collection page header shows a back link to the gallery, the collection name, and `posts · media` counts, plus the search / filter / sort toolbar
+- [x] **COLL-02**: Posts render in a Pinterest-style masonry layout: 1 column small, 2–3 medium, 4–5 desktop, with card heights following natural content/media aspect ratio
+- [x] **COLL-03**: The gallery unit is the tweet/post, not the image — a tweet with four images is one card
+- [x] **COLL-04**: A multi-media post displays **all** of its media using adaptive layouts (1 single, 2 split, 3 adaptive 2/1, 4+ compact grid)
+- [x] **COLL-05**: Text-only posts (`media: []`) render as compact text cards with no artificial image placeholder
+- [x] **COLL-06**: Every card shows author, username, tweet text, tweet date, bookmark date, and an `Open on X` link
+- [x] **COLL-07**: `Open on X` opens the stored `url` in a new tab with `target="_blank"` and `rel="noopener noreferrer"`
+- [x] **COLL-08**: Long tweet text uses a controlled clamp with a `Show more` affordance rather than being aggressively truncated
+- [x] **COLL-09**: Images use browser-native lazy loading and load directly from the stored `pbs.twimg.com` URL (no proxy, download, or cache)
+- [x] **COLL-10**: A valid but postless collection shows "This collection is empty"; zero filter results show "No posts match your filters" with a `Clear filters` action
+- [x] **COLL-11**: Broken remote media renders a neutral placeholder while metadata and `Open on X` stay available, without collapsing the card
 
 ### DISC — Discovery Tools (Phase 6, PRD §28–§33, §76, §77)
 
@@ -193,17 +193,17 @@ One row per requirement. `phase.complete` flips `Pending` → `Complete` automat
 | HOME-07 | 4 — Gallery Homepage | Complete |
 | HOME-08 | 4 — Gallery Homepage | Complete |
 | HOME-09 | 4 — Gallery Homepage | Complete |
-| COLL-01 | 5 — Collection Gallery | Pending |
-| COLL-02 | 5 — Collection Gallery | Pending |
-| COLL-03 | 5 — Collection Gallery | Pending |
-| COLL-04 | 5 — Collection Gallery | Pending |
-| COLL-05 | 5 — Collection Gallery | Pending |
-| COLL-06 | 5 — Collection Gallery | Pending |
-| COLL-07 | 5 — Collection Gallery | Pending |
-| COLL-08 | 5 — Collection Gallery | Pending |
-| COLL-09 | 5 — Collection Gallery | Pending |
-| COLL-10 | 5 — Collection Gallery | Pending |
-| COLL-11 | 5 — Collection Gallery | Pending |
+| COLL-01 | 5 — Collection Gallery | Complete |
+| COLL-02 | 5 — Collection Gallery | Complete |
+| COLL-03 | 5 — Collection Gallery | Complete |
+| COLL-04 | 5 — Collection Gallery | Complete |
+| COLL-05 | 5 — Collection Gallery | Complete |
+| COLL-06 | 5 — Collection Gallery | Complete |
+| COLL-07 | 5 — Collection Gallery | Complete |
+| COLL-08 | 5 — Collection Gallery | Complete |
+| COLL-09 | 5 — Collection Gallery | Complete |
+| COLL-10 | 5 — Collection Gallery | Complete |
+| COLL-11 | 5 — Collection Gallery | Complete |
 | DISC-01 | 6 — Discovery Tools | Pending |
 | DISC-02 | 6 — Discovery Tools | Pending |
 | DISC-03 | 6 — Discovery Tools | Pending |

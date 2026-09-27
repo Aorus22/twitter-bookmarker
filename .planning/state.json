@@ -26,7 +26,7 @@
     {
       "number": "5",
       "name": "Collection Gallery",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "6",
@@ -56,8 +56,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step (plan phase 05)",
-    "reason": "Phase 05 of 10 — needs a plan"
+    "label": "Advance to the next step (plan phase 06)",
+    "reason": "Phase 06 of 10 — needs a plan"
   },
-  "updated_at": "2026-09-27T15:11:24.801Z"
+  "updated_at": "2026-09-27T15:23:12.394Z"
 }

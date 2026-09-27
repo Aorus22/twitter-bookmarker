@@ -447,9 +447,17 @@ describe("CollectionPage — states (COLL-10)", () => {
     expect(screen.queryByText("Could not load this collection")).not.toBeInTheDocument()
   })
 
-  it("renders the backend connection copy on a transport failure (PRD-2 §61)", async () => {
-    stubGalleryFetch({
-      posts: () => Promise.reject(new TypeError("Failed to fetch")),
+  it("renders the backend connection copy on a transport failure and Retry recovers (PRD-2 §61)", async () => {
+    const user = userEvent.setup()
+    let attempt = 0
+    const fetchMock = stubGalleryFetch({
+      posts: () => {
+        attempt += 1
+        return attempt === 1
+          ? Promise.reject(new TypeError("Failed to fetch"))
+          : jsonResponse({ items: [POSTS[2]], next_cursor: null, has_more: false })
+      },
+      collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
     renderPage()
@@ -458,6 +466,15 @@ describe("CollectionPage — states (COLL-10)", () => {
       await screen.findByText("Could not connect to Twitter Bookmarker backend")
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(await screen.findByTestId("post-card")).toBeInTheDocument()
+    expect(
+      screen.queryByText("Could not connect to Twitter Bookmarker backend")
+    ).not.toBeInTheDocument()
+    // The Retry re-issues the posts request rather than only re-rendering.
+    expect(postsRequests(fetchMock).length).toBeGreaterThanOrEqual(2)
   })
 })
 

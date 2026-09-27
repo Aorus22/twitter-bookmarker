@@ -220,20 +220,28 @@ describe("GalleryPage — states", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it("falls back to the gallery API copy when the failure is not a transport error", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(jsonResponse({ status: "error", reason: "" }, 500))
-    )
+  it("falls back to the gallery API copy on a 500 and Retry recovers", async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "error", reason: "" }, 500))
+      .mockResolvedValueOnce(jsonResponse({ collections: [LINUX] }))
+    vi.stubGlobal("fetch", fetchMock)
 
     renderPage()
 
     expect(
       await screen.findByText("Could not load this collection")
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.queryByTestId("collection-card")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(await screen.findByTestId("collection-card")).toBeInTheDocument()
+    expect(
+      screen.queryByText("Could not load this collection")
+    ).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it("keeps the card in place when a cover image fails to load (PRD-2 §62)", async () => {

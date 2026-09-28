@@ -320,8 +320,12 @@ re-orders, never changes a column, and never moves a card above the growing one.
 Eliminating it needs intrinsic dimensions *before* layout, which this data does not carry. The
 options are to fix the single-media tile to a definite aspect (zero shift, but it crops single
 images and contradicts §3.3/PRD-2 §675), or to start storing media dimensions when a bookmark is
-saved (zero shift, no crop, but only for rows saved after the change). Until one of those is
-chosen, natural aspect is kept and the shift is accepted.
+saved (zero shift, no crop, but only for rows saved after the change).
+
+**Decision (2026-09-28): keep the natural aspect.** The shift is accepted rather than paid for
+with cropped single images — cropping would cut into the artwork that the natural-aspect rule
+exists to protect — and the re-order/re-column behaviour it used to be confused with is gone.
+Revisit only if a future revision starts recording media dimensions at save time.
 
 **Post card** — width `292`, radius `r18`, `surface`, `border`, `shadow-post`, padding `10`:
 

@@ -208,6 +208,28 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
     expect(masonry.style.maxWidth).toBe("940px")
   })
 
+  it("caps and centres the page column at the grid width (even gutters)", async () => {
+    stubGalleryFetch({
+      posts: postsRoute(),
+      collections: () => jsonResponse({ collections: [LINUX] }),
+    })
+
+    renderPage()
+
+    const masonry = await screen.findByTestId("gallery-masonry")
+    const column = screen.getByTestId("collection-column")
+
+    // 3 columns → the column is capped at the exact 3-card width (940) and
+    // centred in the shell's rail. The cards then fill it edge to edge, so the
+    // slack is split evenly instead of piling up on the right — which is what
+    // 292px of dead space at a 1360px window looked like.
+    expect(column.style.maxWidth).toBe("940px")
+    expect(column.className).toContain("mx-auto")
+    // The hero, toolbar and grid share the one column, and the masonry's own
+    // cap agrees with it, so the cards cannot be inset from the toolbar above.
+    expect(masonry.style.maxWidth).toBe(column.style.maxWidth)
+  })
+
   it("recomputes the column count when the viewport resizes (COLL-03)", async () => {
     stubGalleryFetch({
       posts: postsRoute(),
@@ -234,6 +256,9 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
       )
     })
     expect(screen.getByTestId("gallery-masonry").style.maxWidth).toBe("1264px")
+    // The page column is measured from the *uncapped* probe, so it regrows with
+    // the viewport instead of being stuck at the width its own cap implied.
+    expect(screen.getByTestId("collection-column").style.maxWidth).toBe("1264px")
   })
 
   it("renders all four images of a four-media tweet in one card (COLL-04)", async () => {

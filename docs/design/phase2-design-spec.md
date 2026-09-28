@@ -260,6 +260,19 @@ Two structural notes: the mockup's 4-column pitch leaves the 5-column desktop gr
 homepage, and the collection page's toolbar row is `440 + 86 + 150` wide with ~10–12px gaps,
 not a single flex row with equal spacing.
 
+**Implementation note — the collection column is centred** (revised after v2.0 shipped). Figma
+puts the cards on the same `x=64` rail as the hero and the toolbar. That reads well at 1440,
+where `4×292 + 3×32 = 1264` misses the `1312` content column by only 48px — but the slack grows
+to 212–292px between two column thresholds (at a 1360px window the rail is 1232 and the grid is
+still 3 columns = 940), and a hole that size on the right stops reading as a page margin and
+starts reading as breakage. The page therefore caps the **whole content column** — hero, toolbar
+and masonry together — at `masonryContainerWidth(count)` and centres it, so the cards fill it
+edge to edge and the gutters stay equal at every width. The card is still exactly `292`; only
+the column the page arranges them in is centred. Centring the masonry *alone* was rejected: it
+would leave the cards inset from the toolbar above them, trading one misalignment for another.
+The collections index (§3.2) keeps the plain `1312` rail, where its 5×244 pitch already fills
+the column.
+
 **Post card** — width `292`, radius `r18`, `surface`, `border`, `shadow-post`, padding `10`:
 
 | Element | Spec |

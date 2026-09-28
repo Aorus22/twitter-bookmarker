@@ -60,9 +60,22 @@ Gallery juga mendukung:
 - infinite scroll;
 - image lightbox.
 
-Web hanya merupakan **read-only viewer**.
+Gallery juga mendukung **curation** dari arsip lokal:
 
-Extension tetap bertanggung jawab mengumpulkan bookmark.
+- menghapus bookmark (soft delete — baris dipindah ke tabel `deleted_bookmarks`, bukan dimusnahkan);
+- memindahkan bookmark ke folder lain yang sudah ada.
+
+Web **bukan lagi read-only viewer secara keseluruhan**, tetapi batasnya tegas dan
+tidak boleh kabur:
+
+```text
+/api/gallery/*  read-only, GET-only — tidak ada satu pun route yang mengubah data
+/v1/bookmarks   tempat seluruh mutasi berada
+```
+
+Extension tetap bertanggung jawab mengumpulkan bookmark **dan** memiliki nama folder.
+Web tidak pernah membuat folder baru: memindahkan bookmark ke slug yang tidak dikenal
+ditolak dengan `404`, bukan dengan membuat folder baru.
 
 Backend Go tetap bertanggung jawab membaca data lokal dan menyediakan API.
 
@@ -142,7 +155,7 @@ Gallery harus membaca schema yang sudah ada.
 
 Phase 2 harus memungkinkan user:
 
-1. Melihat semua CSV sebagai collection/folder.
+1. Melihat semua collection/folder.
 2. Melihat summary setiap collection.
 3. Membuka collection tertentu.
 4. Melihat tweet dalam Pinterest-style gallery.
@@ -159,7 +172,10 @@ Phase 2 harus memungkinkan user:
 15. Menjelajahi data besar melalui infinite scroll.
 16. Membuka media dalam lightbox.
 17. Melihat data terbaru tanpa restart backend.
-18. Menggunakan web melalui satu Go backend pada production.
+18. Menghapus bookmark dari gallery (soft delete — baris dipindahkan ke tabel
+    `deleted_bookmarks`, tetap dapat dipulihkan lewat resep SQL terdokumentasi).
+19. Memindahkan bookmark ke folder lain yang sudah ada.
+20. Menggunakan web melalui satu Go backend pada production.
 
 ---
 
@@ -167,9 +183,6 @@ Phase 2 harus memungkinkan user:
 
 Phase 2 tidak mencakup:
 
-- editing CSV;
-- delete bookmark;
-- move bookmark;
 - category management;
 - renaming collection;
 - syncing category names dari extension;
@@ -187,35 +200,42 @@ Phase 2 tidak mencakup:
 - AI search;
 - recommendation system;
 - bookmark notes;
-- adding bookmark dari gallery;
-- modifying X bookmarks;
-- websocket/live streaming updates;
-- database migration.
+- adding bookmark dari gallery (menyimpan tweet baru tetap hanya lewat extension);
+- modifying X bookmarks (mengubah tweet di X — curation di bawah hanya menyentuh
+  arsip lokal, bukan platformnya);
+- websocket/live streaming updates.
 
-Gallery bersifat:
+Gallery API bersifat:
 
 ```text
 read-only
 ```
 
+Dua hal di daftar lama sudah tidak berlaku dan dihapus dari non-goals: **database
+migration** (arsip kini memang satu file SQLite, lihat §6) dan **larangan
+delete/move**. Yang tetap berlaku adalah batasnya: seluruh mutasi berada di
+`/v1/bookmarks`, dan `/api/gallery/*` tetap GET-only.
+
 ---
 
 # 6. Core Product Principle
 
-CSV tetap menjadi durable source of truth.
+`tw-bookmarker.db` (SQLite) adalah durable source of truth.
 
-Gallery tidak mempunyai database sendiri.
+Arsip adalah **satu file** di direktori `$TWITTER_BOOKMARKER_DIR`. Tidak ada CSV di
+jalur baca maupun tulis: CSV lama sudah dipindah ke `backup/` oleh skrip migrasi
+satu kali, dan backend tidak mengetahuinya sama sekali.
 
 Flow:
 
 ```text
 Chrome Extension
       ↓
-Go Backend
+Go Backend  ──  POST  /v1/bookmarks            (menyimpan)
+      ↓         DELETE/PUT /v1/bookmarks/{id}  (curation)
+tw-bookmarker.db (SQLite, journal_mode=DELETE)
       ↓
-CSV
-      ↓
-Gallery Read API
+Gallery Read API  (/api/gallery/*, GET-only)
       ↓
 React Web Gallery
 ```
@@ -228,43 +248,36 @@ Semua akses data melalui Go backend.
 
 # 7. Collection Definition
 
-Satu file:
+Satu baris di tabel `collections` dipandang sebagai satu gallery collection.
 
-```text
-*.csv
+```sql
+CREATE TABLE collections (
+  id         INTEGER PRIMARY KEY,
+  slug       TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 ```
 
-di:
-
-```text
-~/.twitter-bookmarker/
-```
-
-dipandang sebagai satu gallery collection.
+`slug` adalah public key-nya (dipakai di URL gallery: `/collections/<slug>`), dan
+`name` adalah display name-nya. Keduanya berasal dari nama folder yang dibuat
+extension, bukan dari nama file.
 
 Contoh:
 
 ```text
-linux.csv
+folder linux        → slug linux        → name "Linux"
+folder ai-and-llm   → slug ai-and-llm   → name "AI And LLM"
 ```
 
-menjadi:
+Display name disimpan, bukan diturunkan ulang dari slug, supaya pemisahan kata
+(`ai-and-llm` → `AI And LLM`) tidak perlu ditebak berkali-kali.
 
-```text
-Linux
-```
+Satu folder = satu collection. Karena `slug` yang UNIQUE, mengganti nama sebuah
+folder berarti membuat collection baru — tidak pernah menomori ulang
+`collection_id` yang sudah ada, sehingga tidak ada baris bookmark yang ditulis ulang.
 
-```text
-ai-and-llm.csv
-```
-
-menjadi:
-
-```text
-AI And LLM
-```
-
-Display name diturunkan dari filename.
+Collection tanpa media tetap tampil (lihat §88).
 
 Backend tidak mencoba mencocokkan collection dengan category configuration extension.
 
@@ -1930,7 +1943,11 @@ No:
 
 No authentication dibutuhkan karena application sengaja local-only.
 
-Gallery API harus read-only.
+Gallery API (`/api/gallery/*`) harus read-only dan GET-only. Curation berada di
+`/v1/bookmarks` — resource bookmark, bukan resource gallery — supaya jaminan ini
+dipertahankan, bukan dilubangi. `scripts/check-gallery-acceptance.sh` menguji ulang
+jaminan tersebut *setelah* curation berjalan: POST/PUT/DELETE pada path gallery tetap
+`405`.
 
 Tidak ada arbitrary filesystem endpoint.
 
@@ -2162,7 +2179,18 @@ Backend Phase 2 dianggap selesai ketika:
 20. path traversal ditolak;
 21. malformed media tidak crash server;
 22. data baru terlihat tanpa restart;
-23. API read-only;
+23. Gallery API (`/api/gallery/*`) read-only — POST/PUT/DELETE ditolak `405`, dan
+    tetap ditolak setelah curation berjalan;
+23a. `DELETE /v1/bookmarks/{tweet_id}` memindahkan baris ke `deleted_bookmarks` dan
+     menjawab `{status, tweet_id, recoverable}`; tweet yang tidak tersimpan `404`,
+     id tidak valid `400`;
+23b. `PUT /v1/bookmarks/{tweet_id}/collection` memindahkan baris ke slug yang **sudah
+     ada** dan menjawab `{status, tweet_id, slug}`; slug tidak dikenal `404` dan tidak
+     membuat folder baru;
+23c. setiap read path (`/v1/index`, listing koleksi, `post_count`, `media_count`)
+     langsung konsisten setelah delete/move, tanpa restart;
+23d. resep restore terdokumentasi (`INSERT … SELECT` dari `deleted_bookmarks`)
+     mengembalikan baris tersebut, dan baris trash tetap disimpan sebagai jejak audit;
 24. backend production serve `web/dist`;
 25. React SPA routes bekerja setelah direct browser refresh.
 
@@ -2592,13 +2620,23 @@ web/dist
 Agent harus menjaga invariants berikut:
 
 ```text
-CSV remains the source of truth.
+tw-bookmarker.db (SQLite) remains the source of truth.
 
-Gallery is read-only.
+The gallery API is read-only (GET-only under /api/gallery/*).
 
-One CSV = one collection.
+Curation lives on /v1/bookmarks, never under /api/gallery/*.
 
-Collection names derive from filenames.
+Deleting a bookmark moves its row into deleted_bookmarks; bookmarks always equals
+the live set, so no read path needs a deleted filter.
+
+A soft-deleted row is never destroyed; it stays recoverable by the documented
+INSERT … SELECT recipe.
+
+Moving a bookmark never creates a folder; the target slug must already exist.
+
+One collection = one slug.
+
+Collection names derive from the folder names the extension owns.
 
 Collections without media remain visible.
 
@@ -2606,7 +2644,9 @@ Text-only posts remain visible.
 
 Gallery never requires the Chrome extension to be open.
 
-Gallery reads current CSV state without backend restart.
+Gallery reads current database state without backend restart.
+
+A version-1 database is upgraded in place by the first writable open.
 
 Existing extension API contracts cannot break.
 

@@ -20,8 +20,10 @@ the CSV→SQLite migration boundary — is specified in
 optional unbookmark. The SQLite database is the durable source of truth; nothing
 else is a copy of it, and the backend keeps no cache that could disagree with it.
 
-**It is not** a bookmark manager, dashboard, sync service, or general-purpose
-database. There is no search, filtering, move/undo, import/export, cloud sync,
+**It is not** a dashboard, sync service, or general-purpose database. The gallery
+is read-only and adds search, filtering and sorting; curation adds exactly two
+mutations, move-to-folder and a recoverable delete
+([Curation](#curation)). There is no undo button, import/export, cloud sync,
 authentication, or X API usage. The extension works off the rendered DOM only.
 See `.planning/PROJECT.md` for the full out-of-scope list.
 
@@ -194,11 +196,12 @@ One SQLite database per storage directory:
 <storage dir>/tw-bookmarker.db      (config.DBName)
 ```
 
-Schema version `1` in `PRAGMA user_version`. `journal_mode=DELETE` (deliberately
+Schema version `2` in `PRAGMA user_version`. `journal_mode=DELETE` (deliberately
 **not** WAL, so the directory holds one complete, git-safe file at every quiescent
 moment), `synchronous=FULL`, `foreign_keys=ON` and `busy_timeout=5000`, all
-applied through the DSN so they hold on every pooled connection. The full
-contract, the durability rationale and the alternatives considered are in
+applied through the DSN so they hold on every pooled connection. A database the
+server creates is `chmod 0600`. The full contract, the durability rationale and
+the alternatives considered are in
 [`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md) §2–§4.
 
 ```sql
@@ -223,6 +226,23 @@ CREATE TABLE bookmarks (
 
 CREATE INDEX bookmarks_by_collection_saved ON bookmarks(collection_id, saved_at, tweet_id);
 CREATE INDEX bookmarks_by_collection_tweet ON bookmarks(collection_id, tweet_date, tweet_id);
+
+-- Added in schema version 2; the two tables above are unchanged from version 1.
+CREATE TABLE deleted_bookmarks (
+  id            INTEGER PRIMARY KEY,
+  tweet_id      TEXT NOT NULL,
+  collection_id INTEGER NOT NULL,
+  url           TEXT NOT NULL,
+  author        TEXT NOT NULL,
+  username      TEXT NOT NULL,
+  tweet_date    TEXT NOT NULL,
+  saved_at      TEXT NOT NULL,
+  text          TEXT NOT NULL DEFAULT '',
+  media         TEXT NOT NULL DEFAULT '[]',
+  deleted_at    TEXT NOT NULL
+);
+
+CREATE INDEX deleted_bookmarks_by_tweet ON deleted_bookmarks(tweet_id, deleted_at DESC);
 ```
 
 | Column | Meaning |
@@ -262,7 +282,7 @@ sqlite3 -header -column ~/.twitter-bookmarker/tw-bookmarker.db \
     ORDER BY b.saved_at DESC LIMIT 5;"
 ```
 
-`GET /v1/index` is built from these same two tables in Go — a `JOIN`, not a JSON
+`GET /v1/index` is built from these same live tables in Go — a `JOIN`, not a JSON
 file — so it can never disagree with what the gallery serves.
 
 > The `sqlite3` CLI defaults `PRAGMA foreign_keys` to **off**. That is fine for
@@ -270,18 +290,59 @@ file — so it can never disagree with what the gallery serves.
 > `PRAGMA foreign_keys=ON` in the same session (or pass
 > `-cmd 'PRAGMA foreign_keys=ON'`) so the `ON DELETE CASCADE` actually fires.
 
+### Soft delete: `deleted_bookmarks`
+
+Version 1 → 2 adds exactly one table and one index; the `collections` and
+`bookmarks` DDL above is **unchanged**.
+
+`DELETE /v1/bookmarks/{tweet_id}` does not destroy the row, and it does not flag
+it in place with a `deleted_at` column on `bookmarks`. It **moves the row** into
+`deleted_bookmarks`. The point is the invariant that keeps every reader simple:
+
+> `bookmarks` is exactly the live set.
+
+So *no* read path — the SQLite reader, `/v1/index`, collection counts, cover
+media, cursor pagination — needs a `WHERE deleted_at IS NULL` filter that a
+future query could forget. There is nothing to remember, so there is nothing to
+forget. `scripts/check-gallery-acceptance.sh` re-checks that every read path drops
+the deleted row immediately and that the collection summary still agrees with the
+live row count.
+
+Two choices in that DDL are deliberate:
+
+- There is **no foreign key** from `deleted_bookmarks.collection_id`. Deleting a
+  folder must never erase the deletion audit trail, and an `ON DELETE CASCADE`
+  would quietly empty the trash instead.
+- `id` is a plain autoincrement primary key, not `tweet_id`. Saving and deleting
+  the same tweet twice must record two events rather than overwrite the first, so
+  the trash is a log, not a claim on the Status ID.
+
+**Upgrading is automatic.** Starting the server against a version-1 directory
+upgrades it in place on startup: one transaction that creates the table and its
+index and stamps `user_version = 2`, rewriting no row. The upgrade is narrow on
+purpose: it runs only for a version-1 file that really holds the version-1 table
+set. A database whose shape does not match its stamp is refused rather than
+guessed at — a version-1 file with unexpected tables is not upgraded, and a file
+that claims version 2 while missing one of the tables fails to open.
+
+Restoring a row is a manual SQL step; the recipe is in
+[Restoring a deleted bookmark](#restoring-a-deleted-bookmark-manual).
+
 ### Migrating a CSV-era directory
 
 v1.0 stored one CSV per category (`linux.csv`) plus a derived `index.json`. The
 one-time migration lives with the data it migrates: the data repository's
 `Scripts/migrate_to_sqlite.py` (`hehenugas/twitter-bookmarker-csv`, private). It
 validates every CSV row, builds `tw-bookmarker.db` atomically, sets
-`user_version=1`, asserts per-collection row and media counts, moves the CSVs and
+`user_version` to the current schema version (the same schema constant the
+backend uses, so a fresh migration is never born a version behind), asserts
+per-collection row and media counts, moves the CSVs and
 `index.json` into `backup/`, writes `backup/MIGRATION.json` with per-file SHA-256
 digests, and refuses to run twice.
 
 The backend has **no CSV awareness**: there is no migration flag, no CSV
-scanning, no `backup/` handling, and no startup refusal guard. It opens
+scanning, no `backup/` handling, and no startup guard that refuses to run because a
+directory still contains CSVs. It opens
 `tw-bookmarker.db` and nothing else. See
 [`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md) §9.
 
@@ -348,6 +409,139 @@ extension that sends only a slug still produces a readable collection.
 A duplicate is keyed by **Tweet Status ID**, not URL, so it is detected across
 all collections.
 
+### The gallery API is read-only
+
+`GET /api/gallery/*` is strictly read-only and **GET-only**. No gallery route
+mutates anything: the route table contains only `methodGate(http.MethodGet, …)`
+entries for that prefix, and any other method is answered with `405` and an
+`Allow: GET, HEAD` header.
+
+```text
+GET /api/gallery/collections
+GET /api/gallery/collections/{slug}/posts
+```
+
+`scripts/check-gallery-acceptance.sh` re-asserts the guarantee *after* curation
+has run — `POST`, `PUT` and `DELETE` against a gallery path all answer `405`, and
+the data is byte-for-byte unchanged afterwards. Curation was deliberately put on
+the bookmark resource under `/v1/` so that this did not have to be carved into;
+see [Curation](#curation).
+
+---
+
+## Curation
+
+The archive has exactly two mutations beyond a save, and both live on the
+**bookmark** resource under `/v1/`:
+
+| Route | Effect |
+|---|---|
+| `DELETE /v1/bookmarks/{tweet_id}` | Moves the bookmark into the trash (`deleted_bookmarks`) |
+| `PUT /v1/bookmarks/{tweet_id}/collection` | Moves the bookmark into another existing collection |
+
+They are deliberately **not** gallery routes; putting them next to the `POST`
+that created the bookmark is what keeps
+[the gallery's read-only guarantee](#the-gallery-api-is-read-only) whole instead
+of turning it into a list of exceptions.
+
+> **Vocabulary.** The web app's UI copy says **folder**; the API and the database
+> say **collection**. They are the same thing, and `slug` is the key either way:
+> a "move to folder" is `PUT …/collection` with `{"slug":"…"}`. Expect both words
+> in the same conversation.
+
+### `DELETE /v1/bookmarks/{tweet_id}`
+
+```http
+DELETE /v1/bookmarks/123456789
+
+200 OK
+{"status":"deleted","tweet_id":"123456789","recoverable":true}
+```
+
+`200` with a body rather than `204`, for two reasons: the web client parses every
+successful response as JSON, and the body can state the one thing that makes
+offering a delete safe at all — the row moved to the trash and is still
+recoverable.
+
+The delete is **soft**: the row leaves `bookmarks` and is copied verbatim into
+`deleted_bookmarks`, stamped with `deleted_at`. See
+[Soft delete: `deleted_bookmarks`](#soft-delete-deleted_bookmarks) for the design
+and its rationale.
+
+### `PUT /v1/bookmarks/{tweet_id}/collection`
+
+```http
+PUT /v1/bookmarks/123456789/collection
+Content-Type: application/json
+
+{"slug":"ai"}
+
+200 OK
+{"status":"moved","tweet_id":"123456789","slug":"ai"}
+```
+
+The target collection **must already exist**. The web app never creates a folder
+— the extension owns folder names, and a display name cannot be invented from a
+slug — so a slug the database does not know is a stale picker and answers `404`.
+
+| Status | When | Body |
+|---|---|---|
+| `200 OK` | `DELETE`: the row moved to the trash; `PUT`: the row changed collection | `{"status":"deleted",…,"recoverable":true}` / `{"status":"moved",…,"slug":"…"}` |
+| `400 Bad Request` | Empty, non-numeric or over-32-character tweet id; invalid slug; malformed JSON body | `{"status":"error","reason":"…"}` |
+| `404 Not Found` | The tweet is not a live bookmark — unknown **or already deleted** — or, for a move, the target collection does not exist | `{"status":"error","reason":"tweet is not saved"}` / `{"status":"error","reason":"collection does not exist"}` |
+| `405 Method Not Allowed` | Wrong method on either route (for example `POST`) | plain-text `method not allowed`, `Allow: DELETE` or `Allow: PUT` |
+| `500 Internal Server Error` | Database/internal failure | `{"status":"error","reason":"internal error"}` |
+
+The two `404` causes share a status on purpose: a caller that asks to delete a
+tweet nobody saved and a caller that asks to move it into a folder that does not
+exist both requested a change that did not happen.
+
+Deleting an already-deleted post is `404`, not a second trash entry. Re-saving a
+tweet whose earlier copy sits in the trash succeeds (`201`): the trash is a log,
+not a claim on the Status ID, so the earlier deletion stays as its own audit row.
+
+### The web UI
+
+Every post card shows a kebab (⋮) at its top-right on hover — and also on keyboard
+focus, since a hover-only control is unusable without a pointer. The same kebab
+sits in the media lightbox's info panel, to the left of the `×`. It opens a menu
+with **Move to folder** and **Delete bookmark**.
+
+- Delete asks for confirmation first, and the confirmation says the bookmark is
+  kept and can be restored by hand. There is deliberately **no undo button**.
+- The folder picker lists every folder except the one the post is already in,
+  each with its post count.
+- After a successful delete or move the card leaves the grid and the header counts
+  drop, **without refetching**, so the scroll position and the already-loaded pages
+  survive.
+- On failure nothing changes on screen and a `role="alert"` banner says so
+  explicitly (`… Nothing was changed.`).
+- Deleting the post that is open in the lightbox closes the lightbox.
+
+### Restoring a deleted bookmark (manual)
+
+Recovery is a documented SQL step against the database, not a UI feature. The
+trash row is intentionally **not** removed by the restore, so every restore leaves
+an audit trail.
+
+Find the row first:
+
+```bash
+sqlite3 -header -column ~/.twitter-bookmarker/tw-bookmarker.db \
+  "SELECT id, tweet_id, author, deleted_at FROM deleted_bookmarks ORDER BY deleted_at DESC;"
+```
+
+Then re-insert it by the trash row's `id`:
+
+```sql
+INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media
+FROM deleted_bookmarks WHERE id = <the trash row's id>;
+```
+
+The row returns to the collection it was deleted from: `collection_id` is copied
+into the trash for exactly that reason.
+
 ---
 
 ## Invariants (PRD §71)
@@ -380,6 +574,11 @@ Supporting guarantees:
   storage directory to one complete file at every quiescent moment, so a
   `git add` of the directory never misses committed rows in a `-wal` sidecar.
 - `saved_at` is generated by the backend, in UTC.
+- `GET /api/gallery/*` is GET-only; every mutating route lives on `/v1/`
+  (`POST /v1/bookmarks` and the two [curation](#curation) routes). A wrong method
+  on a known route is `405` with an `Allow` header, never a silent fallthrough.
+- `DELETE /v1/bookmarks/{tweet_id}` moves the row to `deleted_bookmarks`; it never
+  destroys a row, and no read path consults the trash.
 
 ---
 
@@ -441,11 +640,13 @@ Acceptance gates (`make build` first, so `web/dist` exists):
 
 ```bash
 make verify          # every gate below, in order
-make verify-http     # scripts/check-gallery-acceptance.sh — PRD §80 + §82 over HTTP (76 checks)
+make verify-http     # scripts/check-gallery-acceptance.sh — PRD §80 + §82 + curation over HTTP (116 checks)
 make verify-trace    # scripts/check-requirement-traceability.sh (82/82 requirements)
-make verify-web      # scripts/check-web-acceptance.sh — real browser (agent-browser), 98 checks:
+make verify-web      # scripts/check-web-acceptance.sh — real browser (agent-browser), 146 checks:
                      # responsive 390/768/1440, axe-core a11y, keyboard/focus,
-                     # lightbox, and the live-database window-focus refetch
+                     # lightbox, the curation card menu and both curation dialogs,
+                     # and the live-database window-focus refetch
+make verify-extension # extension/dist verification (extension `npm run verify`)
 ```
 
 The full manual test procedure — every PRD §68 scenario with exact steps,
@@ -472,12 +673,22 @@ backend may run, because the port is fixed in `backend/internal/config/config.go
 ### `tw-bookmarker.db` is missing, or startup refuses to open it
 
 A missing database is normal: the server creates the schema (and stamps
-`user_version=1`) on first start, and a fresh install legitimately has no data.
-It **refuses** to open a file it does not recognise — a version other than 1, or
-a version-0 file that already contains unrelated tables — rather than guessing at
-an upgrade. There is no index to rebuild and no `--rebuild-index` flag: the
-database is the only artifact. See
+`user_version=2`) on first start, and a fresh install legitimately has no data.
+A version-1 database is **upgraded in place** on startup — one transaction that
+creates `deleted_bookmarks` and its index and stamps version 2, rewriting no row.
+It **refuses** to open a file it does not recognise — a version other than 1 or 2,
+a version-2 file that is missing one of the tables, or a version-0 file that
+already contains unrelated tables — rather than guessing at an upgrade. There is
+no index to rebuild and no `--rebuild-index` flag: the database is the only
+artifact. See
 [`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md) §3.
+
+### A bookmark vanished after `Delete bookmark`
+
+It was not destroyed: the row moved into the `deleted_bookmarks` table. The UI has
+no undo, but the row can be put back with the documented SQL recipe — see
+[Restoring a deleted bookmark](#restoring-a-deleted-bookmark-manual). The trash
+row deliberately stays behind afterwards, so the restore itself is audited.
 
 ### Saved tweets no longer show `✓ Saved`
 

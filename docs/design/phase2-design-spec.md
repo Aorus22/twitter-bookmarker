@@ -550,7 +550,7 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 | Media-type chips (`All`/`Images`/`Videos`/`Links`/`Text`) | **Omitted** | PRD defines no media-type filter and explicitly excludes video playback |
 | Homepage hero search field | **Omitted** | PRD §28 scopes search to the collection detail page; nav search has no endpoint |
 | `Explore` nav destination | **Omitted** | No such route or requirement; nav shows `Home` / `Collections` |
-| `•••` card overflow menu | **Omitted** | PRD §5 forbids edit/delete/move/rename actions |
+| `•••` card overflow menu | **Kept — an explicit reversal; see §7.1** | The omission reasoned from PRD §5, which forbade edit/delete/move/rename actions. That requirement was subsequently amended to make curation a product requirement, so the mockup's own control is now built rather than omitted |
 | `Recently updated ▾` as a menu | **Static label** | PRD §38 fixes homepage ordering to `last_saved_at DESC` |
 | Dark-mode `muted` `#746b72` | **Lightened to `#b3a8ae`** | Fails PRD §67 contrast on `#28212d` |
 | `Empty gallery` / `Empty collection` / `Error` headline words | **Replaced with PRD strings** | PRD §59–§61 prescribes exact user-facing copy |
@@ -559,6 +559,48 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 | Collection-header meta (`186 posts ◫ 220 media`) | **11 → 24px (20 below `md`), `◫` → `·`** | "How many are in this folder" is the first question the page is asked; at 11px it read as fine print under a 38px title. The mockup's size is inherited from the *card* meta row, where 11px is right because the card is `292` wide and the row competes with the collage — the header has the whole column to itself. The `◫` was a text glyph standing in for a media icon and renders as a bare rectangle with a hairline through it, indistinguishable from a missing glyph; the middle dot is what the homepage hero and the post-card date row already use. `md:` keeps the 96px header column from overflowing at 390px, where the line wraps to two |
 | Lightbox media counter (`n / total`) | **Replaced with dots over the open tweet** | The number counted the loaded archive rather than the tweet, so a one-image tweet read `1 / 39`; see §3.5 |
 | Lightbox single prev/next pair | **Split into a media pair and a post pair** | PRD §27 asks for navigation *inside one tweet*; walking the flattened sequence overrode it; see §3.5 |
+
+### 7.1 The `•••` menu, and why the earlier omission was wrong
+
+The original decision above is kept in the table rather than quietly deleted, because a
+reversal is only honest if the thing reversed is still visible.
+
+The old reasoning was sound given its premise: PRD §5 listed "editing tweet metadata",
+"adding bookmark dari gallery" and `modifying X bookmarks` as non-goals, and the web app
+was described as a read-only viewer. A menu whose every item is forbidden is not a
+deferral, it is a dead control. The premise then changed: curating *the local archive* —
+removing a bookmark from the gallery, filing it in a different folder — was made a
+requirement. That is a different act from editing the tweet on X, and it is the one
+capability the gallery was actually missing: an archive you cannot prune is an archive
+you stop trusting.
+
+What was built, and the reasoning that matters:
+
+- **The control.** A `⋮` at the card's top-right, revealed on hover *and* on keyboard
+  focus. Hover is what the mockup implies; focus is what makes it usable at all, because
+  a control that exists only under a pointer cannot be reached by keyboard or on touch.
+  The same control sits in the lightbox info panel, to the left of `×`, so a post can be
+  curated while it is open rather than only from the grid.
+- **The two actions.** `Move to folder` and `Delete bookmark`. PRD §5 also forbade
+  *rename*; that stays forbidden, and deliberately — folder names belong to the
+  extension, which is the only component that knows what a folder came from. The picker
+  therefore lists existing folders and never offers to create one.
+- **Delete is a soft delete, and the UI says so.** The confirmation's description states
+  that the row is kept in a `deleted_bookmarks` table and can be restored by hand. A
+  destructive action is only defensible if its consequence is stated at the moment of
+  asking.
+- **The gallery API stays read-only.** The new endpoints are
+  `DELETE /v1/bookmarks/{tweet_id}` and `PUT /v1/bookmarks/{tweet_id}/collection`, on the
+  bookmark resource. `/api/gallery/*` remains GET-only, so the read-only guarantee is
+  preserved rather than carved into, and it is re-asserted after curation has run by
+  `scripts/check-gallery-acceptance.sh`.
+- **No undo button.** Recovery is a documented SQL statement. This is a deliberate scope
+  choice, not an oversight: an undo affordance implies a session-scoped stack the
+  backend does not have, and inventing one would create a second source of truth about
+  what "deleted" means.
+- **A removal never refetches.** The card leaves the rendered list and the header counts
+  drop in place, so the scroll position and the already-loaded pages survive. A refetch
+  here would silently return a scrolled-down user to the top of the page.
 
 ---
 

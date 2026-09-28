@@ -4,11 +4,11 @@
 
 Twitter Bookmarker is a Chrome Extension (Manifest V3) plus a small local Go HTTP server that lets a single user categorize tweets on `https://x.com/i/bookmarks`. Clicking a category on a bookmarked tweet extracts the tweet metadata and writes it into one SQLite database, `~/.twitter-bookmarker/tw-bookmarker.db`. Optionally, the tweet is removed from X Bookmarks after the database write is confirmed.
 
-Phase 2 adds a **local web gallery**: the same Go server also serves a read-only web app that turns the database into a browsable, searchable, filterable Pinterest-style media gallery. The extension still does the collecting; the database is still the source of truth; the gallery never writes.
+Phase 2 adds a **local web gallery**: the same Go server also serves a web app that turns the database into a browsable, searchable, filterable Pinterest-style media gallery. The extension still does the collecting; the database is still the source of truth. The `/api/gallery/*` API is strictly read-only and GET-only; curation — moving a post between folders and soft-deleting it — lives on the bookmark resource (`PUT /v1/bookmarks/{tweet_id}/collection`, `DELETE /v1/bookmarks/{tweet_id}`), never in the gallery API.
 
 ## Core Value
 
-A categorized tweet is durably persisted to the SQLite database before anything else happens — the database is the single source of truth, and nothing is ever unbookmarked from X before the write succeeds (synchronous, `synchronous=FULL`, fsynced at commit). The gallery is a pure read-only projection of that database and may never become a second source of truth; there is no derived index and no cache.
+A categorized tweet is durably persisted to the SQLite database before anything else happens — the database is the single source of truth, and nothing is ever unbookmarked from X before the write succeeds (synchronous, `synchronous=FULL`, fsynced at commit). The `/api/gallery/*` API is a pure read-only projection of that database and may never become a second source of truth; there is no derived index and no cache. Mutations live on the bookmark resource, never in the gallery API.
 
 ## Requirements
 
@@ -48,6 +48,13 @@ No active milestone. v2.0 shipped 2026-09-28 and is archived. Start the next mil
 carried forward is recorded in `.planning/milestones/v2.0-MILESTONE-AUDIT.md` and listed in
 `.planning/STATE.md` under Deferred Items.
 
+**post-v2.0 curation (done, not yet committed):** soft delete plus move between existing folders —
+`DELETE /v1/bookmarks/{tweet_id}` moves the row into `deleted_bookmarks`, and
+`PUT /v1/bookmarks/{tweet_id}/collection` re-files it — with SQLite schema version 2 and the web
+kebab (⋮) `Move to folder` / `Delete bookmark` UI. Implemented and locally verified (Go packages pass,
+46 web test files / 496 tests, gallery acceptance 116/116, web acceptance 146/146, traceability 82/82)
+but not yet committed; the working tree shows it as modified/untracked files. See Current State.
+
 ### Out of Scope
 
 Explicitly excluded by the PRDs (do not re-add):
@@ -55,7 +62,7 @@ Explicitly excluded by the PRDs (do not re-add):
 From `PRD.md` (v1.0):
 
 - Dashboard, search, filtering, database viewer/editor from the extension — not core to the categorize→persist job
-- Move tweet between categories, undo, import, export — adds state the database already owns
+- Move tweet between categories, undo, import, export — adds state the database already owns (moving a post between folders was later superseded by the post-v2.0 curation feature — see Active; undo, import, and export remain out of scope)
 - Cloud sync, multi-device sync, authentication, accounts, remote backend — single-user local tool
 - Quoted tweet text, image/video download — only parent text and media URLs are persisted
 - Keyboard shortcuts, category icons, favorites, automatic/AI classification — not required for MVP
@@ -65,7 +72,7 @@ From `PRD.md` (v1.0):
 
 From `PRD-2.md` (v2.0):
 
-- Editing stored bookmarks, deleting/moving bookmarks, category management, renaming collections, syncing category names from the extension
+- Editing stored bookmark content, category management, renaming collections, syncing category names from the extension (PRD-2 also excluded deleting and moving bookmarks, but that part was superseded by the post-v2.0 curation feature — see Active)
 - Authentication, accounts, multi-user, cloud hosting, cloud storage
 - Downloading media, local media archiving, media proxy, video playback
 - Editing tweet metadata, notes, AI tagging/search, recommendations
@@ -81,8 +88,8 @@ From `PRD-2.md` (v2.0):
 - X is an SPA, so route changes and infinitely loaded timeline rows are handled with `MutationObserver`.
 - X DOM structure is unstable; all selector logic is encapsulated in one extractor module.
 - Category definitions and settings live only in `chrome.storage.local`; the backend never owns them.
-- Collection names live on the `collections` row (the extension sends the typed name with each save) and fall back to `model.DeriveName(slug)` when a save omits one. The backend never matches stored collections to extension category config, and never merges renamed categories.
-- The database schema is fixed at version 1 (`PRAGMA user_version`): `collections(id, slug UNIQUE, name, created_at)` and `bookmarks(tweet_id PRIMARY KEY, collection_id, url, author, username, tweet_date, saved_at, text, media)`. `tweet_id` is derived from `url` and is globally unique. The full contract is `docs/design/sqlite-migration.md`.
+- Collection names live on the `collections` row (the extension sends the typed name with each save) and fall back to `model.DeriveName(slug)` when a save omits one. A collection's key is its `slug`, derived by the extension from the folder name — not a filename. The backend never matches stored collections to extension category config, and never merges renamed categories.
+- The database schema is at version 2 (`PRAGMA user_version`). Version 1: `collections(id, slug UNIQUE, name, created_at)` and `bookmarks(tweet_id PRIMARY KEY, collection_id, url, author, username, tweet_date, saved_at, text, media)`. Version 2 adds `deleted_bookmarks(id INTEGER PRIMARY KEY, tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media, deleted_at)` plus the `deleted_bookmarks_by_tweet` index; it deliberately has no foreign key to `collections` (deleting a folder must not erase the audit trail). `tweet_id` is derived from `url` and is globally unique. Starting the server upgrades a version-1 database in place, in one transaction, rewriting no row; a database whose shape does not match its `user_version` stamp is refused. The full contract is `docs/design/sqlite-migration.md`.
 - Timestamps are UTC/RFC3339 in storage; the web app renders them in the browser's local timezone and converts local date-range boundaries back to UTC before calling the API.
 - **Design authority for the web app**: Figma file `Twitter Bookmarker — Phase 2 Gallery Mockups` (key `RAxDbIIUbz2mtNJtXXuDGQ`), page **`Gallery Mockups v2 — Editorial`** (chosen by the user over the page-1 neutral variant). Exact tokens, layout numbers, and component specs are captured in `docs/design/phase2-design-spec.md`.
 
@@ -91,8 +98,8 @@ From `PRD-2.md` (v2.0):
 - **Tech stack (extension)**: Chrome Extension Manifest V3, TypeScript, plain DOM APIs, no frontend framework.
 - **Tech stack (backend)**: Go, `net/http`, `database/sql` with the pure-Go `modernc.org/sqlite` driver. Built with `CGO_ENABLED=0`, so the binary is static and links no C SQLite.
 - **Tech stack (web)**: Vite + React + TypeScript + shadcn/ui, `pnpm`, React Router, Tailwind. Scaffolded with the official shadcn CLI, not hand-rolled config.
-- **Persistence**: one SQLite database, `tw-bookmarker.db`, under `~/.twitter-bookmarker/` (`$TWITTER_BOOKMARKER_DIR` overrides the directory). It is the only file the server owns; there is no derived `index.json` and no second store. The gallery has no cache that can hide fresh data (a fresh read-only connection per request).
-- **Security**: Backend binds `127.0.0.1` only; collection slugs must match `^[a-z0-9][a-z0-9-]*$`; no path traversal; no absolute home paths in error bodies; no arbitrary filesystem endpoint; gallery API is strictly read-only.
+- **Persistence**: one SQLite database, `tw-bookmarker.db`, under `~/.twitter-bookmarker/` (`$TWITTER_BOOKMARKER_DIR` overrides the directory), created mode `0600` with `journal_mode=DELETE` and `synchronous=FULL` — never WAL, because that directory is a git repository. It is the only file the server owns; CSV is no longer the source of truth (there is no CSV anywhere in the running system — the old files were moved to a `backup/` folder by a migration script that lives in the data repository), there is no derived `index.json`, and there is no second store. The gallery has no cache that can hide fresh data (a fresh read-only connection per request).
+- **Security**: Backend binds `127.0.0.1` only; collection slugs must match `^[a-z0-9][a-z0-9-]*$`; no path traversal; no absolute home paths in error bodies; no arbitrary filesystem endpoint; the `/api/gallery/*` API is strictly read-only and GET-only (requirement API-07), re-asserted by `scripts/check-gallery-acceptance.sh` after curation has run — the mutating endpoints live on `/v1/bookmarks/{tweet_id}`, so that guarantee never had to be weakened.
 - **Performance**: Backend reads one collection's rows per request from SQLite (personal dataset, local machine); filtering, search, sort and the cursor stay in Go over those rows. The frontend must never load a whole collection at once — server-side filter/search/sort plus cursor pagination plus native image lazy loading.
 - **Simplicity**: No infrastructure beyond the extension + Go server + one SQLite database + built static `web/dist`. No separate index, cache, queue, or external service.
 - **Compatibility**: Existing `/health`, `/v1/index`, and `POST /v1/bookmarks` contracts cannot break. The extension is not migrated to the gallery API.
@@ -116,7 +123,10 @@ From `PRD-2.md` (v2.0):
 | Web app built to Figma page `Gallery Mockups v2 — Editorial`, warm editorial palette, Playfair Display + Inter | User selected this direction over the page-1 neutral shadcn variant | ✓ v2.0 |
 | Text-only posts render the design's typographic "quote panel" instead of a fake image placeholder | Matches the selected design; PRD §22 only says an artificial placeholder is unnecessary, and the panel keeps masonry rhythm without implying media exists | ✓ v2.0 |
 | Dark-mode muted text is lightened from the mockup's `#746b72` | The mockup value is ~3:1 on the dark surface and fails PRD §67's adequate-contrast requirement | ✓ v2.0 |
-| Storage migrated from one CSV per category + derived `index.json` to one SQLite database (`tw-bookmarker.db`, schema version 1) | One file, one schema, a real primary key; removes the derived index as a second source of truth. The one-time CSV→SQLite migration lives in the data repository (`Scripts/migrate_to_sqlite.py`), not the backend | ✓ post-v2.0 |
+| Storage migrated from one CSV per category + derived `index.json` to one SQLite database (`tw-bookmarker.db`, schema version 1; curation later raises it to version 2) | One file, one schema, a real primary key; removes the derived index as a second source of truth. The one-time CSV→SQLite migration lives in the data repository (`Scripts/migrate_to_sqlite.py`), not the backend | ✓ post-v2.0 |
+| A deleted bookmark is *moved* into `deleted_bookmarks`, never flagged in place | Keeps `bookmarks` exactly the live set, so no read path needs a filter it could forget; the trash row is kept after a restore so the action stays auditable | ✓ post-v2.0 (uncommitted) |
+| Curation endpoints live on the bookmark resource (`DELETE /v1/bookmarks/{tweet_id}`, `PUT /v1/bookmarks/{tweet_id}/collection`) | Keeps `/api/gallery/*` strictly read-only and GET-only (API-07) instead of weakening that guarantee with a mutating gallery route | ✓ post-v2.0 (uncommitted) |
+| Schema version 2 adds `deleted_bookmarks` with its own `id` primary key and no foreign key to `collections`; recovery is manual SQL | Repeated save/delete cycles are each logged, deleting a folder cannot erase the audit trail, and a restore stays auditable — no undo button hiding state | ✓ post-v2.0 (uncommitted) |
 
 ## Current State
 
@@ -124,7 +134,9 @@ From `PRD-2.md` (v2.0):
 
 The product today is one Go binary that both stores bookmarks and serves the gallery, plus the MV3 extension that writes them. Storage is a single SQLite database (`docs/design/sqlite-migration.md`); the CSV→SQLite migration is complete, and the backend has no CSV awareness. `make build` produces the server binary, the loadable extension, and `web/dist`; `make run` serves everything from `127.0.0.1:43121`; `make verify` runs the HTTP, traceability, browser and extension-dist acceptance gates.
 
-**Next milestone:** run `$gsd-new-milestone` to define fresh requirements from a new PRD; phase numbering continues at **Phase 11**. Open tech debt — two moderate landmark violations while the desktop filter Popover is open, the gradient-contrast combination axe cannot evaluate, the absence of a real screen-reader pass, and a known `--out` argument bug in the browser acceptance script — is recorded in `.planning/milestones/v2.0-MILESTONE-AUDIT.md` and in `.planning/STATE.md` under Deferred Items.
+**Uncommitted work — post-v2.0 curation.** Since the storage migration was committed (`69da7ce`), curation has landed in the working tree but is not yet committed: soft delete (`DELETE /v1/bookmarks/{tweet_id}` → 200 `{status, tweet_id, recoverable}`, the row moved into `deleted_bookmarks`) and move between existing folders (`PUT /v1/bookmarks/{tweet_id}/collection` → 200 `{status, tweet_id, slug}`), SQLite schema version 2, and the web kebab (⋮) menu with `Move to folder` / `Delete bookmark`, a destructive confirmation dialog, and a folder picker that excludes the post's current folder, requires the target to exist, and shows each folder's post count. The gallery API stays strictly read-only and GET-only (API-07). Recovery is deliberately manual SQL (`INSERT INTO bookmarks (…) SELECT … FROM deleted_bookmarks WHERE id = <id>;`), and the trash row is kept afterwards so a restore is auditable. Verified: all Go packages pass (`make test`), 46 web test files / 496 tests, `scripts/check-gallery-acceptance.sh` 116/116, `scripts/check-web-acceptance.sh` 146/146, `scripts/check-requirement-traceability.sh` 82/82.
+
+**Next milestone:** commit the curation work, then run `$gsd-new-milestone` to define fresh requirements from a new PRD; phase numbering continues at **Phase 11**. Open tech debt — two moderate landmark violations while the desktop filter Popover is open, the gradient-contrast combination axe cannot evaluate, the absence of a real screen-reader pass, and a known `--out` argument bug in the browser acceptance script — is recorded in `.planning/milestones/v2.0-MILESTONE-AUDIT.md` and in `.planning/STATE.md` under Deferred Items.
 
 ---
 
@@ -146,4 +158,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-28 — storage migrated from per-category CSVs + `index.json` to one SQLite database (schema v1); v2.0 (Local Web Gallery) shipped and archived; no active milestone*
+*Last updated: 2026-09-28 — post-v2.0 curation (schema v2 soft delete + move between folders + web kebab menu) implemented and verified but not yet committed; storage migrated to one SQLite database (schema v1, commit `69da7ce`); both milestones shipped and archived; no active milestone*

@@ -46,7 +46,7 @@ rows are written.
 | Database file | `tw-bookmarker.db` (`config.DBName`) |
 | Directory mode | `0o700` on creation |
 | Database mode | `0o600` when this process creates it |
-| Schema version | `1` (`db.Version`, stored in `PRAGMA user_version`) |
+| Schema version | `2` (`db.Version`, stored in `PRAGMA user_version`) |
 | Journal mode | `DELETE` |
 | Synchronisation | `FULL` |
 | Foreign keys | enforced on the writer |
@@ -89,6 +89,24 @@ CREATE INDEX bookmarks_by_collection_saved
 
 CREATE INDEX bookmarks_by_collection_tweet
   ON bookmarks(collection_id, tweet_date, tweet_id);
+
+-- Added by version 2; see §2.2.
+CREATE TABLE deleted_bookmarks (
+  id            INTEGER PRIMARY KEY,
+  tweet_id      TEXT NOT NULL,
+  collection_id INTEGER NOT NULL,
+  url           TEXT NOT NULL,
+  author        TEXT NOT NULL,
+  username      TEXT NOT NULL,
+  tweet_date    TEXT NOT NULL,
+  saved_at      TEXT NOT NULL,
+  text          TEXT NOT NULL DEFAULT '',
+  media         TEXT NOT NULL DEFAULT '[]',
+  deleted_at    TEXT NOT NULL
+);
+
+CREATE INDEX deleted_bookmarks_by_tweet
+  ON deleted_bookmarks(tweet_id, deleted_at DESC);
 ```
 
 Load-bearing details:
@@ -110,27 +128,85 @@ Load-bearing details:
 - **`created_at` is informational.** It is written on insert and never read by the
   API. The migration sets it to the collection's earliest `saved_at`.
 
+### 2.2 `deleted_bookmarks`: a soft delete that moves the row
+
+Deleting a bookmark does not destroy it and does not set a `deleted_at` flag on
+`bookmarks`. It **moves the row**: `INSERT INTO deleted_bookmarks (…) SELECT …`,
+then `DELETE FROM bookmarks WHERE tweet_id = ?`, in one transaction.
+
+The reason is an invariant, not nostalgia. Moving the row keeps
+
+```text
+bookmarks == exactly the set of live bookmarks
+```
+
+true by construction. A `deleted_at` column would instead make every read path
+responsible for filtering, and there are a lot of them — the row reader, the
+`/v1/index` listing, the per-collection `post_count` and `media_count` aggregates,
+cover media, and cursor pagination. One missing `WHERE deleted_at IS NULL` is a
+deleted bookmark reappearing in the gallery, and no test would necessarily catch
+it. Here there is nothing to remember, so there is nothing to forget.
+
+Three further deliberate choices:
+
+- **No foreign key to `collections`.** `bookmarks.collection_id` cascades, so
+  deleting a folder deletes its bookmarks. If the trash shared that foreign key, a
+  folder delete would erase the record of deletions too — precisely the history
+  worth keeping. `deleted_bookmarks.collection_id` is therefore a plain integer
+  that may reference a collection that no longer exists.
+- **`id INTEGER PRIMARY KEY`, not `tweet_id`.** A tweet can be saved, deleted,
+  re-saved and deleted again; each deletion is its own event with its own
+  `deleted_at`. Keying on `tweet_id` would collapse that history to one row.
+- **`deleted_at` is a server-side RFC 3339 UTC stamp**, like every other timestamp
+  in the file, so the trash sorts in the same lexicographic order as everything
+  else.
+
+Recovery is deliberately manual SQL rather than a UI affordance:
+
+```sql
+INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media
+FROM deleted_bookmarks WHERE id = <the trash row's id>;
+```
+
+The trash row is intentionally **not** removed by that statement, so a restore
+leaves an audit trail. Re-saving the same tweet through the extension also works:
+the trash never claims the tweet id, so `bookmarks.tweet_id` is free again.
+
 ---
 
-## 3. Versioning: four cases, only one writes
+## 3. Versioning: five cases, one of which writes twice
 
 `db.ensureSchema` classifies the file on every writable open:
 
 | case | `user_version` | user tables | action |
 |---|---|---|---|
-| fresh | 0 | 0 | create the schema and stamp version 1 |
-| current | 1 | — | verify the expected tables exist |
+| fresh | 0 | 0 | create the schema and stamp version 2 |
+| current | 2 | — | verify the expected tables exist |
+| upgradable | 1 | exactly `bookmarks`, `collections` | **upgrade in place** to version 2 |
 | foreign | 0 | > 0 | **refuse** — an unrecognised file |
-| other | ≠ 1 | — | **refuse** with `ErrUnsupportedVersion` |
+| other | ≠ 1, ≠ 2 | — | **refuse** with `ErrUnsupportedVersion` |
 
-Refusing is deliberate. An implicit upgrade would have to decide what to do with
-rows it does not understand, and the only safe answer is "not my file". The
-distinction between *fresh* and *foreign* is why the version is stamped inside the
-same transaction that creates the tables: a crash mid-creation leaves a version-0
-file with no tables, which the next startup correctly treats as fresh again.
+Refusing is deliberate for a file we do not recognise. An implicit upgrade of an
+*unknown* shape would have to decide what to do with rows it does not understand,
+and the only safe answer is "not my file".
+
+The `upgradable` case is the one bounded exception, and it is narrow on purpose: the
+stamp must be exactly `1` **and** the table set must be exactly the two version-1
+tables. Anything else at version 1 — a missing table, an extra one, a renamed one —
+falls through to `other` and is refused, because a version stamp is not evidence.
+The upgrade runs in a single transaction: create `deleted_bookmarks` and its index,
+then `PRAGMA user_version = 2`, then commit. It **rewrites no existing row** and
+adds no column, so an interrupted upgrade rolls back whole and the next start
+retries it from a still-version-1 file.
+
+The distinction between *fresh* and *foreign* is why the version is stamped inside
+the same transaction that creates the tables: a crash mid-creation leaves a
+version-0 file with no tables, which the next startup correctly treats as fresh
+again.
 
 `verifySchema` exists because a version stamp is not evidence — a truncated or
-hand-edited file can keep `user_version = 1` while missing a table.
+hand-edited file can keep `user_version = 2` while missing a table.
 
 ---
 
@@ -269,7 +345,7 @@ json_array_length(media) ELSE 0 END)` guards the same tolerance when counting.
 The DDL exists in two languages, so drift is the real risk. It is guarded three
 ways:
 
-1. **`db.verifySchema`** refuses to start against a version-1 file whose tables do
+1. **`db.verifySchema`** refuses to start against a current-version file whose tables do
    not match — the loud, production-facing guard.
 2. **`TestSchemaColumnContract`** in `internal/db` pins the exact column list of
    both tables, so a Go-side change cannot pass unnoticed.
@@ -297,7 +373,8 @@ The one-time migration lives with the data it migrates: the data repository's
    aborts before writing anything if any row is invalid;
 2. builds the database in a temp file and `os.replace`s it into place, so a crash
    cannot leave a half-written database;
-3. sets `user_version = 1` and the identical schema;
+3. sets `user_version = 2` and the identical schema (the script and the backend
+   share one schema constant, so a fresh migration is never born a version behind);
 4. asserts row and media counts per collection before committing;
 5. moves every CSV and `index.json` into `backup/` and writes
    `backup/MIGRATION.json` with per-file SHA-256 digests;
@@ -306,11 +383,30 @@ The one-time migration lives with the data it migrates: the data repository's
 Two orderings matter:
 
 - If the server runs first it creates an **empty** `tw-bookmarker.db`. The
-  migration accepts that state (an empty, version-1, schema-matching file) and
-  proceeds; it refuses a non-empty one.
+  migration accepts that state (an empty, current-version, schema-matching file)
+  and proceeds; it refuses a non-empty one. Its emptiness test counts the trash
+  table as well as the live one: a schema-2 file whose live rows are gone but whose
+  `deleted_bookmarks` still holds deletions is not "the empty file a server
+  leaves", and overwriting it would destroy the archive's deletion history.
 - After migration the directory holds `tw-bookmarker.db` plus a `backup/` folder.
   `backup/` is a frozen archive: the server never reads it, and the migration
   scripts only read it to verify the archive.
+
+---
+
+### 9.1 Upgrading an existing database is the backend's job
+
+The one-time CSV migration is finished; the *schema* will keep moving, and that is
+the backend's concern. A version-1 database is upgraded in place by the first writable
+open (§3) — no flag, no script, no manual step. That split is the point: the data
+repository owns getting the rows *out of CSV*, and the backend owns the shape of the
+file it reads.
+
+Because the upgrade is automatic, the version stamp is the contract between the two:
+`Scripts/verify_data.py` accepts `user_version` `2` or `1` and validates each stamp
+against its own table shape, so a directory can be verified before the server has ever
+touched it. It reports a still-version-1 file as an informational note rather than a
+failure.
 
 ---
 
@@ -326,3 +422,10 @@ Two orderings matter:
 | A `media` join table | Media is an ordered list of at most 8 URLs with no identity of its own; normalising it would add a table and a transaction for no query the app makes. |
 | Cache the reader's parsed collection | Breaks the freshness property (§80.22) that the gallery depends on. |
 | `INTEGER` epoch timestamps | Would change the wire format for no gain; RFC 3339 strings sort correctly. |
+| Flag deletes with `deleted_at` on `bookmarks` | Every read path would then own a `WHERE deleted_at IS NULL` filter — the row reader, `/v1/index`, both per-collection aggregates, cover media, cursor pagination. One forgotten filter resurfaces a deleted bookmark. Moving the row keeps `bookmarks` equal to the live set by construction (§2.2). |
+| Hard-delete the row | A misclick becomes unrecoverable. The archive is the product; a destructive action with no way back is not one to ship. |
+| Foreign key from `deleted_bookmarks.collection_id` | It would cascade, so deleting a folder would erase the deletion history — the part of the trash worth keeping. The column is a plain integer on purpose (§2.2). |
+| Key the trash on `tweet_id` | Save → delete → save → delete is four events. Keying on the tweet would collapse them into one and lose the timeline. |
+| Put curation under `/api/gallery` | That prefix is the read-only gallery API by requirement (API-07). Adding a mutation there would weaken a guarantee the acceptance script re-asserts; the bookmark resource is where curation belongs. |
+| Auto-create the target folder on move | Folder names come from the extension, which is the only component that knows where a folder came from. The API refuses an unknown slug (`404`) rather than inventing a name for it. |
+| An undo affordance in the web UI | It implies a session-scoped stack the backend does not have, and would create a second answer to "what does deleted mean". Recovery is one documented SQL statement instead. |

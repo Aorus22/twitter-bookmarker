@@ -5,8 +5,11 @@ the popup/toast scenarios automation cannot prove). Every row has exact steps,
 an observable expected result, and what to inspect on disk.
 
 > This file is the manual half of Phase 6. The automated half is
-> `go test ./... -race` (backend, PRD §65 items 1–20) and `npm test`
-> (extension, 158 tests). Anything automated there is **not** repeated here.
+> `go test ./... -race` (backend, PRD §65 items 1–20), `npm test`
+> (extension, 158 tests) and, for the gallery, `cd web && pnpm test`
+> (46 files / 496 tests) plus the two acceptance scripts described in §4.
+> The curation feature has its own scenario, §5 *G1*. Anything automated
+> there is **not** repeated here.
 >
 > A literal `~/.twitter-bookmarker/...` below is the **default** storage path. If
 > you started the backend with `TWITTER_BOOKMARKER_DIR`, substitute that
@@ -126,6 +129,7 @@ export DB="$STORAGE/tw-bookmarker.db"
 | D3 | DOM re-render (no duplicate controls) | Browser |
 | E1 | Toast visuals / stacking / click-through | Browser |
 | F1 | PRD §82 end-to-end gallery scenario (24 steps) | Backend + browser |
+| G1 | Curation: delete, move and restore (17 steps) | Backend + browser |
 
 ---
 
@@ -650,10 +654,14 @@ sqlite3 -header -column "$FIXTURE/tw-bookmarker.db" "SELECT c.slug, b.tweet_id, 
 
 **Accessibility sub-check (HARD-04).** Repeat steps 3–21 with a keyboard only
 (`Tab` / `Shift+Tab` / `Enter` / `Space` / arrows / `Esc`): every control is
-reachable, paints a visible focus ring, the lightbox traps `Tab` and names all
-four navigation controls distinctly (`Previous media` / `Next media` /
-`Previous post` / `Next post` — the two pairs look alike), `Esc` restores focus
-to the originating tile, and images carry an author-derived `alt`. With a screen
+reachable, paints a visible focus ring, the lightbox traps `Tab` and names the
+four navigation controls plus the per-post kebab — **five** controls, each with
+its own distinct label (`Previous media` / `Next media` / `Previous post` /
+`Next post`, where the two pairs look alike so each label is checked on its own,
+plus the kebab in the info panel, which is not a navigation control and is
+announced as `More actions for <handle>`; the `×` keeps its own `Close lightbox`
+label) — `Esc` restores focus to the originating tile, and
+images carry an author-derived `alt`. With a screen
 reader, the nav, toolbar and lightbox announce meaningful names, and the dots
 indicator announces the exact position (`Media 2 of 4`).
 
@@ -670,7 +678,150 @@ layout change), and that is expected.
 
 ---
 
-## 5. Sign-off
+## 5. Curation — delete, move and restore (G1)
+
+Curation is the post-§82 gallery feature: a per-post kebab that moves a bookmark
+to another folder or soft-deletes it. It is **not** part of PRD §82 (that
+scenario's 24 steps end with the live-write check), so it gets its own scenario
+ID — **G1**, the next letter in the file's existing `A`–`F` scheme — and its own
+numbered steps `G1.1`–`G1.17`. The automated half is covered by the Go and web unit
+suites (`make test`) plus two acceptance gates: `bash
+scripts/check-gallery-acceptance.sh` locks the HTTP behaviour, and
+`bash scripts/check-web-acceptance.sh` locks the browser behaviour (axe, keyboard,
+dialogs). That second script names the four browser-visible behaviours it asserts,
+so the steps below can refer to them instead of restating them:
+
+- **CUR-01** — a removal is local: card and header counts update in place, nothing
+  is refetched, scroll position and loaded pages survive.
+- **CUR-02** — the kebab is reachable on hover *and* on keyboard focus and opens a
+  menu of exactly two labelled items, including from inside the lightbox, where it
+  must not escape the dialog's focus trap.
+- **CUR-03** — delete is confirmed and cancellable, is locked while in flight, and
+  is soft: the row moves to `deleted_bookmarks` with its payload intact.
+- **CUR-04** — a move targets an *existing* folder only, and any failure changes
+  nothing on screen and says so.
+
+These are labels local to the acceptance scripts, not requirement IDs in an
+archived milestone: `scripts/check-requirement-traceability.sh` reads only
+`.planning/milestones/`, so nothing here is registered as a traceable requirement.
+
+Two endpoints back it. Both sit on the **bookmark** resource and deliberately
+*not* under `/api/gallery`, which stays strictly GET-only (API-07, PRD-2 §36):
+
+| Request | Success | Refusals |
+|---|---|---|
+| `DELETE /v1/bookmarks/{tweet_id}` | `200` `{"status":"deleted","tweet_id":"…","recoverable":true}` | unknown / not-saved id → `404`; non-numeric or >32-char id → `400`; wrong method → `405` + `Allow` |
+| `PUT /v1/bookmarks/{tweet_id}/collection` with `{"slug":"ai"}` | `200` `{"status":"moved","tweet_id":"…","slug":"ai"}` | target folder missing → `404` (never auto-created); invalid slug → `400`; not-saved id → `404`; wrong method → `405` + `Allow` |
+
+The delete is a **soft** delete: the row is *moved* out of `bookmarks` into
+`deleted_bookmarks`, so `bookmarks` is always exactly the live set. There is
+deliberately **no undo in the UI**; recovery is the manual recipe in G1.16.
+Re-saving a previously deleted tweet succeeds (`201`) — the trash does not claim
+the tweet id.
+
+Run these steps against the same disposable fixture as §4 (`$FIXTURE`) or the
+real database (`$DB`). The commands below use `$DB`; inside a §4 fixture run
+substitute `"$FIXTURE/tw-bookmarker.db"` and `<tweet_id>` (the id in the card's
+`Open on X` link).
+
+| # | Step | Expected |
+|---|---|---|
+| G1.1 | Open any collection and let the pointer rest off the cards | Every card's kebab (⋮) is invisible while its card is idle (`getComputedStyle(kebab.parentElement).opacity` is `0`) |
+| G1.2 | Hover a card | The kebab fades in at the card's top-right corner |
+| G1.3 | Move the pointer away, then `Tab` to the same kebab | It is revealed again while it holds keyboard focus and paints a visible focus ring — hover must not be the only reveal, or the control would be unusable without a pointer |
+| G1.4 | Click the kebab (or press `Enter` / `Space` on it) | A menu opens with **exactly two** items, labelled `Move to folder` and `Delete bookmark` |
+| G1.5 | Click `Delete bookmark` | A dialog titled `Delete this bookmark?` opens. Its description names the post's author and handle and says the bookmark is kept in the database's deleted table and can be restored by hand. The buttons are `Cancel` and a destructive `Delete` |
+| G1.6 | Click `Cancel`. Then reopen the menu and dialog and press `Esc` | Both close the dialog and send **nothing**: the card is still in the grid and the trash count from command block A is unchanged |
+| G1.7 | Reopen the confirmation and click `Delete`, watching the dialog while the request is in flight | Both buttons are disabled, `Esc` and outside-click do nothing, and the `×` close control is gone. When the request lands the dialog closes, the card leaves the grid, and the header counts (`N posts · M media`) drop |
+| G1.8 | First scroll well down the collection, then delete a card there | The scroll position and the already-loaded pages survive: the page does not jump to the top and page 1 is not refetched (the row is removed from the loaded list) |
+| G1.9 | Inspect the trashed row (command block B) | Exactly one trash row for the tweet, with its whole payload and a `deleted_at` stamp; the live row is gone from `bookmarks` |
+| G1.10 | Stop the backend (Ctrl+C), then delete another card | The card stays exactly where it was, the counts are unchanged, and a `role="alert"` banner appears reading `Could not delete this bookmark. Nothing was changed.` Repeat with `Move to folder` for `Could not move this bookmark. Nothing was changed.` Restart the backend afterwards |
+| G1.11 | Reopen a card's `Move to folder` | The picker is titled `Move to another folder` and lists every folder **except** the one the post is already in, each row naming the folder and its post count. The loading, error-with-`Retry`, and "this is the only folder" states appear when their conditions hold |
+| G1.12 | Choose a destination folder | The picker closes, the card disappears from the current collection, and command block C prints the chosen slug for the same row — it moved, it was not copied |
+| G1.13 | Try to move a post into a folder that does not exist (command block D) | `404`, and nothing is created: no `ghost-folder` row in `collections` and the bookmark's folder is unchanged. An invalid slug body answers `400` |
+| G1.14 | Open a post in the media lightbox and use the kebab in its info panel (left of the `×`) | The menu, and then the confirmation, mount **inside** the lightbox, so `Tab` stays trapped in the dialog. Confirming closes the lightbox as well (its position is derived from the loaded posts) and the post is in the trash |
+| G1.15 | With a keyboard only: `Tab` to a card's kebab, `Enter`, `Delete bookmark`, then confirm | When the card is removed focus lands on the collection heading, not `<body>`, so the next `Tab` continues where the user was instead of restarting at the top of the page. Check `document.activeElement` in the console |
+| G1.16 | Restore the deleted bookmark with the documented recipe (command block E) | The before/after counts show the row is live again, and the trash row is **deliberately kept** so a restore stays auditable |
+| G1.17 | Check the schema (command block F) | `PRAGMA user_version;` is `2` and all three tables exist. Pointing the new backend at a version-1 directory upgrades it **in place on start** — it adds `deleted_bookmarks` and its index and stamps version 2, rewriting no row |
+
+**Command block A — Cancel / Escape changed nothing (G1.6)**
+```bash
+sqlite3 "$DB" "SELECT count(*) FROM deleted_bookmarks;"   # before Cancel / Esc
+sqlite3 "$DB" "SELECT count(*) FROM deleted_bookmarks;"   # after  Cancel / Esc — identical
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks WHERE tweet_id = '<tweet_id>';"   # -> 1, still live
+```
+
+**Command block B — the trashed payload survived (G1.9)**
+```bash
+sqlite3 -header -column "$DB" "SELECT id, tweet_id, collection_id, url, author, username, tweet_date, saved_at, length(text) AS text_len, json_valid(media) AS media_ok, deleted_at FROM deleted_bookmarks WHERE tweet_id = '<tweet_id>' ORDER BY id DESC;"
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks WHERE tweet_id = '<tweet_id>';"   # -> 0
+```
+- One row, `deleted_at` non-empty and ending in `Z`, `media_ok` `1`, and the
+  other columns equal to the values the live row held. `text_len` may be `0` for
+  an image-only tweet, which is correct.
+- The live count is `0`: the row was moved, not flagged.
+
+**Command block C — the move landed (G1.12)**
+```bash
+sqlite3 "$DB" "SELECT c.slug FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE b.tweet_id = '<tweet_id>';"   # -> the slug you picked
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks WHERE tweet_id = '<tweet_id>';"                                                   # -> 1, moved not duplicated
+```
+
+**Command block D — a missing target is refused, never created (G1.13)**
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X PUT \
+  http://127.0.0.1:43121/v1/bookmarks/<tweet_id>/collection \
+  -H 'Content-Type: application/json' -d '{"slug":"ghost-folder"}'          # -> 404
+curl -s -o /dev/null -w '%{http_code}\n' -X PUT \
+  http://127.0.0.1:43121/v1/bookmarks/<tweet_id>/collection \
+  -H 'Content-Type: application/json' -d '{"slug":"Bad Slug"}'              # -> 400
+sqlite3 "$DB" "SELECT count(*) FROM collections WHERE slug = 'ghost-folder';"   # -> 0
+sqlite3 "$DB" "SELECT c.slug FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE b.tweet_id = '<tweet_id>';"   # unchanged
+```
+
+**Command block E — manual restore (G1.16)**
+
+The UI has no undo on purpose. This is the documented recovery path:
+```bash
+# Before: the row is in the trash, not the live set.
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks WHERE tweet_id = '<tweet_id>';"   # -> 0
+sqlite3 -header -column "$DB" "SELECT id, tweet_id, collection_id, deleted_at FROM deleted_bookmarks WHERE tweet_id = '<tweet_id>' ORDER BY id DESC LIMIT 1;"
+
+# Restore the row you want, using that trash row's id.
+sqlite3 "$DB" "INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media
+FROM deleted_bookmarks WHERE id = <the trash row's id>;"
+
+# After: live again, and the trash row is still there.
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks WHERE tweet_id = '<tweet_id>';"              # -> 1
+sqlite3 "$DB" "SELECT count(*) FROM deleted_bookmarks WHERE id = <the trash row's id>;"    # -> 1
+```
+- The trash row is **intentionally kept**, so the restore itself is auditable and
+  a second restore is possible.
+- The recipe re-uses the original `collection_id`. If that folder has since been
+  deleted, choose an existing one instead
+  (`SELECT id FROM collections WHERE slug = '<slug>';`): there is deliberately no
+  foreign key from `deleted_bookmarks.collection_id`, so the audit trail outlives
+  its folder.
+
+**Command block F — schema version and tables (G1.17)**
+```bash
+sqlite3 "$DB" 'PRAGMA user_version;'    # -> 2
+sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;"
+# -> bookmarks, collections, deleted_bookmarks
+```
+- Version 2 added exactly one table plus one index
+  (`deleted_bookmarks_by_tweet`); the `collections` and `bookmarks` DDL is
+  unchanged from version 1.
+- To watch the upgrade: point the server at a version-1 storage directory (or
+  restore one from `backup/`), start it, and re-run the two commands above —
+  `user_version` is `2` and the row counts in `collections` / `bookmarks` are
+  unchanged. A file whose version is neither 1 nor 2 is refused rather than
+  migrated.
+
+---
+
+## 6. Sign-off
 
 - [ ] A1–A5 pass
 - [ ] B1–B8 pass
@@ -678,10 +829,19 @@ layout change), and that is expected.
 - [ ] D1–D3 pass
 - [ ] E1 passes
 - [ ] F1 (PRD §82, steps 1–24) passes
+- [ ] G1 (curation, steps G1.1–G1.17) passes
 - [ ] No server process left running (`pgrep -f twitter-bookmarker-server` is empty)
 
 **Residual automated coverage (do not re-test manually):** PRD §65 items 1–20
-are locked by `cd backend && go test ./... -race`; extraction, quoted/media
-handling, slug generation, the double-click in-flight guard, DOM re-injection,
-observer resilience, bounded cleanup and the saved-index retry are locked by
-`cd extension && npm test` (158 tests).
+are locked by `cd backend && go test ./... -race` (now including the curation
+handlers, the soft-delete/reassign store paths and the version-1 → 2 upgrade);
+extraction, quoted/media handling, slug generation, the double-click in-flight
+guard, DOM re-injection, observer resilience, bounded cleanup and the
+saved-index retry are locked by `cd extension && npm test` (158 tests). The
+gallery's §82 walkthrough (F1) and the curation contract (G1) are locked by
+`bash scripts/check-gallery-acceptance.sh` (116 passed / 0 failed, HTTP) and
+`bash scripts/check-web-acceptance.sh` (146 passed / 0 failed, real browser +
+axe-core); the web unit suite is `cd web && pnpm test` (46 files / 496 tests).
+Axe-core reports zero serious/critical violations with the card menu open, with
+each dialog open (light and dark), and with a menu opened from inside the
+lightbox.

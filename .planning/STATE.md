@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 milestone: v2.0
 milestone_name: Local Web Gallery
 status: Awaiting next milestone
-stopped_at: Phase 10 complete — all phases complete
-last_updated: "2026-09-28T13:16:51Z"
+stopped_at: Phase 10 complete — all phases complete; post-v2.0 curation implemented but uncommitted
+last_updated: "2026-09-28T14:32:16Z"
 last_activity: 2026-09-28
-last_activity_desc: Storage migrated from per-category CSVs + index.json to one SQLite database; docs updated
-state_head: 2e60204ec4baa91a7fd3f72ddabc2b5a32c74453
+last_activity_desc: Post-v2.0 curation (schema v2 soft delete + move between folders + web kebab menu) implemented and verified; not yet committed
+state_head: 69da7ceaae8fbc4660dae9a9a8d54dd5a2f7da0d
 progress:
   total_phases: 10
   completed_phases: 10
@@ -24,15 +24,15 @@ current_phase_name: Hardening, Accessibility & Responsive
 
 See: .planning/PROJECT.md (updated 2026-09-28)
 
-**Core value:** A categorized tweet is durably persisted to the SQLite database before anything else happens — the database is the single source of truth, and nothing is ever unbookmarked before the write succeeds. The Phase 2 gallery is a read-only projection of that database and may never become a second source of truth; there is no derived index or cache.
-**Current focus:** None — v2.0 shipped and archived; the next milestone starts at Phase 11
+**Core value:** A categorized tweet is durably persisted to the SQLite database before anything else happens — the database is the single source of truth, and nothing is ever unbookmarked before the write succeeds. The `/api/gallery/*` API (Phase 2) is a read-only projection of that database and may never become a second source of truth; there is no derived index or cache. Mutations live on the bookmark resource, never in the gallery API.
+**Current focus:** Post-v2.0 curation is implemented and verified but uncommitted — commit it before starting the next milestone; v2.0 shipped and archived; the next milestone starts at Phase 11
 
 ## Current Position
 
-Phase: Milestone v2.0 complete
+Phase: Milestone v2.0 complete (no active phase)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-09-28 — Milestone v2.0 completed and archived
+Status: Awaiting next milestone — post-v2.0 curation done but uncommitted
+Last activity: 2026-09-28 — Post-v2.0 curation implemented and verified; not yet committed
 
 ## Performance Metrics
 
@@ -75,11 +75,12 @@ Recent decisions affecting current work:
 - [v2.0 Bootstrap]: Discuss skipped (`workflow.skip_discuss=true`); each phase's `NN-CONTEXT.md` is authored from the PRD + design spec and is authoritative.
 - [Phase 1]: Malformed cursor is rejected by `Reader.Posts` as a `*storage.ValidationError` (not by `RawQuery.Parse`) — Phase 2 must map `Posts` errors to 400 too. `limit=0` is only rejected via `RawQuery.Parse`, so the HTTP layer must build queries through `RawQuery.Parse`.
 - [Phase 1]: Two defects in the orchestrator's fixture/acceptance harness were found and fixed before Phase 2 (invalid quoting for the `media` field in the Phase 1 fixture; inverted `tweet_desc` expectation).
-- [post-v2.0 storage]: One CSV per category plus a derived `index.json` was replaced by one SQLite database (`tw-bookmarker.db`, schema version 1 in `PRAGMA user_version`). The backend has no CSV awareness; the one-time CSV→SQLite migration lives in the data repository (`Scripts/migrate_to_sqlite.py`). See `docs/design/sqlite-migration.md` and PROJECT.md Key Decisions.
+- [post-v2.0 storage]: One CSV per category plus a derived `index.json` was replaced by one SQLite database (`tw-bookmarker.db`, schema version 1 in `PRAGMA user_version`; schema version 2 added by the curation work below). The backend has no CSV awareness; the one-time CSV→SQLite migration lives in the data repository (`Scripts/migrate_to_sqlite.py`). See `docs/design/sqlite-migration.md` and PROJECT.md Key Decisions.
+- [post-v2.0 curation]: Deletion is a soft delete — the row is *moved* from `bookmarks` into `deleted_bookmarks` (schema version 2) so `bookmarks` stays exactly the live set and no read path needs a filter; recovery is deliberately manual SQL and the trash row is kept after a restore so it stays auditable. Moving between existing folders is `PUT /v1/bookmarks/{tweet_id}/collection`. Both endpoints live on the bookmark resource so `/api/gallery/*` stays strictly read-only and GET-only (API-07). Web UI is a per-post kebab menu with a destructive confirmation dialog and a folder picker. Implemented and verified (Go packages, 46 web test files / 496 tests, gallery acceptance 116/116, web acceptance 146/146, traceability 82/82) but **not yet committed**. See PROJECT.md Key Decisions.
 
 ### Pending Todos
 
-None.
+- Commit the post-v2.0 curation work (schema version 2, `deleted_bookmarks`, soft-delete and move endpoints, web kebab menu and dialogs); it currently shows as modified/untracked files in the extension repo.
 
 ### Blockers/Concerns
 
@@ -100,10 +101,11 @@ Items acknowledged and deferred, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-28
-Stopped at: Milestone v2.0 completed and archived — no active milestone
+Stopped at: Post-v2.0 curation implemented and verified but uncommitted — no active milestone
 Resume file: None
 
 ## Operator Next Steps
 
+- Commit the post-v2.0 curation work (schema version 2, soft delete + move between folders, web kebab menu and dialogs) — it is verified but currently uncommitted
 - Start the next milestone with `$gsd-new-milestone` (fresh requirements; the next phase number is 11)
 - Read `.planning/milestones/v2.0-MILESTONE-AUDIT.md` for the full audit and tech-debt detail

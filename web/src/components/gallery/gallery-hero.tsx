@@ -1,5 +1,5 @@
 import { CollectionCover } from "@/components/gallery/collection-cover"
-import { formatCount } from "@/lib/collection-meta"
+import { formatCount, sumCounts } from "@/lib/collection-meta"
 import { sliceCoverMedia } from "@/lib/cover"
 import { cn } from "@/lib/utils"
 import type { GalleryCollection } from "@/types"
@@ -39,7 +39,10 @@ export function HeroArt({ media, caption, className }: HeroArtProps) {
         seed="gallery-hero-art"
         className="h-full w-full"
       />
-      <p className="absolute bottom-4 left-4 rounded-md bg-black/35 px-3 py-1.5 font-display text-[20px] leading-[1.3] text-white">
+      {/* `max-w` keeps the pill clear of the art's border when the summary wraps
+          to a second line at narrow widths — without it the box ran right up to
+          the edge, which read as an overflow rather than as a caption. */}
+      <p className="absolute bottom-4 left-4 max-w-[calc(100%-2rem)] rounded-md bg-black/35 px-3 py-1.5 font-display text-[20px] leading-[1.3] text-white">
         {caption}
       </p>
     </div>
@@ -54,14 +57,19 @@ export function GalleryHero({ collections }: GalleryHeroProps) {
   const media = sliceCoverMedia(
     collections.flatMap((collection) => collection.cover_media)
   )
-  const mediaTotal = collections.reduce(
-    (total, collection) => total + collection.media_count,
-    0
-  )
+  const mediaTotal = sumCounts(collections, (c) => c.media_count)
+  // The archive-wide bookmark (post) total. The per-collection rows each carry
+  // their own count; this is the only place the whole archive is summed up, so
+  // the caption answers "how much have I saved" without opening a single folder.
+  const postTotal = sumCounts(collections, (c) => c.post_count)
   const caption =
     collections.length === 0
       ? "Your local archive"
-      : `${formatCount(collections.length, "collection")} · ${formatCount(mediaTotal, "media", "media")}`
+      : [
+          formatCount(collections.length, "collection"),
+          formatCount(postTotal, "post"),
+          formatCount(mediaTotal, "media", "media"),
+        ].join(" · ")
 
   return (
     <section

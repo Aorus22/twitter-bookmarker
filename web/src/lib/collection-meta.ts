@@ -11,14 +11,35 @@ import { formatLastSaved, type DateFormatOptions } from "./date"
  * required by the PRD and the description has no CSV field, so the date wins.
  */
 
+/**
+ * A count as it is displayed: a whole, non-negative number. Non-finite and
+ * negative values degrade to `0` instead of printing `NaN` or `-3`, so a
+ * malformed summary can never leak into the copy.
+ */
+export function normalizeCount(count: number): number {
+  return Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
+}
+
 /** `1 post` / `83 posts` — never `1 posts`. */
 export function formatCount(
   count: number,
   singular: string,
   plural: string = `${singular}s`
 ): string {
-  const value = Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : 0
+  const value = normalizeCount(count)
   return `${value} ${value === 1 ? singular : plural}`
+}
+
+/**
+ * Sum of one count field across collections, clamped the same way the copy is:
+ * the homepage totals must agree with the per-collection rows they are the sum
+ * of, even when one summary is malformed.
+ */
+export function sumCounts<T>(
+  items: readonly T[],
+  select: (item: T) => number
+): number {
+  return items.reduce((total, item) => total + normalizeCount(select(item)), 0)
 }
 
 /** The subset of a collection the meta row needs. */

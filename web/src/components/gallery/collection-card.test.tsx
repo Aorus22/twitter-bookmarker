@@ -51,6 +51,22 @@ describe("CollectionCard", () => {
     ).toHaveAttribute("href", "/collections/linux.csv")
   })
 
+  it("surfaces the bookmark total as a chip on the cover", () => {
+    renderCard()
+
+    const chip = screen.getByTestId("collection-card-count")
+    expect(chip).toHaveTextContent("83")
+    // Decorative only: the card link's accessible name already carries the
+    // count via the meta row, so the chip must not announce it twice.
+    expect(chip).toHaveAttribute("aria-hidden", "true")
+  })
+
+  it("degrades a malformed post count to 0 in the chip", () => {
+    renderCard({ ...LINUX, post_count: Number.NaN })
+
+    expect(screen.getByTestId("collection-card-count")).toHaveTextContent("0")
+  })
+
   it("URL-encodes the filename in the href", () => {
     renderCard({ ...LINUX, filename: "a b/c.csv", name: "Odd" })
 

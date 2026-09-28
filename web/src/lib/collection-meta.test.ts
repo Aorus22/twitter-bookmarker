@@ -4,10 +4,48 @@ import {
   formatCollectionCounts,
   formatCollectionMeta,
   formatCount,
+  normalizeCount,
+  sumCounts,
 } from "./collection-meta"
 
 const NOW = new Date(2026, 8, 28, 12, 0, 0)
 const SAVED_AT = new Date(2026, 8, 27, 12, 0, 0).toISOString()
+
+describe("normalizeCount", () => {
+  it("truncates to a whole, non-negative number", () => {
+    expect(normalizeCount(83)).toBe(83)
+    expect(normalizeCount(83.9)).toBe(83)
+    expect(normalizeCount(-3)).toBe(0)
+  })
+
+  it("degrades non-finite input to zero", () => {
+    expect(normalizeCount(Number.NaN)).toBe(0)
+    expect(normalizeCount(Number.POSITIVE_INFINITY)).toBe(0)
+  })
+})
+
+describe("sumCounts", () => {
+  it("adds one field across collections", () => {
+    const collections = [
+      { post_count: 8, media_count: 13 },
+      { post_count: 4, media_count: 3 },
+      { post_count: 0, media_count: 0 },
+    ]
+
+    expect(sumCounts(collections, (c) => c.post_count)).toBe(12)
+    expect(sumCounts(collections, (c) => c.media_count)).toBe(16)
+  })
+
+  it("clamps a malformed member so the total still agrees with the rows", () => {
+    expect(
+      sumCounts([{ n: 5 }, { n: Number.NaN }, { n: -2 }], (item) => item.n)
+    ).toBe(5)
+  })
+
+  it("is zero for an empty archive", () => {
+    expect(sumCounts([], (item: { n: number }) => item.n)).toBe(0)
+  })
+})
 
 describe("formatCount", () => {
   it("pluralises counts", () => {

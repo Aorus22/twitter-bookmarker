@@ -142,6 +142,37 @@ describe("GalleryPage — populated", () => {
     ).toBeGreaterThan(0)
   })
 
+  it("sums the archive totals in the hero caption (collections · posts · media)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ collections: [LINUX, DESIGN, QUIET] })
+        )
+    )
+
+    renderPage()
+
+    // 83 + 12 + 0 posts and 126 + 3 + 0 media across the three collections. The
+    // caption is the only place the whole archive is summed, so it has to agree
+    // with the per-card rows it is the sum of.
+    expect(
+      await screen.findByText("3 collections · 95 posts · 129 media")
+    ).toBeInTheDocument()
+  })
+
+  it("falls back to a plain caption for an empty archive", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ collections: [] }))
+    )
+
+    renderPage()
+
+    expect(await screen.findByText("Your local archive")).toBeInTheDocument()
+  })
+
   it("keeps timestamp-less collections last without re-sorting the rest", async () => {
     vi.stubGlobal(
       "fetch",

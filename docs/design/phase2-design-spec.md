@@ -172,7 +172,13 @@ given collection or post always renders the same placeholder.
    - CTA `Explore gallery` `134×42` `r14` `grad-cta`, white SemiBold 12
    - hero art `560×272` at x=718, `r22`, gradient collage of 3–4 tiles `r14` plus a white
      Playfair Regular 20 caption. **Placeholder art** — assemble it from the newest
-     `cover_media` when media exists, otherwise fall back to gradient tiles.
+     `cover_media` when media exists, otherwise fall back to gradient tiles. The caption
+     carries the **archive totals** — `3 collections · 12 posts · 16 media` — because this
+     is the only aggregate in the UI: every other count is per collection, so without it
+     "how much have I saved in total" has no answer anywhere. Adding the post total makes
+     the line long enough to wrap at narrow widths, so the caption is
+     `max-w-[calc(100%-2rem)]`; without the cap the pill ran up against the art's border
+     and read as an overflow rather than as a caption.
 2. **Section header** at y=466: `My Collections` (Playfair Bold 28) + `N collections`
    (Inter Medium 11, muted, baseline-aligned); right-aligned `Recently updated ▾` control
    `160×38` `r12` (visual only — ordering is fixed `last_saved_at DESC` per PRD §38, so
@@ -191,6 +197,7 @@ given collection or post always renders the same placeholder.
 | Secondary line | Inter Regular 11 muted at `(18,231)` |
 | Meta | `248 posts ◫ 312 media` Inter Medium 11 muted at `(18,288)` |
 | Overflow | `•••` at `(206,288)` — **omit** unless a real action exists (PRD has no card actions) |
+| Bookmark chip | **added** — `N` with a bookmark glyph, pill over the collage at top-right: white Inter SemiBold 11 on `black/45`, `r999`, `backdrop-blur-sm`. Carries the collection's `post_count` and is `aria-hidden`, because the card link's accessible name already includes it via the meta row. The meta row spells the count out in words as well; the chip exists because that row is 11px muted text at the bottom of the card, while "how many are in this folder" is what people scan a collection for. A `surface` pill was tried first and rejected: a near-opaque cream chip on saturated collage tiles read as a sticker pasted onto the art, so it reuses the hero caption's `black/45` overlay treatment instead. |
 
 Cover collage must follow PRD §17: **4+** → four newest `saved_at DESC`; **3** → balanced
 2-top + 1-wide-bottom (or 1-wide-top + 2-bottom); **1** → single full tile; **0** → gradient

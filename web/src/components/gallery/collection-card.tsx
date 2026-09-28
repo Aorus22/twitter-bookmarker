@@ -1,7 +1,8 @@
+import { Bookmark } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { CollectionCover } from "@/components/gallery/collection-cover"
-import { formatCollectionMeta } from "@/lib/collection-meta"
+import { formatCollectionMeta, formatCount, normalizeCount } from "@/lib/collection-meta"
 import type { GalleryCollection } from "@/types"
 
 /**
@@ -18,6 +19,13 @@ import type { GalleryCollection } from "@/types"
  *   - the mockup's `•••` overflow control is omitted because no card action
  *     exists (PRD-2 §5, spec §7).
  *
+ * The bookmark total is additionally surfaced as a chip on the cover. The meta
+ * row already spells it out, but it does so as 11px muted text at the bottom of
+ * the card, and "how many are in this folder" is the single thing most people
+ * scan a collection for — so the number gets its own glanceable element. The
+ * chip is `aria-hidden` because the card link's accessible name already
+ * contains the count via the meta row; announcing it twice would be noise.
+ *
  * The whole card is a single react-router `<Link>`, so it is keyboard reachable
  * and announcing as one destination (the accessible name repeats name + meta).
  */
@@ -31,6 +39,7 @@ export function CollectionCard({ collection, now }: CollectionCardProps) {
   const { filename, name, cover_media } = collection
   const displayName = name.trim() === "" ? filename : name
   const meta = formatCollectionMeta(collection, now ? { now } : {})
+  const postCount = normalizeCount(collection.post_count)
   const href = `/collections/${encodeURIComponent(filename)}`
 
   return (
@@ -40,11 +49,30 @@ export function CollectionCard({ collection, now }: CollectionCardProps) {
         aria-label={`${displayName}, ${meta}`}
         className="group flex h-[330px] w-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-card transition-shadow outline-none hover:shadow-hero focus-visible:ring-3 focus-visible:ring-ring/50"
       >
-        <CollectionCover
-          media={cover_media}
-          seed={filename}
-          className="h-[181px] w-full shrink-0"
-        />
+        <div className="relative h-[181px] w-full shrink-0">
+          <CollectionCover
+            media={cover_media}
+            seed={filename}
+            className="h-full w-full"
+          />
+
+          {/* The folder's bookmark total, over the collage rather than in the
+              text block, so it is readable at a glance. It reuses the hero's
+              overlay treatment (`bg-black/45` + white) rather than a `surface`
+              pill: the tiles underneath are saturated gradients, and a near-opaque
+              cream chip on top of them read as a sticker pasted onto the art.
+              `aria-hidden` because the link's accessible name already carries it
+              (see the note above). */}
+          <span
+            aria-hidden="true"
+            data-testid="collection-card-count"
+            title={formatCount(postCount, "post")}
+            className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] leading-[1.2] font-semibold text-white backdrop-blur-sm"
+          >
+            <Bookmark className="size-3" fill="currentColor" />
+            {postCount}
+          </span>
+        </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-[18px] pt-[17px] pb-7">
           <h3 className="line-clamp-2 font-display text-[22px] leading-[1.2] font-bold text-ink">

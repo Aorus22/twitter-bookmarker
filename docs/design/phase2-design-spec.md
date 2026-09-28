@@ -300,14 +300,28 @@ collection, or a filter/sort change starts a new generation and legitimately re-
 The visible cost is that the DOM is column-major rather than one logical list. Within a column
 the sorted order is preserved, a column-major order is the order a sighted user scans the layout
 in, and the logical position is exposed as `data-index` on each row (the lightbox and the paging
-tests both key off it). A single-media tile keeps its natural aspect (`h-auto`, `min-h 160`), so
-its height still settles once its image arrives — but Chrome's lazy-loading margin fetches well
-ahead of the viewport, so in practice that settles before the card is ever visible (verified:
-the last single-media card on a 30-card page was already at its final height while still 2100px
-below the fold). Column heights are read back after each commit and only ever influence where
-the *next* page's cards land, never where an existing card sits. Measured after the change:
-**0 of 30 cards move on append, 0 change column, and 0 change document position across a full
-70-card scroll.**
+tests both key off it).
+
+**Measured after the change.** On a 70-post fixture, appending page 2 and page 3 moves **0 of 30
+cards and changes 0 columns**; a full scroll moves no card at all. On real vault data (240 posts,
+4 columns) **no card changes column** in any run, the four columns stay within ~16% of each other
+in height, and only 1 of 51 sampled scroll positions showed any in-viewport movement.
+
+**Known residual — a single-media tile still grows to its natural height.** That is the one
+thing that still moves, and it is a direct consequence of PRD-2 §675 plus spec §3.3 ("1 → single
+tile, natural aspect") meeting a 7-column CSV that stores media as bare URLs: the tile is priced
+at its `min-h 160` floor until the image arrives, then settles to its real height, which pushes
+down the cards *below it in the same column*. Blocking the media CDN removes it completely —
+CLS `0.0000`, zero cards shifted, zero column changes — so it is the entire residual. With real,
+uncached images it is timing-dependent and can be seen: one real collection measured scroll CLS
+`0.93` (42 visible cards nudged, max `670px`), another `0.047` with none at all. It never
+re-orders, never changes a column, and never moves a card above the growing one.
+
+Eliminating it needs intrinsic dimensions *before* layout, which this data does not carry. The
+options are to fix the single-media tile to a definite aspect (zero shift, but it crops single
+images and contradicts §3.3/PRD-2 §675), or to start storing media dimensions when a bookmark is
+saved (zero shift, no crop, but only for rows saved after the change). Until one of those is
+chosen, natural aspect is kept and the shift is accepted.
 
 **Post card** — width `292`, radius `r18`, `surface`, `border`, `shadow-post`, padding `10`:
 

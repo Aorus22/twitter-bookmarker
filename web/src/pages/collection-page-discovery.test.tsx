@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import {
   MemoryRouter,
   Route,
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { CollectionPage } from "./collection-page"
 import { toUtcFrom, toUtcTo } from "@/lib/date-bounds"
+import { chooseSort } from "@/test/interactions"
 import {
   jsonResponse,
   makeCollection,
@@ -325,9 +327,8 @@ describe("CollectionPage — sort (DISC-06)", () => {
     renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
 
-    fireEvent.change(screen.getByTestId("collection-sort"), {
-      target: { value: "tweet_desc" },
-    })
+    const user = userEvent.setup()
+    await chooseSort(user, "Newest Posted")
 
     await waitFor(() => {
       expect(locationProbe()).toContain("sort=tweet_desc")
@@ -350,12 +351,16 @@ describe("CollectionPage — sort (DISC-06)", () => {
 
     renderPage(["/collections/linux", "/collections/linux?sort=tweet_asc"], 1)
     await screen.findByTestId("gallery-masonry")
-    expect(screen.getByTestId("collection-sort")).toHaveValue("tweet_asc")
+    expect(screen.getByTestId("collection-sort")).toHaveTextContent(
+      "Oldest Posted"
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "History back" }))
 
     await waitFor(() => {
-      expect(screen.getByTestId("collection-sort")).toHaveValue("saved_desc")
+      expect(screen.getByTestId("collection-sort")).toHaveTextContent(
+        "Newest Bookmarked"
+      )
     })
     await waitFor(() => {
       expect(
@@ -406,9 +411,8 @@ describe("CollectionPage — empty states and reset (DISC-08, PRD-2 §77)", () =
     await screen.findByTestId("gallery-masonry")
     expect(scrollTo).not.toHaveBeenCalled()
 
-    fireEvent.change(screen.getByTestId("collection-sort"), {
-      target: { value: "tweet_asc" },
-    })
+    const user = userEvent.setup()
+    await chooseSort(user, "Oldest Posted")
 
     await waitFor(() => {
       expect(scrollTo).toHaveBeenCalledTimes(1)

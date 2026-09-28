@@ -78,19 +78,45 @@ describe("CollectionToolbar — controls (design spec §3.3)", () => {
     expect(filter.className).toContain("w-[86px]")
 
     const sort = screen.getByTestId("collection-sort")
-    expect(sort.className).toContain("h-full")
-    expect(sort.parentElement?.className).toContain("w-[150px]")
+    expect(sort.className).toContain("h-10")
+    expect(sort.className).toContain("w-[150px]")
+    expect(sort.className).toContain("rounded-sm")
+    // The trigger's *text* is the current value, so the control needs a name of
+    // its own or a screen reader would hear only "Newest Bookmarked".
+    expect(sort).toHaveAttribute("aria-label", "Sort")
+    expect(sort).toHaveTextContent("Newest Bookmarked")
   })
 
-  it("offers exactly the four PRD-2 §33 sort modes, newest bookmarked first", () => {
+  it("is a themed menu control, not a native select", () => {
     renderToolbar()
 
-    const options = Array.from(
-      screen.getByTestId("collection-sort").querySelectorAll("option")
-    ).map((option) => option.textContent)
+    const trigger = screen.getByTestId("collection-sort")
+    expect(trigger).toHaveRole("button")
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu")
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    // The native control is what this replaced: its box can be restyled, but the
+    // popup it opens is drawn by the OS and ignores the palette entirely.
+    expect(
+      document.querySelector('select[data-testid="collection-sort"]')
+    ).toBeNull()
+  })
+
+  it("offers exactly the four PRD-2 §33 sort modes, newest bookmarked first", async () => {
+    const user = userEvent.setup()
+    renderToolbar()
+
+    await user.click(screen.getByTestId("collection-sort"))
+
+    const options = screen
+      .getAllByRole("menuitemradio")
+      .map((option) => option.textContent)
 
     expect(options).toEqual(SORT_OPTIONS.map((option) => option.label))
-    expect(screen.getByTestId("collection-sort")).toHaveValue("saved_desc")
+    // The selected mode is shown on the trigger itself, and is what the trigger
+    // painted on the very first frame (before this click).
+    expect(screen.getByTestId("collection-sort")).toHaveTextContent(
+      "Newest Bookmarked"
+    )
   })
 
   it("emits the typed search text (Phase 6 owns the debounce)", async () => {
@@ -121,10 +147,15 @@ describe("CollectionToolbar — controls (design spec §3.3)", () => {
       />
     )
 
-    await user.selectOptions(screen.getByTestId("collection-sort"), "tweet_asc")
+    await user.click(screen.getByTestId("collection-sort"))
+    await user.click(
+      screen.getByRole("menuitemradio", { name: "Oldest Posted" })
+    )
 
     expect(onSortChange).toHaveBeenCalledWith("tweet_asc")
-    expect(screen.getByTestId("collection-sort")).toHaveValue("tweet_asc")
+    expect(screen.getByTestId("collection-sort")).toHaveTextContent(
+      "Oldest Posted"
+    )
   })
 
   it("invokes the filter callback and marks the active state", async () => {

@@ -46,6 +46,15 @@ export const COLLECTION_SEARCH_PLACEHOLDER = "⌕ Search this collection…"
 /** Design spec §3.3 — the filter control label. */
 export const FILTER_LABEL = "Filter"
 
+/**
+ * Design spec §3.3 — the accessible name of the sort control.
+ *
+ * The control's *visible* text is the selected mode ("Newest Bookmarked"), so it
+ * needs a name that says what the control is rather than what it currently
+ * holds; without this a screen reader announces only the value.
+ */
+export const SORT_LABEL = "Sort"
+
 /** Design spec §3.4 — the filter popover/sheet title. */
 export const FILTER_TITLE = "Filter your archive"
 

@@ -10,6 +10,8 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { afterEach, describe, expect, it } from "vitest"
 
+import { chooseSort } from "@/test/interactions"
+
 import { CollectionPage } from "./collection-page"
 import {
   jsonResponse,
@@ -158,8 +160,9 @@ describe("CollectionPage — header (COLL-01)", () => {
     expect(within(toolbar).getByTestId("collection-filter")).toHaveTextContent(
       "Filter"
     )
-    expect(within(toolbar).getByTestId("collection-sort")).toHaveValue(
-      "saved_desc"
+    // The trigger's text is the current mode; the control's *name* is "Sort".
+    expect(within(toolbar).getByTestId("collection-sort")).toHaveTextContent(
+      "Newest Bookmarked"
     )
   })
 
@@ -596,7 +599,7 @@ describe("CollectionPage — discovery wiring (DISC-01, DISC-06)", () => {
 
     expect(postsRequests(fetchMock)[0]).toContain("sort=saved_desc")
 
-    await user.selectOptions(screen.getByTestId("collection-sort"), "tweet_asc")
+    await chooseSort(user, "Oldest Posted")
 
     await waitFor(() => {
       expect(

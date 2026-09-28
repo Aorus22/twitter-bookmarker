@@ -302,8 +302,43 @@ shot "collection-search"
 agent-browser fill '[data-testid="collection-search"]' "" >/dev/null 2>&1
 agent-browser wait 900 >/dev/null 2>&1
 first_before=$(js "document.querySelector('[data-testid=\"post-card\"] [data-testid=\"open-on-x\"]').getAttribute('href')")
-agent-browser select '[data-testid="collection-sort"]' "tweet_asc" >/dev/null 2>&1
+
+# The sort control is a Radix listbox, so `agent-browser select` (which needs a
+# native <select>) no longer applies. Drive it the way a user does, and assert
+# while it is open that the popup is the theme's own surface: a native select
+# opens an OS-drawn list that ignores the palette, which is the whole reason the
+# primitive replaced it.
+agent-browser click '[data-testid="collection-sort"]' >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+chk "the sort control is not a native select" "true" \
+  "$(js "!document.querySelector('select[data-testid=\"collection-sort\"]')")"
+chk "the sort control opens a themed menu" "true" \
+  "$(js "!!document.querySelector('[data-slot=\"dropdown-menu-content\"]')")"
+chk "the open menu paints the theme's surface (not an OS-drawn popup)" "true" \
+  "$(js "(() => { const c = document.querySelector('[data-slot=\"dropdown-menu-content\"]'); if (!c) return false; const p = document.createElement('div'); p.style.backgroundColor = 'var(--surface)'; document.body.appendChild(p); const want = getComputedStyle(p).backgroundColor; p.remove(); return getComputedStyle(c).backgroundColor === want; })()")"
+chk "the menu offers all four sort modes as radio items" "4" \
+  "$(js "document.querySelectorAll('[data-slot=\"dropdown-menu-content\"] [role=\"menuitemradio\"]').length")"
+chk "exactly one sort mode is marked as checked" "1" \
+  "$(js "document.querySelectorAll('[data-slot=\"dropdown-menu-content\"] [role=\"menuitemradio\"][aria-checked=\"true\"]').length")"
+chk "the menu control is labelled and expanded" "true" \
+  "$(js "(() => { const t = document.querySelector('[data-testid=\"collection-sort\"]'); return t.getAttribute('aria-label') === 'Sort' && t.getAttribute('aria-haspopup') === 'menu' && t.getAttribute('aria-expanded') === 'true'; })()")"
+shot "collection-sort-open"
+# The open state must be audited, not just the closed one. Radix's Select — the
+# obvious primitive here — marks everything outside itself aria-hidden via
+# hideOthers() and offers no `modal` prop to disable it, which axe reports as
+# serious `aria-hidden-focus` with the sort list open. This check is what keeps
+# that from being reintroduced; `ui/dropdown-menu.tsx` passes `modal={false}`
+# precisely so it does not happen.
+axe_check "collection sort menu open"
+
+# Clicked by selector, not by text: `find … click` drives a Radix *button* (the
+# filter presets use it), but a Radix menu item only commits when the pointer
+# sequence starts on the item itself, and the selector path is the one already
+# proven against the kebab menu's items.
+agent-browser click '[data-testid="collection-sort-option"][data-value="tweet_asc"]' >/dev/null 2>&1
 agent-browser wait 900 >/dev/null 2>&1
+chk "choosing an item closes the menu" "true" \
+  "$(js "!document.querySelector('[data-slot=\"dropdown-menu-content\"]')")"
 chk "sort writes sort= to the URL" "true" "$(js "location.search.includes('sort=tweet_asc')")"
 ne "sort reorders the first card" "$first_before" \
   "$(js "document.querySelector('[data-testid=\"post-card\"] [data-testid=\"open-on-x\"]').getAttribute('href')")"
@@ -500,6 +535,37 @@ chk "filter becomes a Popover at 1440px" "true" "$(js "!!document.querySelector(
 chk "mobile Sheet is not used at 1440px" "false" "$(js "!!document.querySelector('[data-testid=\"filter-sheet\"]')")"
 agent-browser press Escape >/dev/null 2>&1
 agent-browser wait 300 >/dev/null 2>&1
+
+# --- theming: the scrollbar belongs to the palette ---------------------------
+echo
+echo "Scrollbars (themed, not OS chrome)"
+# Two independent claims, because either alone can pass while the other is
+# broken: the standard properties (what Firefox and Chrome 121+ actually honour)
+# must be declared with a token colour, and the WebKit pseudo-elements must
+# exist for the engines that still need them. Asserted through the CSSOM rather
+# than by reading a rendered pixel, since headless Chrome does not always paint
+# a classic scrollbar.
+#
+# `css_has` descends into nested rule lists. That matters: these rules live in
+# `@layer base`, and a CSSLayerBlockRule's own `selectorText` is empty while its
+# `cssText` serialises the whole child block — so a one-level `cssRules` scan
+# finds the *declarations* (inside the layer's cssText) but never the *selectors*.
+# The first version of this check passed the two declaration assertions and
+# failed the two selector ones for exactly that reason, which looked like the
+# stylesheet had dropped the rules when it had not.
+css_has() {
+  js "(() => { const out = []; const walk = (rules) => { for (const r of rules) { out.push(r); if (r.cssRules) walk(r.cssRules); } }; for (const sheet of document.styleSheets) { try { walk(sheet.cssRules) } catch (e) {} } return out.some(r => $1); })()"
+}
+chk "scrollbar-width is declared thin" "true" \
+  "$(css_has "/scrollbar-width:\s*thin/.test(r.cssText || '')")"
+chk "scrollbar-color uses the theme tokens" "true" \
+  "$(css_has "/scrollbar-color:\s*var\(--border\)/.test(r.cssText || '')")"
+chk "the WebKit thumb is themed and rounded, not a default grey bar" "true" \
+  "$(css_has "(r.selectorText || '').includes('::-webkit-scrollbar-thumb') && /background-color:\s*var\(--border\)/.test(r.cssText || '') && /border-radius:\s*var\(--r-pill\)/.test(r.cssText || '')")"
+chk "the WebKit track is styled too (not left transparent-white)" "true" \
+  "$(css_has "(r.selectorText || '').includes('::-webkit-scrollbar-track')")"
+chk "the resolved computed scrollbar-width reaches the page" "thin" \
+  "$(js "getComputedStyle(document.documentElement).scrollbarWidth || 'UNSET'")"
 
 # --- HARD-04 accessibility: axe-core on every surface, both themes ------------
 echo

@@ -294,4 +294,54 @@
     background-color: var(--accent);
     color: #fffdfc;
   }
+
+  /* Scrollbars. The default OS chrome is a wide, opaque, square-ended bar that
+   * belongs to no palette: on the dark frame it stayed light grey and read as a
+   * seam down the page, and in the light theme it cut a hard grey stripe through
+   * the warm surfaces.
+   *
+   * Styled from the tokens so one block covers both themes — `--border` is the
+   * resting thumb and `--muted` the hovered one, which is the same relationship
+   * the surfaces and the secondary text already have, so nothing new is
+   * introduced and no contrast is invented.
+   *
+   * The standard properties come first: Firefox has honoured them since 64, and
+   * Chrome 121+ prefers them over the `::-webkit-` pseudo-elements, which are
+   * kept for the engines that still need them. `scrollbar-width: thin` also
+   * means the reserved gutter shrinks slightly, so the masonry never changes
+   * column count because of this.
+   *
+   * Deliberately NOT set: `scrollbar-gutter: stable`. Reserving the gutter
+   * permanently would change the content width on routes that do not scroll,
+   * and the responsive tests (1/2/4 columns at 390/768/1440) are breakpoint
+   * driven — a permanent gutter would move those edges for no visual gain. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--muted) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    /* The transparent border + `content-box` clipping is what insets the thumb
+     * to 6px inside a 10px track; without it the thumb fills the full width and
+     * the rounding is invisible. */
+    background-color: var(--border);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: var(--r-pill);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }

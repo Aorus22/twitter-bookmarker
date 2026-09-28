@@ -1,5 +1,27 @@
 "use client"
 
+/**
+ * Radix `Select` — a themed replacement for `<select>`, with one caveat that
+ * matters before you reach for it.
+ *
+ * **`SelectContentImpl` calls `hideOthers(content)` unconditionally**, and
+ * `Select.Root` exposes no `modal` prop to turn it off. Opening this component
+ * therefore marks everything outside its content `aria-hidden` — including
+ * `#root`, which still contains the nav, the cards and the trigger itself — and
+ * axe reports that as serious `aria-hidden-focus`. The acceptance gate audits
+ * the open state precisely so this cannot be reintroduced silently; see
+ * `scripts/check-web-acceptance.sh` ("collection sort menu open").
+ *
+ * The walk-around that ships instead: `ui/dropdown-menu.tsx` passes
+ * `modal={false}`, and `DropdownMenuRadioGroup`/`DropdownMenuRadioItem` give the
+ * `menuitemradio` semantics of an exclusive choice without hiding the page
+ * (`collection-toolbar.tsx` is the worked example).
+ *
+ * Where this component is still the right tool: inside a surface that is
+ * *already* modal, such as `ui/sheet.tsx`, where hiding the rest of the page is
+ * the intended behaviour rather than a side effect.
+ */
+
 import * as React from "react"
 import { cn } from "cn"
 import { Select as SelectPrimitive } from "radix-ui"

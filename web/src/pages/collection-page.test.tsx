@@ -181,17 +181,38 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
     renderPage()
 
     const masonry = await screen.findByTestId("gallery-masonry")
-    expect(masonry.tagName).toBe("UL")
-    expect(masonry.style.columnCount).toBe("3")
+    // The masonry packs its own columns and renders one flex column per column,
+    // instead of handing the whole list to CSS `column-count` — the browser
+    // re-balanced every card on each appended page, which is what made the grid
+    // shuffle while scrolling.
+    expect(masonry.tagName).toBe("DIV")
+    expect(masonry.style.columnCount).toBe("")
     expect(masonry.style.columnGap).toBe("32px")
+    expect(masonry.children).toHaveLength(3)
     // Natural heights: no fixed row height / auto-rows grid.
     expect(masonry.className).not.toContain("grid-auto-rows")
 
     const cards = screen.getAllByTestId("post-card")
     expect(cards).toHaveLength(6)
-    expect(cards.map((card) => within(card).getByText(/@/).textContent)).toEqual(
+    // DOM order is column-major (that is the point of the rewrite). Logical
+    // order — the order the API returned — is carried by `data-index`, and it is
+    // preserved inside every column.
+    const logical = cards
+      .slice()
+      .sort(
+        (a, b) =>
+          Number(a.closest("li")?.getAttribute("data-index")) -
+          Number(b.closest("li")?.getAttribute("data-index"))
+      )
+    expect(logical.map((card) => within(card).getByText(/@/).textContent)).toEqual(
       ["@four", "@two", "@one", "@three", "@texty", "@verbose"]
     )
+    for (const column of masonry.children) {
+      const indexes = Array.from(column.querySelectorAll("li")).map((row) =>
+        Number(row.getAttribute("data-index"))
+      )
+      expect(indexes).toEqual([...indexes].sort((a, b) => a - b))
+    }
   })
 
   it("keeps the 292-wide card measure for the measured column count", async () => {

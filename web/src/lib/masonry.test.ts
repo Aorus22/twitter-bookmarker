@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   columnsForWidth,
+  distributeMasonryKeys,
   MASONRY_CARD_WIDTH,
   MASONRY_COLUMN_GAP,
   MASONRY_MAX_COLUMNS,
@@ -87,5 +88,150 @@ describe("columnsForWidth (PRD-2 §21/§66)", () => {
     expect(columnsForWidth(-100)).toBe(1)
     expect(columnsForWidth(Number.NaN)).toBe(1)
     expect(columnsForWidth(Number.POSITIVE_INFINITY)).toBe(1)
+  })
+})
+
+/**
+ * The append-only packing that replaced CSS `column-count`.
+ *
+ * The bug: `column-count` balances the whole list against the container's
+ * content height, so appending one page re-distributed every card — measured in
+ * headless Chrome at 1440px, 22 of the 30 rendered cards moved when page 2 of a
+ * 70-post collection arrived, by up to 3106px vertically and two columns
+ * horizontally. These tests pin the replacement guarantee in a layout engine
+ * jsdom does not have: **a key that has a column keeps it, forever.**
+ */
+describe("distributeMasonryKeys — append-only packing (the scroll-shuffle fix)", () => {
+  const keys = (count: number, offset = 0): string[] =>
+    Array.from({ length: count }, (_, index) => `k${offset + index}`)
+
+  it("round-robins when nothing has been measured yet", () => {
+    // All heights are 0 and the mean estimate is 0, so the tie-break by
+    // "placed this pass" is the only thing keeping the first render from
+    // stacking every card into column 1.
+    const buckets = distributeMasonryKeys(
+      ["a", "b", "c", "d", "e", "f"],
+      new Map<string, number>(),
+      3
+    )
+
+    expect(buckets).toEqual([
+      [0, 3],
+      [1, 4],
+      [2, 5],
+    ])
+  })
+
+  it("never moves a key that already has a column", () => {
+    const assigned = new Map<string, number>()
+    const firstPage = keys(30)
+
+    distributeMasonryKeys(firstPage, assigned, 4, [], 300)
+    const before = new Map(assigned)
+    expect(before.size).toBe(30)
+
+    const secondPage = [...firstPage, ...keys(30, 30)]
+    const buckets = distributeMasonryKeys(
+      secondPage,
+      assigned,
+      4,
+      [5000, 4200, 5600, 4600],
+      300
+    )
+
+    for (const [key, column] of before) {
+      expect(assigned.get(key)).toBe(column)
+    }
+
+    // ...and the new page lands at the *bottom* of its column, so a card can
+    // never be pushed above one the user has already read.
+    for (const column of buckets) {
+      const original = column.filter((index) => index < firstPage.length)
+      expect(column.slice(0, original.length)).toEqual(original)
+    }
+  })
+
+  it("puts a new key in the shortest measured column", () => {
+    const assigned = new Map<string, number>([
+      ["a", 0],
+      ["b", 1],
+      ["c", 2],
+    ])
+
+    distributeMasonryKeys(["a", "b", "c", "d"], assigned, 3, [0, 900, 500], 100)
+
+    expect(assigned.get("d")).toBe(0)
+  })
+
+  it("spreads an appended page across every column", () => {
+    const assigned = new Map<string, number>()
+    const firstPage = keys(30)
+    distributeMasonryKeys(firstPage, assigned, 4, [], 300)
+
+    const buckets = distributeMasonryKeys(
+      [...firstPage, ...keys(30, 30)],
+      assigned,
+      4,
+      [5000, 4200, 5600, 4600],
+      300
+    )
+
+    for (const column of buckets) {
+      expect(column.filter((index) => index >= 30).length).toBeGreaterThan(0)
+    }
+  })
+
+  it("forgets keys that are no longer rendered", () => {
+    const assigned = new Map<string, number>([
+      ["a", 0],
+      ["b", 1],
+      ["filtered-out", 2],
+    ])
+
+    distributeMasonryKeys(["a", "b"], assigned, 3, [], 0)
+
+    expect(assigned.has("filtered-out")).toBe(false)
+    expect(assigned.size).toBe(2)
+  })
+
+  it("re-places a key whose column no longer exists", () => {
+    const assigned = new Map<string, number>([["a", 4]])
+
+    // One column, so column 4 is unreachable and the key has to be re-packed.
+    expect(distributeMasonryKeys(["a"], assigned, 1, [], 0)).toEqual([[0]])
+    expect(assigned.get("a")).toBe(0)
+  })
+
+  it("clamps a nonsense column count instead of returning no columns", () => {
+    expect(distributeMasonryKeys(["a", "b", "c"], new Map(), 0)).toEqual([
+      [0, 1, 2],
+    ])
+    expect(distributeMasonryKeys(["a", "b", "c"], new Map(), Number.NaN)).toEqual(
+      [[0, 1, 2]]
+    )
+  })
+
+  it("ignores unusable measured heights", () => {
+    expect(
+      distributeMasonryKeys(["a", "b"], new Map(), 2, [Number.NaN, -5], 0)
+    ).toEqual([[0], [1]])
+  })
+
+  it("keeps declaration order inside each column", () => {
+    const buckets = distributeMasonryKeys(keys(12), new Map(), 3, [], 0)
+
+    for (const column of buckets) {
+      expect(column).toEqual([...column].sort((a, b) => a - b))
+    }
+  })
+
+  it("is idempotent, so a StrictMode double render is harmless", () => {
+    const assigned = new Map<string, number>()
+    const list = keys(9)
+
+    const once = distributeMasonryKeys(list, assigned, 3, [], 0)
+    const twice = distributeMasonryKeys(list, assigned, 3, [], 0)
+
+    expect(twice).toEqual(once)
   })
 })

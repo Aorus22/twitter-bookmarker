@@ -58,9 +58,32 @@ function cursorOf(url: string): string | null {
   return new URL(url, "http://gallery.test").searchParams.get("cursor")
 }
 
+function logicalIndex(card: HTMLElement): number {
+  return Number(card.closest("li")?.getAttribute("data-index") ?? "0")
+}
+
+/** Which masonry column (0-based, left to right) a card is currently in. */
+function columnOf(card: HTMLElement): number {
+  const column = card.closest("ul")
+  const parent = column?.parentElement
+  if (column == null || parent == null) {
+    return -1
+  }
+  return Array.from(parent.children).indexOf(column)
+}
+
+/**
+ * Cards in **logical** order. The masonry packs cards into flex columns and
+ * renders them column by column, so DOM order is column-major; the logical
+ * position is the `data-index` it stamps on each row. That is the order the API
+ * returned, the order a single column reads top to bottom, and the order the
+ * lightbox walks.
+ */
 function cardUsernames() {
   return screen
     .getAllByTestId("post-card")
+    .slice()
+    .sort((a, b) => logicalIndex(a) - logicalIndex(b))
     .map((card) => within(card).getByText(/@/).textContent)
 }
 
@@ -347,13 +370,34 @@ describe("CollectionPage — sentinel-driven accumulation (SCROLL-01, SCROLL-03,
     const masonry = await screen.findByTestId("gallery-masonry")
     expect(masonry.style.columnGap).toBe("32px")
 
+    // The packing memory lives outside the DOM, so the assignment of the cards
+    // already on screen must survive the append untouched. This is the
+    // regression the flex-column rewrite fixes: CSS multi-column re-balanced the
+    // whole list, so page 2 re-distributed page 1 (measured in Chrome: 22 of 30
+    // cards moved, up to 3106px).
+    const columnsBefore = new Map(
+      screen
+        .getAllByTestId("post-card")
+        .map((card) => [logicalIndex(card), columnOf(card)])
+    )
+
     await emitIntersection()
     await waitFor(() => {
       expect(screen.getAllByTestId("post-card")).toHaveLength(4)
     })
 
     expect(masonry.style.columnGap).toBe("32px")
-    expect(masonry.querySelector("li")).toHaveStyle({ marginBottom: "22px" })
+    expect(masonry.querySelector("ul")?.getAttribute("style")).toContain(
+      "gap: 22px"
+    )
+
+    for (const card of screen.getAllByTestId("post-card")) {
+      const index = logicalIndex(card)
+      const before = columnsBefore.get(index)
+      if (before !== undefined) {
+        expect(columnOf(card)).toBe(before)
+      }
+    }
   })
 })
 

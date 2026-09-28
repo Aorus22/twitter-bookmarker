@@ -280,6 +280,35 @@ would leave the cards inset from the toolbar above them, trading one misalignmen
 The collections index (§3.2) keeps the plain `1312` rail, where its 5×244 pitch already fills
 the column.
 
+**Implementation note — the columns are packed in JS, not by CSS `column-count`** (revised
+after v2.0 shipped). The grid is still true masonry with natural card heights (`292` cards,
+`32px` column gap, `22px` row gap, nothing equalised into rows). What changed is *who decides
+which column a card lands in*. CSS multi-column balances the whole list against the
+container's own content height, so every appended page re-distributed every card already on
+screen — measured in headless Chrome at 1440px, appending page 2 to a 70-post collection moved
+**22 of the 30 rendered cards**, by up to **3106px** vertically and two columns (**648px**)
+horizontally. That is the "the cards move on their own while I scroll" bug, and it is inherent
+to `column-count`: `column-fill: auto` is ignored at an auto height, and at a definite height an
+over-estimate collapses the grid to one column while an under-estimate spills sideways.
+
+`distributeMasonryKeys` (`web/src/lib/masonry.ts`) therefore packs the keys itself, into `count`
+flex columns, and the packing is **append-only**: a card that has a column keeps it for the life
+of the view. New cards go to the currently shortest column, so pages still interleave, but they
+can only ever be added at the *bottom* of a column. A column-count change (a real resize), a new
+collection, or a filter/sort change starts a new generation and legitimately re-packs.
+
+The visible cost is that the DOM is column-major rather than one logical list. Within a column
+the sorted order is preserved, a column-major order is the order a sighted user scans the layout
+in, and the logical position is exposed as `data-index` on each row (the lightbox and the paging
+tests both key off it). A single-media tile keeps its natural aspect (`h-auto`, `min-h 160`), so
+its height still settles once its image arrives — but Chrome's lazy-loading margin fetches well
+ahead of the viewport, so in practice that settles before the card is ever visible (verified:
+the last single-media card on a 30-card page was already at its final height while still 2100px
+below the fold). Column heights are read back after each commit and only ever influence where
+the *next* page's cards land, never where an existing card sits. Measured after the change:
+**0 of 30 cards move on append, 0 change column, and 0 change document position across a full
+70-card scroll.**
+
 **Post card** — width `292`, radius `r18`, `surface`, `border`, `shadow-post`, padding `10`:
 
 | Element | Spec |

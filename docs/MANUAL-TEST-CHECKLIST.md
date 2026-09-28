@@ -560,7 +560,7 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 | 12 | Add a **Tweet Date** from-bound | Both ranges are now active |
 | 13 | Click **Apply** | Results shrink to the rows satisfying **both** ranges (5); every visible card matches |
 | 14 | Sort → **Newest Posted** | The newest tweet is first |
-| 15 | Scroll to the bottom | The next page loads via cursor; no duplicates, no full reload |
+| 15 | Scroll to the bottom | The next page loads via cursor; no duplicates, no full reload; **the cards already on screen keep their column and do not move** |
 
 ### Steps 16–21 — lightbox, keyboard, original tweet
 
@@ -590,6 +590,12 @@ screen reader, the nav, toolbar and lightbox announce meaningful names.
 **Responsive sub-check (HARD-03).** At 390 / 768 / 1440 px the masonry shows
 1 / 2 / 4 columns; **Filter** is a Sheet at 390 and a Popover at 1440; the
 wordmark is hidden at 390 px (the logo and the accessible name stay).
+
+**Scroll-stability sub-check.** On a collection with more than one page (the
+`bulk.csv` fixture: 70 posts), scroll slowly from top to bottom while watching
+one card. It must never change column or jump: the packing is append-only, so a
+new page can only add cards at the bottom of a column. Resizing the window *does*
+re-pack (a real layout change), and that is expected.
 
 ---
 

@@ -1,10 +1,10 @@
 /**
  * Pinterest-masonry geometry (PRD-2 §21, design spec §3.3 frame `6:121`).
  *
- * The layout is CSS multi-column: `columnCount` with `break-inside: avoid` on
- * every card, so each card keeps its **natural** height and nothing is
- * equalised into a row grid. This module owns the numbers that the component
- * and the page share, and keeps the responsive decision a pure function so it
+ * Every card keeps its **natural** height and nothing is equalised into a row
+ * grid (PRD-2 §675: "card height mengikuti natural content/media aspect
+ * ratio"). This module owns the numbers that the component and the page share,
+ * the responsive decision, and the column packing — all pure functions, so they
  * can be unit-tested at every breakpoint without a layout engine.
  *
  * Figma-validated numbers: card `292`, horizontal gap `32`, vertical gap `22`,
@@ -72,4 +72,86 @@ export function columnsForWidth(width: number): number {
   }
 
   return MASONRY_MIN_COLUMNS
+}
+
+/**
+ * Pack `keys` into `columnCount` masonry columns **without ever moving a key
+ * that is already placed**.
+ *
+ * This is the fix for the infinite-scroll reflow. CSS multi-column
+ * (`column-count`) balances the *whole* list against the container's own
+ * content height, so appending one page re-distributed everything: measured in
+ * headless Chrome at 1440px, appending page 2 of a 70-post collection moved
+ * **22 of the 30 already-rendered cards**, by up to 3106px vertically and two
+ * columns (648px) horizontally. `column-fill: auto` cannot help — with an auto
+ * height it is ignored, and with a definite height an over-estimate collapses
+ * the grid to a single column while an under-estimate overflows sideways.
+ *
+ * So the assignment lives here instead of in the browser: `assigned` is the
+ * caller's persistent memory (`key -> column`), and only keys that are **new**
+ * are given a column. A new key goes to the column with the smallest known
+ * height, breaking ties by how many keys this pass has already added — so a
+ * first render, where no height has been measured yet, still distributes
+ * round-robin rather than stacking every card into column 1.
+ *
+ * `columnHeights` are real measured heights from the previous commit, and
+ * `estimatedHeight` is the mean item height used to price the not-yet-measured
+ * keys of the page being appended. Both influence **only new keys**, so an
+ * inaccurate estimate can leave the columns uneven but can never move a card
+ * the user has already seen.
+ *
+ * Mutating `assigned` is deliberate and idempotent: re-running the same call
+ * with the same inputs yields the same buckets, which is what a React
+ * StrictMode double render relies on.
+ *
+ * @returns one array of indexes into `keys` per column, each ascending
+ */
+export function distributeMasonryKeys(
+  keys: readonly string[],
+  assigned: Map<string, number>,
+  columnCount: number,
+  columnHeights: readonly number[] = [],
+  estimatedHeight = 0
+): number[][] {
+  const count = clampColumns(columnCount)
+
+  // Forget keys that are no longer rendered (a filter, sort or collection
+  // change) so the map cannot grow without bound across a session.
+  const live = new Set(keys)
+  for (const key of assigned.keys()) {
+    if (!live.has(key)) {
+      assigned.delete(key)
+    }
+  }
+
+  const buckets: number[][] = Array.from({ length: count }, () => [])
+  const fill = Array.from({ length: count }, (_, column) => {
+    const height = columnHeights[column]
+    return Number.isFinite(height) && height > 0 ? height : 0
+  })
+  const added = new Array<number>(count).fill(0)
+
+  keys.forEach((key, index) => {
+    let column = assigned.get(key)
+
+    if (column === undefined || column < 0 || column >= count) {
+      column = 0
+      for (let candidate = 1; candidate < count; candidate += 1) {
+        const shorter = fill[candidate] < fill[column]
+        const tied =
+          fill[candidate] === fill[column] && added[candidate] < added[column]
+        if (shorter || tied) {
+          column = candidate
+        }
+      }
+
+      assigned.set(key, column)
+      fill[column] += estimatedHeight
+      added[column] += 1
+    }
+
+    buckets[column].push(index)
+  })
+
+  return buckets
 }

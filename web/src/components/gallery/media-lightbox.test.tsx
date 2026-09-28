@@ -406,12 +406,17 @@ describe("MediaLightbox — responsive structure and scrim (LIGHT-02)", () => {
     expect(prev).toContain("min-[1400px]:top-1/2")
 
     const next = screen.getByTestId("lightbox-next-post").className
-    expect(next).toContain("right-[42px]")
+    expect(next).toContain("right-[402px]")
     expect(next).toContain("min-[1400px]:-right-14")
     // Between `md` and the 1400px gutter the info panel sits to the right, so the
-    // next-post button has to skip it (30 + 330 + 30 + 12). Anchoring it to the
-    // panel's own corner instead would drop it on top of the `×` close control.
-    expect(next).toContain("md:right-[402px]")
+    // next-post button has to skip it (30 + 330 + 30 + 12). The narrow tier must
+    // be `max-md`, not `md`: Tailwind emits `md:` *after* `min-[1400px]:`, so with
+    // `md:right-[402px]` both matched from 1400px up, the 402px rule won, and the
+    // button landed exactly on the media `→` (both are 12px inside the media
+    // area's right edge) and hid it. `max-md` and `min-[1400px]` cannot both
+    // match, so emission order stops deciding the layout.
+    expect(next).toContain("max-md:right-[42px]")
+    expect(next).not.toContain("md:right-[402px]")
   })
 
   it("tints the scrim with the spec colour", () => {

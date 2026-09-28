@@ -339,8 +339,15 @@ chk "the indicator keeps the exact position for assistive tech" "true" \
   "$(js "(() => { const c = document.querySelector('[data-testid=\"lightbox-counter\"]'); return /^Media [0-9]+ of [0-9]+$/.test(c.getAttribute('aria-label') || ''); })()")"
 chk "the two navigation axes have four distinct accessible names" "true" \
   "$(js "(() => { const names = [...document.querySelectorAll('[data-testid=\"media-lightbox\"] button')].map((b) => b.getAttribute('aria-label')); return ['Previous media','Next media','Previous post','Next post'].every((n) => names.includes(n)); })()")"
-chk "the post controls sit outside the media area" "true" \
-  "$(js "(() => { const area = document.querySelector('[data-testid=\"lightbox-media-area\"]'); const b = document.querySelector('[data-testid=\"lightbox-next-post\"]'); return !!area && !!b && !area.contains(b); })()")"
+# Geometry, not DOM containment: the post buttons are siblings of the media area
+# by construction, so `area.contains(button)` is false no matter where they are
+# actually painted — an assertion that passed while the post button sat exactly
+# on top of the media arrow and hid it. What matters is that the two pairs do not
+# overlap and that at 1440px the post pair is clear of the media area.
+chk "the two arrow pairs do not overlap" "true" \
+  "$(js "(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const ov = (a,b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom; return !ov(r('[data-testid=\"lightbox-next\"]'), r('[data-testid=\"lightbox-next-post\"]')) && !ov(r('[data-testid=\"lightbox-prev\"]'), r('[data-testid=\"lightbox-prev-post\"]')); })()")"
+chk "the post controls sit outside the media area at 1440px" "true" \
+  "$(js "(() => { const a = document.querySelector('[data-testid=\"lightbox-media-area\"]').getBoundingClientRect(); const p = document.querySelector('[data-testid=\"lightbox-prev-post\"]').getBoundingClientRect(); const n = document.querySelector('[data-testid=\"lightbox-next-post\"]').getBoundingClientRect(); return p.right <= a.left && n.left >= a.right && n.right <= window.innerWidth && p.left >= 0; })()")"
 chk "lightbox shows the stored image, decoded" "true" \
   "$(js "(() => { const i = document.querySelector('[data-testid=\"lightbox-media-area\"] img'); return !!i && i.getAttribute('src').includes('pbs.twimg.com') && i.naturalWidth > 0; })()")"
 chk "three meta lines present" "true" \

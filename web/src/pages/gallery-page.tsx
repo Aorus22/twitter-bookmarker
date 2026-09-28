@@ -63,7 +63,14 @@ export function GalleryPage() {
           ) : null}
 
           {status === "success" && collections.length > 0 ? (
-            <ul className="flex flex-wrap gap-[18px]">
+            // justify-center, not flex-start: the cards are a fixed 244px wide
+            // inside the shell's rail, so a row of 4 in a 1312px rail leaves
+            // ~282px of slack and a row of 3 leaves more still. Flushing them
+            // left piled all of it against the right edge, which read as a
+            // broken layout. Centring shares the slack between both sides.
+            // The section header above stays justify-between on purpose: it is
+            // a title row spanning the rail, not part of this grid.
+            <ul className="flex flex-wrap justify-center gap-[18px]">
               {collections.map((collection) => (
                 <CollectionCard key={collection.slug} collection={collection} />
               ))}

@@ -124,7 +124,7 @@ describe("CollectionPage — header (COLL-01)", () => {
     expect(back).toHaveAttribute("href", "/")
 
     expect(await screen.findByTestId("collection-counts")).toHaveTextContent(
-      "6 posts ◫ 12 media"
+      "6 posts · 12 media"
     )
     expect(
       screen.getByRole("heading", { level: 1, name: "Linux" })

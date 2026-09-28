@@ -69,11 +69,18 @@ export type CollectionCountsSource = Pick<
 /**
  * The collection-page header meta (design spec §3.3, frame `6:121`):
  *
- *   `186 posts ◫ 220 media`
+ *   `186 posts · 220 media`
  *
- * The mockup's `◫` glyph separates the two counts and the design's third
- * (description) line is omitted by spec §7, so the header shows only counts.
- * Reuses {@link formatCount} so `1 post` never becomes `1 posts`.
+ * The mockup separated the two counts with a `◫` glyph, which was dropped: it is
+ * a text character standing in for a media icon, and at UI sizes it renders as a
+ * bare rectangle with a hairline through it — indistinguishable from a missing
+ * glyph. The middle dot is what the homepage hero (`3 collections · 12 posts ·
+ * 16 media`) and the post-card date row (`Saved Sep 27`) already use, so the
+ * header now separates its counts the same way the rest of the app does.
+ *
+ * The design's third (description) line is omitted by spec §7, so the header
+ * shows only counts. Reuses {@link formatCount} so `1 post` never becomes
+ * `1 posts`.
  */
 export function formatCollectionCounts(
   collection: CollectionCountsSource
@@ -81,5 +88,5 @@ export function formatCollectionCounts(
   return [
     formatCount(collection.post_count, "post"),
     formatCount(collection.media_count, "media", "media"),
-  ].join(" ◫ ")
+  ].join(" · ")
 }

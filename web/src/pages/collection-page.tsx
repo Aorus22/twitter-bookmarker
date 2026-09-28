@@ -31,7 +31,9 @@ import { scrollNearTop } from "@/lib/scroll"
  *
  * Header: `← Collections` back link, a `96×96` `r24` gradient icon seeded
  * deterministically from the filename, the title Playfair Bold 38 and the meta
- * `186 posts ◫ 220 media` at x=184. The mockup's description line (y=198) is
+ * `186 posts · 220 media` at x=184, set at `text-xl` because the size of the
+ * folder is what the page is opened to find out. The mockup's description line
+ * (y=198) is
  * omitted (spec §7 — the CSV has no description field) and so are the
  * media-type (y=350) and topic (y=394) pills.
  *
@@ -172,7 +174,7 @@ export function CollectionPage() {
             {collection === undefined ? null : (
               <p
                 data-testid="collection-counts"
-                className="text-base leading-[1.4] font-medium text-muted"
+                className="text-xl leading-[1.4] font-medium text-muted md:text-2xl"
               >
                 {formatCollectionCounts(collection)}
               </p>

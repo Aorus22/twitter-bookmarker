@@ -20,11 +20,7 @@ import {
   type GalleryFilterDates,
   type GalleryQuery,
 } from "@/lib/gallery-query"
-import {
-  FILTER_LABEL,
-  FILTER_SUBTITLE,
-  FILTER_TITLE,
-} from "@/lib/messages"
+import { FILTER_LABEL, FILTER_SUBTITLE, FILTER_TITLE } from "@/lib/messages"
 
 /**
  * The `Filter` control (PRD-2 §30/§66, DISC-02).

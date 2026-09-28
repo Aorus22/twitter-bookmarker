@@ -5,7 +5,7 @@
  * (PRD §26–§28, §34, §54; XI-02/XI-03/XI-04).
  */
 
-import { DEFAULT_SETTINGS } from "../shared/constants.ts";
+import { DEFAULT_SETTINGS, createDefaultStore } from "../shared/constants.ts";
 import { sendExtensionMessage } from "../shared/messages.ts";
 import type { GetSavedIndexResponse } from "../shared/messages.ts";
 import { getStore } from "../shared/storage.ts";
@@ -355,7 +355,7 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
   const running = (): boolean => state !== null && state.token === token;
 
   try {
-    let store: Store = { version: 1, settings: { ...DEFAULT_SETTINGS }, categories: [] };
+    let store: Store = createDefaultStore();
     try {
       store = await deps.loadStore();
     } catch (error) {

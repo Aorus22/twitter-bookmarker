@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
  */
 export interface MediaImageProps {
   src: string
-  /** Stable key for the deterministic placeholder (usually `filename:index`). */
+  /** Stable key for the deterministic placeholder (usually `slug:index`). */
   fallbackSeed: string
   alt?: string
   className?: string

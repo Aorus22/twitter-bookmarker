@@ -47,12 +47,13 @@ const SAVED_BODY = {
   status: "saved",
   tweet_id: "123456",
   url: "https://x.com/foo/status/123456",
-  filename: "linux.csv",
+  slug: "linux",
   saved_at: "2026-09-27T01:05:00Z",
 };
 const DUPLICATE_BODY = { status: "duplicate", tweet_id: "123456" };
 const SAMPLE_REQUEST = {
-  filename: "linux.csv",
+  slug: "linux",
+  name: "Linux",
   tweet: {
     url: "https://x.com/foo/status/123456",
     media: ["https://pbs.twimg.com/media/AAA.jpg"],
@@ -113,7 +114,7 @@ test("409 maps to kind:'duplicate'", async () => {
 });
 
 test("400 maps to invalid_request", async () => {
-  captureFetch(() => jsonResponse(400, { error: "invalid filename" }));
+  captureFetch(() => jsonResponse(400, { error: "invalid slug" }));
   await assert.rejects(postBookmark(SAMPLE_REQUEST), (error) => {
     assert.ok(error instanceof BackendRequestError);
     assert.equal(error.code, "invalid_request");
@@ -170,7 +171,7 @@ test("a malformed success body is treated as internal, never as a saved tweet", 
 /* -------------------------------------------------------------------------- */
 
 test("fetchSavedIndex returns the parsed items record", async () => {
-  const body = { items: { 123456: { url: "u", filename: "linux.csv", saved_at: "t" } } };
+  const body = { items: { 123456: { url: "u", slug: "linux", saved_at: "t" } } };
   const calls = captureFetch(() => jsonResponse(200, body));
 
   const index = await fetchSavedIndex();
@@ -199,7 +200,7 @@ test("savedIndexToSet degrades a failed index to an empty Set", () => {
   assert.deepEqual([...savedIndexToSet({ ok: false, index: null, error: "backend_unavailable" })], []);
   assert.deepEqual([...savedIndexToSet({ ok: true, index: null })], []);
   assert.deepEqual(
-    [...savedIndexToSet({ ok: true, index: { items: { 1: { url: "u", filename: "f.csv", saved_at: "t" }, 2: { url: "u", filename: "f.csv", saved_at: "t" } } } })].sort(),
+    [...savedIndexToSet({ ok: true, index: { items: { 1: { url: "u", slug: "f", saved_at: "t" }, 2: { url: "u", slug: "f", saved_at: "t" } } } })].sort(),
     ["1", "2"],
   );
 });

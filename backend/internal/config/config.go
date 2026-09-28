@@ -33,8 +33,20 @@ const (
 	// repository read the same variable.
 	EnvDir = "TWITTER_BOOKMARKER_DIR"
 
+	// DBName is the SQLite database inside the storage directory. It is the one
+	// durable file the backend owns; the gallery serves nothing but what it
+	// reads from here.
+	DBName = "tw-bookmarker.db"
+
 	// FileMode is the mode used for the storage directory.
 	FileMode os.FileMode = 0o700
+
+	// DBFileMode is the mode used for a database this process creates. The
+	// database holds the same personal data the per-category CSVs used to, and
+	// those were 0o600; the directory is 0o700 as well, so this is defence in
+	// depth rather than the only protection. It is applied only on creation, so
+	// a mode the user chose for an existing file is never overwritten.
+	DBFileMode os.FileMode = 0o600
 
 	// WebDirName is the default location of the built single-page app,
 	// relative to the repository root (and therefore to the directory
@@ -79,7 +91,7 @@ func StorageDir() (string, error) {
 // An empty value yields the historical default. A leading "~/" is expanded to
 // the user's home; anything else must already be absolute, because a relative
 // path would depend on the working directory the server happens to be started
-// from and would silently scatter CSVs across the disk.
+// from, so the same install could end up with two different databases.
 func resolveStorageDir(raw, home string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -178,3 +190,6 @@ func EnsureStorageDir() (string, error) {
 	}
 	return dir, nil
 }
+
+// DBPath is the database file inside dir, e.g. "/data/tw-bookmarker.db".
+func DBPath(dir string) string { return filepath.Join(dir, DBName) }

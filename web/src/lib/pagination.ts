@@ -14,8 +14,8 @@
  *      sentinel loop forever (SCROLL-04).
  *   2. {@link mergeUniquePosts} appends a page while dropping any `tweet_id`
  *      already loaded, keeping the first-seen instance and position. This is the
- *      documented defensive dedupe for a CSV that gained rows mid-scroll, which
- *      drifts a sort-key cursor window (PRD-2 §44, SCROLL-03).
+ *      documented defensive dedupe for a collection that gained rows mid-scroll,
+ *      which drifts a sort-key cursor window (PRD-2 §44, SCROLL-03).
  */
 
 import type { GalleryPost, GalleryPostsResponse } from "@/types"

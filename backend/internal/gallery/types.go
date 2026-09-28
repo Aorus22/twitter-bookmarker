@@ -1,14 +1,15 @@
-// Package gallery implements the read-only projection of the per-category
-// bookmark CSVs: collection discovery, collection summaries, row parsing,
-// search, two independent date filters, four sort modes and opaque cursor
-// pagination.
+// Package gallery implements the read-only projection of the bookmark database:
+// collection discovery, collection summaries, row parsing, search, two
+// independent date filters, four sort modes and opaque cursor pagination.
 //
 // The package is deliberately transport-free. It exports no HTTP handlers,
 // registers no routes and knows nothing about the server; internal/api is
 // expected to call Reader.Collections and Reader.Posts and to map the exported
-// error types onto status codes. Every call re-reads the CSV files from disk —
-// there is no cache of any kind, because the CSVs are the single source of
-// truth (PRD-2 §48, §71).
+// error types onto status codes.
+//
+// Every call opens a fresh read-only handle on tw-bookmarker.db and holds no
+// state between calls, so a bookmark saved while the server runs is visible on
+// the next request (PRD-2 §48, §80.22).
 package gallery
 
 import (
@@ -16,15 +17,20 @@ import (
 	"time"
 )
 
-// Collection is the summary of one bookmark CSV file, i.e. one gallery
-// collection. It maps to a homepage card (PRD-2 §74).
+// Collection is the summary of one collection. It maps to a homepage card
+// (PRD-2 §74).
 type Collection struct {
-	Filename   string `json:"filename"`
+	// Slug is the collection's public key: what the extension sends with a save
+	// and what the gallery URL carries. It is not a filename.
+	Slug string `json:"slug"`
+	// Name is the display name the extension supplied, falling back to a name
+	// derived from the slug for a collection that was never saved to by a
+	// version of the extension that sends one.
 	Name       string `json:"name"`
 	PostCount  int    `json:"post_count"`
 	MediaCount int    `json:"media_count"`
-	// LastSavedAt is the maximum saved_at in the file as UTC RFC3339, or nil
-	// when the file has no valid rows. JSON is null in that case.
+	// LastSavedAt is the maximum saved_at in the collection as UTC RFC3339, or
+	// nil when it has no valid rows. JSON is null in that case.
 	LastSavedAt *string `json:"last_saved_at"`
 	// CoverMedia holds up to four media URLs taken from the newest-by-saved_at
 	// rows, newest first. It is never nil, so it always encodes as [].
@@ -103,7 +109,7 @@ type Page struct {
 	HasMore    bool
 }
 
-// ErrCollectionNotFound is returned (wrapped) when a syntactically valid
-// filename does not resolve to a readable CSV, so the HTTP layer can answer
-// 404 rather than 500 (PRD-2 §54).
+// ErrCollectionNotFound is returned (wrapped) when a syntactically valid slug
+// does not resolve to a collection, so the HTTP layer can answer 404 rather
+// than 500 (PRD-2 §54).
 var ErrCollectionNotFound = errors.New("gallery: collection not found")

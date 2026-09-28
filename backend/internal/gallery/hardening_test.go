@@ -1,14 +1,12 @@
 package gallery_test
 
 import (
-	"encoding/csv"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/gallery"
 )
 
@@ -17,7 +15,7 @@ import (
 // plus the blanket invariant that no malformed input can panic the server-side
 // reader. The individual behaviours each have a narrower test elsewhere
 // (reader_test.go); what this file adds is the "one bad row does not take the
-// collection down" pairing, the legacy header, the 5,000-row bound, and the
+// collection down" pairing, the hand-edited row, the 5,000-row bound, and the
 // panic guard.
 
 // assertNoPanic runs fn and fails the test if it panics, naming the input.
@@ -32,25 +30,34 @@ func assertNoPanic(t *testing.T, label string, fn func()) {
 }
 
 // TestHardeningMalformedMediaRowDoesNotTakeDownTheCollection is PRD-2 §50: a
-// malformed `media` cell must degrade to a text card while every other row in
-// the same file still reads.
+// malformed `media` value must degrade to a text card while every other row in
+// the same collection still reads.
 func TestHardeningMalformedMediaRowDoesNotTakeDownTheCollection(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "mixed.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `["https://pbs.twimg.com/media/one.jpg"]`,
-			"First", "@first", "2026-09-01T00:00:00Z", "2026-09-04T00:00:00Z", "good with media"),
-		currentRow("https://x.com/u/status/2", `{"not":"an array"}`,
-			"Broken", "@broken", "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "broken media cell"),
-		currentRow("https://x.com/u/status/3", `not-json-at-all`,
-			"Broken Too", "@brokentoo", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "also broken"),
-		currentRow("https://x.com/u/status/4", `["https://pbs.twimg.com/media/two.jpg"]`,
-			"Last", "@last", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "good with media"),
-	})
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "mixed", "Mixed",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Media:  `["https://pbs.twimg.com/media/one.jpg"]`,
+			Author: "First", Username: "@first",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-04T00:00:00Z", Text: "good with media"},
+		dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+			Media:  `{"not":"an array"}`,
+			Author: "Broken", Username: "@broken",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-03T00:00:00Z", Text: "broken media cell"},
+		dbtest.Row{TweetID: "3", URL: "https://x.com/u/status/3",
+			Media:  `not-json-at-all`,
+			Author: "Broken Too", Username: "@brokentoo",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "also broken"},
+		dbtest.Row{TweetID: "4", URL: "https://x.com/u/status/4",
+			Media:  `["https://pbs.twimg.com/media/two.jpg"]`,
+			Author: "Last", Username: "@last",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-01T00:00:00Z", Text: "good with media"},
+	)
 	reader, logs := newReader(t, dir)
 
 	var page gallery.Page
-	assertNoPanic(t, "Posts on a malformed-media CSV", func() {
-		page = mustPosts(t, reader, "mixed.csv", gallery.RawQuery{Sort: "tweet_asc"})
+	assertNoPanic(t, "Posts on a collection with malformed media", func() {
+		page = mustPosts(t, reader, "mixed", gallery.RawQuery{Sort: "tweet_asc"})
 	})
 
 	if len(page.Items) != 4 {
@@ -89,34 +96,44 @@ func TestHardeningMalformedMediaRowDoesNotTakeDownTheCollection(t *testing.T) {
 }
 
 // TestHardeningMalformedRowInTheMiddleIsSkipped is PRD-2 §51: a bad row in the
-// middle of a file is skipped with a warning and the surrounding rows survive.
+// middle of a collection is skipped with a warning and the surrounding rows
+// survive.
 func TestHardeningMalformedRowInTheMiddleIsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "rows.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "before 1"),
-		currentRow("https://x.com/u/status/2", `[]`, "B", "@b", "2026-09-02T00:00:00Z", "2026-09-02T00:00:00Z", "before 2"),
-		// The malformed row: the wrong field count, which field-order-tolerant
-		// CSV readers must reject per row rather than aborting the file.
-		{"https://x.com/u/status/3", `[]`},
-		currentRow("https://x.com/u/status/4", `[]`, "D", "@d", "2026-09-04T00:00:00Z", "2026-09-04T00:00:00Z", "after 1"),
-		currentRow("https://x.com/u/status/5", `[]`, "E", "@e", "2026-09-05T00:00:00Z", "2026-09-05T00:00:00Z", "after 2"),
+	conn := dbtest.Open(t, dir)
+	id := dbtest.Collection(t, conn, "rows", "Rows")
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "1",
+		SavedAt: "2026-09-01T00:00:00Z", Text: "before 1"})
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "2",
+		SavedAt: "2026-09-02T00:00:00Z", Text: "before 2"})
+	// The malformed row: a hand edit that left the author blank. The reader must
+	// reject it per row rather than aborting the collection.
+	insertRaw(t, conn, id, dbtest.Row{
+		TweetID: "3", URL: "https://x.com/u/status/3",
+		Author: "", Username: "@b",
+		TweetDate: "2026-09-03T00:00:00Z", SavedAt: "2026-09-03T00:00:00Z",
+		Text: "hand-edited row", Media: "[]",
 	})
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "4",
+		SavedAt: "2026-09-04T00:00:00Z", Text: "after 1"})
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "5",
+		SavedAt: "2026-09-05T00:00:00Z", Text: "after 2"})
 	reader, logs := newReader(t, dir)
 
 	var page gallery.Page
-	assertNoPanic(t, "Posts on a mid-file malformed row", func() {
-		page = mustPosts(t, reader, "rows.csv", gallery.RawQuery{Sort: "tweet_asc"})
+	assertNoPanic(t, "Posts on a collection with a malformed middle row", func() {
+		page = mustPosts(t, reader, "rows", gallery.RawQuery{Sort: "tweet_asc"})
 	})
 
 	want := []string{"1", "2", "4", "5"}
 	if got := itemIDs(page); !equalStrings(got, want) {
 		t.Fatalf("surviving ids = %v, want %v (only the middle row is skipped)", got, want)
 	}
-	if !strings.Contains(logs.String(), "skipping malformed row") {
+	if !strings.Contains(logs.String(), "skipping malformed bookmark") {
 		t.Errorf("expected a skipped-row warning, logs = %q", logs.String())
 	}
-	if !strings.Contains(logs.String(), "expected 7 fields, got 2") {
-		t.Errorf("warning should name the field-count mismatch, logs = %q", logs.String())
+	if !strings.Contains(logs.String(), "missing author") {
+		t.Errorf("warning should name the malformed field, logs = %q", logs.String())
 	}
 
 	collections, err := reader.Collections()
@@ -128,101 +145,105 @@ func TestHardeningMalformedRowInTheMiddleIsSkipped(t *testing.T) {
 	}
 }
 
-// TestHardeningLegacyHeaderStillReads pins the six-column pre-media layout
-// (GAL-05): a file written before the `media` column existed reads normally and
-// yields `media = []`, alongside a current-layout file.
-func TestHardeningLegacyHeaderStillReads(t *testing.T) {
+// TestHardeningHandEditedTimestampIsSkipped pins the degradation of a database
+// row edited by hand: a non-RFC3339 saved_at drops that row with a warning, the
+// valid rows in the same collection survive, and a neighbouring collection is
+// untouched.
+func TestHardeningHandEditedTimestampIsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "legacy.csv", legacyHeader(), [][]string{
-		legacyRow("https://x.com/old/status/71", "Old Timer", "@oldtimer", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "written before media existed, with a comma"),
-		legacyRow("https://x.com/old/status/72", "Old Timer", "@oldtimer", "2026-01-03T00:00:00Z", "2026-01-04T00:00:00Z", "second legacy row"),
+	conn := dbtest.Open(t, dir)
+	id := dbtest.Collection(t, conn, "edited", "Edited")
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "71", URL: "https://x.com/old/status/71",
+		Author: "Old Timer", Username: "@oldtimer",
+		TweetDate: "2026-01-01T00:00:00Z", SavedAt: "2026-01-02T00:00:00Z",
+		Text: "reads normally", Media: "[]"})
+	insertRaw(t, conn, id, dbtest.Row{
+		TweetID: "72", URL: "https://x.com/old/status/72",
+		Author: "Old Timer", Username: "@oldtimer",
+		TweetDate: "2026-01-03T00:00:00Z", SavedAt: "yesterday",
+		Text: "hand-edited saved_at", Media: "[]",
 	})
-	writeCSV(t, dir, "current.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/new/status/81", `["https://pbs.twimg.com/media/n.jpg"]`, "New Timer", "@newtimer", "2026-02-01T00:00:00Z", "2026-02-02T00:00:00Z", "current layout"),
-	})
-	reader, _ := newReader(t, dir)
+	dbtest.Seed(t, conn, "intact", "Intact",
+		dbtest.Row{TweetID: "81", URL: "https://x.com/new/status/81",
+			Media:  `["https://pbs.twimg.com/media/n.jpg"]`,
+			Author: "New Timer", Username: "@newtimer",
+			TweetDate: "2026-02-01T00:00:00Z", SavedAt: "2026-02-02T00:00:00Z", Text: "neighbour"},
+	)
+	reader, logs := newReader(t, dir)
 
-	var legacy gallery.Page
-	assertNoPanic(t, "Posts on a legacy-header CSV", func() {
-		legacy = mustPosts(t, reader, "legacy.csv", gallery.RawQuery{Sort: "tweet_asc"})
+	var edited gallery.Page
+	assertNoPanic(t, "Posts on a collection with a hand-edited timestamp", func() {
+		edited = mustPosts(t, reader, "edited", gallery.RawQuery{Sort: "tweet_asc"})
 	})
-	if len(legacy.Items) != 2 {
-		t.Fatalf("legacy Items = %d, want 2", len(legacy.Items))
+	if len(edited.Items) != 1 {
+		t.Fatalf("edited Items = %d, want 1", len(edited.Items))
 	}
-	first := legacy.Items[0]
+	first := edited.Items[0]
 	if first.TweetID != "71" || first.Author != "Old Timer" || first.Username != "@oldtimer" {
-		t.Errorf("legacy post misparsed: %+v", first)
-	}
-	if first.Text != "written before media existed, with a comma" {
-		t.Errorf("legacy Text = %q", first.Text)
+		t.Errorf("surviving post misparsed: %+v", first)
 	}
 	if first.Media == nil || len(first.Media) != 0 {
-		t.Errorf("legacy Media = %v, want []", first.Media)
+		t.Errorf("Media = %v, want []", first.Media)
+	}
+	if !strings.Contains(logs.String(), "saved_at is not RFC3339") {
+		t.Errorf("expected a bad-timestamp warning, logs = %q", logs.String())
 	}
 
-	current := mustPosts(t, reader, "current.csv", gallery.RawQuery{})
-	if len(current.Items) != 1 || len(current.Items[0].Media) != 1 {
-		t.Fatalf("current layout beside a legacy file misparsed: %+v", current.Items)
+	// The neighbouring collection is unaffected by the skip.
+	intact := mustPosts(t, reader, "intact", gallery.RawQuery{})
+	if len(intact.Items) != 1 || len(intact.Items[0].Media) != 1 {
+		t.Fatalf("neighbouring collection misparsed: %+v", intact.Items)
 	}
 
 	collections, err := reader.Collections()
 	if err != nil {
 		t.Fatalf("Collections() error = %v", err)
 	}
-	if got := collectionByName(t, collections, "Legacy").PostCount; got != 2 {
-		t.Errorf("legacy summary PostCount = %d, want 2", got)
+	if got := collectionByName(t, collections, "Edited").PostCount; got != 1 {
+		t.Errorf("edited summary PostCount = %d, want 1", got)
+	}
+	if got := collectionByName(t, collections, "Intact").PostCount; got != 1 {
+		t.Errorf("intact summary PostCount = %d, want 1", got)
 	}
 }
 
-// TestHardeningLargeCSVSummaryAndPagedQueryComplete is PRD-2 §68: a personal
-// dataset of ~5,000 rows is acceptable on a local machine. Both a full summary
-// and a paginated query must finish without error inside a generous bound that
-// would still catch an accidental O(n²) rescan-per-row.
-func TestHardeningLargeCSVSummaryAndPagedQueryComplete(t *testing.T) {
+// TestHardeningLargeDatabaseSummaryAndPagedQueryComplete is PRD-2 §68: a
+// personal dataset of ~5,000 rows is acceptable on a local machine. Both a full
+// summary and a paginated query must finish without error inside a generous
+// bound that would still catch an accidental O(n²) rescan-per-row.
+func TestHardeningLargeDatabaseSummaryAndPagedQueryComplete(t *testing.T) {
 	const rows = 5000
 	const bound = 10 * time.Second
 
 	dir := t.TempDir()
-	file, err := os.Create(filepath.Join(dir, "large.csv"))
-	if err != nil {
-		t.Fatalf("create large.csv: %v", err)
-	}
-	writer := csv.NewWriter(file)
-	if err := writer.Write(currentHeader()); err != nil {
-		t.Fatalf("write header: %v", err)
-	}
+	conn := dbtest.Open(t, dir)
+
+	fixtures := make([]dbtest.Row, 0, rows)
 	for i := 1; i <= rows; i++ {
 		media := "[]"
 		if i%3 == 0 {
 			media = fmt.Sprintf(`["https://pbs.twimg.com/media/large%d.jpg"]`, i)
 		}
-		row := currentRow(
-			fmt.Sprintf("https://x.com/bulk/status/%d", i),
-			media,
-			fmt.Sprintf("Author %d", i%17),
-			fmt.Sprintf("@bulk%05d", i),
+		fixtures = append(fixtures, dbtest.Row{
+			TweetID:  fmt.Sprintf("%d", i),
+			URL:      fmt.Sprintf("https://x.com/bulk/status/%d", i),
+			Media:    media,
+			Author:   fmt.Sprintf("Author %d", i%17),
+			Username: fmt.Sprintf("@bulk%05d", i),
 			// One distinct UTC instant per row, oldest first, so paging order
 			// is deterministic.
-			time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i)*time.Minute).Format(time.RFC3339),
-			time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i)*time.Minute).Format(time.RFC3339),
-			fmt.Sprintf("Bulk post %d with searchable haystack text.", i),
-		)
-		if err := writer.Write(row); err != nil {
-			t.Fatalf("write row %d: %v", i, err)
-		}
+			TweetDate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute).Format(time.RFC3339),
+			SavedAt:   time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute).Format(time.RFC3339),
+			Text:      fmt.Sprintf("Bulk post %d with searchable haystack text.", i),
+		})
 	}
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		t.Fatalf("flush large.csv: %v", err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("close large.csv: %v", err)
-	}
+	dbtest.Seed(t, conn, "large", "Large", fixtures...)
 
 	reader, _ := newReader(t, dir)
 
 	var collections []gallery.Collection
-	assertNoPanic(t, "Collections on a 5,000-row CSV", func() {
+	var err error
+	assertNoPanic(t, "Collections on a 5,000-row database", func() {
 		start := time.Now()
 		collections, err = reader.Collections()
 		if elapsed := time.Since(start); elapsed > bound {
@@ -248,9 +269,9 @@ func TestHardeningLargeCSVSummaryAndPagedQueryComplete(t *testing.T) {
 	}
 
 	var page1 gallery.Page
-	assertNoPanic(t, "first paginated query on a 5,000-row CSV", func() {
+	assertNoPanic(t, "first paginated query on a 5,000-row database", func() {
 		start := time.Now()
-		page1 = mustPosts(t, reader, "large.csv", gallery.RawQuery{Sort: "saved_desc", Limit: "30"})
+		page1 = mustPosts(t, reader, "large", gallery.RawQuery{Sort: "saved_desc", Limit: "30"})
 		if elapsed := time.Since(start); elapsed > bound {
 			t.Errorf("first page query took %s, want <= %s", elapsed, bound)
 		}
@@ -271,8 +292,8 @@ func TestHardeningLargeCSVSummaryAndPagedQueryComplete(t *testing.T) {
 	}
 
 	var page2 gallery.Page
-	assertNoPanic(t, "second paginated query on a 5,000-row CSV", func() {
-		page2 = mustPosts(t, reader, "large.csv", gallery.RawQuery{
+	assertNoPanic(t, "second paginated query on a 5,000-row database", func() {
+		page2 = mustPosts(t, reader, "large", gallery.RawQuery{
 			Sort: "saved_desc", Limit: "30", Cursor: page1.NextCursor,
 		})
 	})
@@ -283,11 +304,11 @@ func TestHardeningLargeCSVSummaryAndPagedQueryComplete(t *testing.T) {
 		t.Errorf("second page head TweetID = %q, want 4970 (cursor must not overlap page 1)", got)
 	}
 
-	// A search over the whole 5,000-row file must also complete.
+	// A search over the whole 5,000-row database must also complete.
 	var searched gallery.Page
-	assertNoPanic(t, "searched paginated query on a 5,000-row CSV", func() {
+	assertNoPanic(t, "searched paginated query on a 5,000-row database", func() {
 		start := time.Now()
-		searched = mustPosts(t, reader, "large.csv", gallery.RawQuery{Q: "haystack", Sort: "saved_desc", Limit: "30"})
+		searched = mustPosts(t, reader, "large", gallery.RawQuery{Q: "haystack", Sort: "saved_desc", Limit: "30"})
 		if elapsed := time.Since(start); elapsed > bound {
 			t.Errorf("searched query took %s, want <= %s", elapsed, bound)
 		}
@@ -297,80 +318,118 @@ func TestHardeningLargeCSVSummaryAndPagedQueryComplete(t *testing.T) {
 	}
 }
 
-// TestHardeningReaderNeverPanics runs the reader over a corpus of hostile CSVs
+// TestHardeningReaderNeverPanics runs the reader over a corpus of hostile rows
 // and asserts that neither Collections nor Posts ever panics. A panic in the
 // HTTP path would take the whole server down, so this is the blanket invariant
 // behind the individual degradation rules (PRD-2 §50/§51/§68).
 func TestHardeningReaderNeverPanics(t *testing.T) {
 	corpus := []struct {
-		name    string
-		content string
+		slug string
+		rows []dbtest.Row
 	}{
-		{"empty.csv", ""},
-		{"headeronly.csv", "url,media,author,username,tweet_date,saved_at,text\n"},
-		{"binary.csv", "\x00\x01\x02\xff\xfe binary \x00 garbage"},
-		{"nul-in-cell.csv", "url,media,author,username,tweet_date,saved_at,text\n" +
-			"https://x.com/u/status/1,\"[]\",\"Au\x00thor\",@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,text\n"},
-		{"unterminated-quote.csv", "url,media,author,username,tweet_date,saved_at,text\n" +
-			"https://x.com/u/status/1,\"[\"\"x\"\"]\",\"Unterminated,@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,text\n"},
-		{"duplicate-columns.csv", "url,url,author,username,tweet_date,saved_at,text\n" +
-			"https://x.com/u/status/1,https://x.com/u/status/2,A,@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,text\n"},
-		{"no-header-columns.csv", "a,b,c\n1,2,3\n"},
-		{"ragged.csv", "url,media,author,username,tweet_date,saved_at,text\n" +
-			"1\n2,3\n4,5,6,7,8,9,10,11,12\n"},
-		{"huge-field.csv", "url,media,author,username,tweet_date,saved_at,text\n" +
-			"https://x.com/u/status/1,\"[]\",A,@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,\"" +
-			strings.Repeat("x", 1<<20) + "\"\n"},
-		{"bom-header.csv", "\ufeffurl,media,author,username,tweet_date,saved_at,text\n" +
-			"https://x.com/u/status/1,\"[]\",A,@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,text\n"},
-		{"crlf.csv", "url,media,author,username,tweet_date,saved_at,text\r\n" +
-			"https://x.com/u/status/1,\"[]\",A,@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,text\r\n"},
-		{"not-a-tweet-url.csv", "url,media,author,username,tweet_date,saved_at,text\n" +
-			"javascript:alert(1),\"[]\",A,@a,2026-09-01T00:00:00Z,2026-09-02T00:00:00Z,text\n"},
-		{"negative-date.csv", "url,media,author,username,tweet_date,saved_at,text\n" +
-			"https://x.com/u/status/1,\"[]\",A,@a,0001-01-01T00:00:00Z,9999-12-31T23:59:59Z,text\n"},
+		{"empty", nil},
+		{"binary", []dbtest.Row{
+			{TweetID: "h1", URL: "https://x.com/u/status/1", Text: "\x00\x01\x02\xff\xfe binary \x00 garbage"},
+		}},
+		{"nul-in-cell", []dbtest.Row{
+			{TweetID: "h2", URL: "https://x.com/u/status/2", Author: "Au\x00thor", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "text", Media: "[]"},
+		}},
+		{"unterminated-quote", []dbtest.Row{
+			{TweetID: "h3", URL: "https://x.com/u/status/3", Author: "A", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "text", Media: `["x`},
+		}},
+		{"duplicate-urls", []dbtest.Row{
+			{TweetID: "h4", URL: "https://x.com/u/status/4", Author: "A", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "first", Media: "[]"},
+			{TweetID: "h4-duplicate", URL: "https://x.com/u/status/4", Author: "B", Username: "@b",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-03T00:00:00Z", Text: "second", Media: "[]"},
+		}},
+		{"no-url", []dbtest.Row{
+			{TweetID: "h5", URL: "", Author: "A", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "no url", Media: "[]"},
+		}},
+		{"ragged", []dbtest.Row{
+			{TweetID: "h6", URL: "1"},
+			{TweetID: "h7", URL: "2", Author: "B"},
+			{TweetID: "h8", URL: "https://x.com/u/status/8", Author: "C", Username: "@c",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "complete", Media: "[]"},
+		}},
+		{"huge-field", []dbtest.Row{
+			{TweetID: "h9", URL: "https://x.com/u/status/9", Author: "A", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z",
+				Text: strings.Repeat("x", 1<<20), Media: "[]"},
+		}},
+		{"bom", []dbtest.Row{
+			{TweetID: "h10", URL: "https://x.com/u/status/10", Author: "\ufeffA", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "text", Media: "[]"},
+		}},
+		{"crlf", []dbtest.Row{
+			{TweetID: "h11", URL: "https://x.com/u/status/11", Author: "A", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "line\r\nline", Media: "[]"},
+		}},
+		{"not-a-tweet-url", []dbtest.Row{
+			{TweetID: "h12", URL: "javascript:alert(1)", Author: "A", Username: "@a",
+				TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "text", Media: "[]"},
+		}},
+		{"negative-date", []dbtest.Row{
+			{TweetID: "h13", URL: "https://x.com/u/status/13", Author: "A", Username: "@a",
+				TweetDate: "0001-01-01T00:00:00Z", SavedAt: "9999-12-31T23:59:59Z", Text: "text", Media: "[]"},
+		}},
 	}
 
 	dir := t.TempDir()
+	conn := dbtest.Open(t, dir)
 	for _, entry := range corpus {
-		if err := os.WriteFile(filepath.Join(dir, entry.name), []byte(entry.content), 0o600); err != nil {
-			t.Fatalf("write %s: %v", entry.name, err)
+		id := dbtest.Collection(t, conn, entry.slug, "")
+		for _, row := range entry.rows {
+			insertRaw(t, conn, id, row)
 		}
 	}
 	// One syntactically valid collection guarantees Collections() has real work
 	// to do while it walks the hostile neighbours.
-	writeCSV(t, dir, "valid.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `["https://pbs.twimg.com/media/ok.jpg"]`, "A", "@a",
-			"2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "valid row"),
-	})
+	dbtest.Seed(t, conn, "valid", "Valid",
+		dbtest.Row{TweetID: "v1", URL: "https://x.com/u/status/100",
+			Media:  `["https://pbs.twimg.com/media/ok.jpg"]`,
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "valid row"},
+	)
 
 	reader, _ := newReader(t, dir)
 
-	// Collections walks every file, including the hostile ones.
+	// Collections walks every collection, including the hostile ones.
 	assertNoPanic(t, "Collections over the hostile corpus", func() {
 		collections, err := reader.Collections()
 		if err != nil {
 			t.Fatalf("Collections() error = %v", err)
 		}
-		if len(collections) == 0 {
-			t.Fatal("Collections() returned nothing; the valid file should still appear")
+		if len(collections) != len(corpus)+1 {
+			t.Fatalf("Collections() returned %d collections, want %d (every collection must survive)",
+				len(collections), len(corpus)+1)
 		}
 	})
 
+	slugs := make([]string, 0, len(corpus)+4)
 	for _, entry := range corpus {
+		slugs = append(slugs, entry.slug)
+	}
+	// Syntactically invalid and unknown slugs are part of the hostile corpus too.
+	slugs = append(slugs, "absent", "a/b", "..", "")
+
+	for _, slug := range slugs {
 		for _, query := range []gallery.RawQuery{
 			{},
 			{Sort: "tweet_asc", Limit: "100"},
 			{Q: "text"},
 			{Limit: "1"},
 		} {
-			name, raw := entry.name, query
+			name, raw := slug, query
 			assertNoPanic(t, fmt.Sprintf("Posts(%q, %+v)", name, raw), func() {
-				query, err := raw.Parse()
+				parsed, err := raw.Parse()
 				if err != nil {
 					return // a validation rejection is a fine outcome, not a panic
 				}
-				if _, err := reader.Posts(name, query); err != nil {
+				if _, err := reader.Posts(name, parsed); err != nil {
 					return // a clean error is a fine outcome
 				}
 			})

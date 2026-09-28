@@ -37,9 +37,12 @@ afterEach(() => {
 })
 
 function renderLightbox(posts = POSTS) {
-  return renderHook(({ value }: { value: typeof POSTS }) => useMediaLightbox(value), {
-    initialProps: { value: posts },
-  })
+  return renderHook(
+    ({ value }: { value: typeof POSTS }) => useMediaLightbox(value),
+    {
+      initialProps: { value: posts },
+    }
+  )
 }
 
 describe("useMediaLightbox — flattening and opening (LIGHT-03)", () => {

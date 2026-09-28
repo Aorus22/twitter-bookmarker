@@ -34,23 +34,15 @@ func (lg *Logger) Slog() *slog.Logger {
 	return lg.l
 }
 
-// Startup reports the server name, listen address, storage dir and indexed
-// tweet count.
-func (lg *Logger) Startup(name, addr, storageDir string, indexed int) {
+// Startup reports the server name, listen address, storage dir and how much the
+// database holds.
+func (lg *Logger) Startup(name, addr, storageDir string, collections, bookmarks int) {
 	lg.Slog().Info("Twitter Bookmarker server started",
 		"server", name,
 		"listening", addr,
 		"storage", storageDir,
-		"indexed_tweets", indexed,
-	)
-}
-
-// IndexRebuild reports that the derived index was rebuilt from CSV files.
-func (lg *Logger) IndexRebuild(dir, reason string, count int) {
-	lg.Slog().Info("index rebuilt from csv files",
-		"dir", dir,
-		"reason", reason,
-		"indexed_tweets", count,
+		"collections", collections,
+		"bookmarks", bookmarks,
 	)
 }
 
@@ -91,12 +83,6 @@ func (lg *Logger) InvalidRequest(reason string) {
 // FilesystemError reports a storage failure.
 func (lg *Logger) FilesystemError(op string, err error) {
 	lg.Slog().Error("filesystem error", "op", op, "error", err)
-}
-
-// IndexPersistWarning reports that the derived index could not be persisted
-// while the CSV write already succeeded (CSV remains authoritative).
-func (lg *Logger) IndexPersistWarning(err error) {
-	lg.Slog().Warn("index persistence failed; csv remains authoritative", "error", err)
 }
 
 // Shutdown reports that a termination signal was received.

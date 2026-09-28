@@ -119,7 +119,9 @@ describe("MediaLightbox — contents (LIGHT-01)", () => {
     expect(screen.getByTestId("lightbox-posted")).toHaveTextContent(
       "Posted Mar 12, 2026"
     )
-    expect(screen.getByTestId("lightbox-saved")).toHaveTextContent("Saved Apr 3")
+    expect(screen.getByTestId("lightbox-saved")).toHaveTextContent(
+      "Saved Apr 3"
+    )
     expect(screen.getByTestId("lightbox-collection")).toHaveTextContent(
       "Collection Linux"
     )
@@ -220,15 +222,18 @@ describe("MediaLightbox — the two control pairs (LIGHT-02/LIGHT-03)", () => {
     expect(
       screen.getByRole("button", { name: "Previous media" })
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Next media" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Next media" })
+    ).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Previous post" })
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Next post" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Close lightbox" })).toHaveAttribute(
-      "data-testid",
-      "lightbox-close"
-    )
+    expect(
+      screen.getByRole("button", { name: "Next post" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Close lightbox" })
+    ).toHaveAttribute("data-testid", "lightbox-close")
   })
 
   it("disables the media arrows at the ends of the open tweet", () => {
@@ -322,7 +327,9 @@ describe("MediaLightbox — the two control pairs (LIGHT-02/LIGHT-03)", () => {
 describe("MediaLightbox — keyboard (LIGHT-04)", () => {
   it("drives the media arrows with ArrowLeft and ArrowRight", async () => {
     const user = userEvent.setup()
-    const { onNextMedia, onPrevMedia, onNextPost } = renderLightbox({ index: 1 })
+    const { onNextMedia, onPrevMedia, onNextPost } = renderLightbox({
+      index: 1,
+    })
 
     await user.keyboard("{ArrowRight}")
     await user.keyboard("{ArrowLeft}")
@@ -445,14 +452,18 @@ describe("MediaLightbox — clamp and broken media (LIGHT-01)", () => {
     await user.click(screen.getByTestId("post-text-toggle"))
 
     expect(text.className).not.toContain("line-clamp")
-    expect(screen.getByTestId("post-text-toggle")).toHaveTextContent("Show less")
+    expect(screen.getByTestId("post-text-toggle")).toHaveTextContent(
+      "Show less"
+    )
   })
 
   it("keeps the panel intact when the lightbox image is broken", () => {
     renderLightbox({ index: 0 })
 
     fireEvent.error(
-      within(screen.getByTestId("lightbox-media-area")).getByTestId("media-image")
+      within(screen.getByTestId("lightbox-media-area")).getByTestId(
+        "media-image"
+      )
     )
 
     expect(screen.getByTestId("media-placeholder")).toBeInTheDocument()

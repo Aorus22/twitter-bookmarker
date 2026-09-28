@@ -6,9 +6,9 @@
  * `.planning/phases/02-gallery-http-api/02-VERIFICATION.md`.
  */
 
-/** One `*.csv` file in the storage directory. */
+/** One saved collection, identified by its slug. */
 export interface GalleryCollection {
-  filename: string
+  slug: string
   name: string
   post_count: number
   media_count: number
@@ -37,7 +37,7 @@ export interface GalleryCollectionListResponse {
   collections: GalleryCollection[]
 }
 
-/** `GET /api/gallery/collections/{filename}/posts` */
+/** `GET /api/gallery/collections/{slug}/posts` */
 export interface GalleryPostsResponse {
   items: GalleryPost[]
   /** Opaque cursor for the next page, or `null` at the end. */
@@ -47,10 +47,7 @@ export interface GalleryPostsResponse {
 
 /** The four sort modes the backend accepts (PRD-2 §33). */
 export type GallerySort =
-  | "saved_desc"
-  | "saved_asc"
-  | "tweet_desc"
-  | "tweet_asc"
+  "saved_desc" | "saved_asc" | "tweet_desc" | "tweet_asc"
 
 /**
  * Query parameters for the posts endpoint (PRD-2 §40).

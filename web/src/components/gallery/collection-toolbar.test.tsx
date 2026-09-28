@@ -46,7 +46,9 @@ function ControlledToolbar({
   )
 }
 
-function renderToolbar(overrides: Partial<Parameters<typeof CollectionToolbar>[0]> = {}) {
+function renderToolbar(
+  overrides: Partial<Parameters<typeof CollectionToolbar>[0]> = {}
+) {
   const props = {
     search: "",
     onSearchChange: vi.fn(),
@@ -65,10 +67,7 @@ describe("CollectionToolbar — controls (design spec §3.3)", () => {
     renderToolbar()
 
     const search = screen.getByTestId("collection-search")
-    expect(search).toHaveAttribute(
-      "placeholder",
-      "⌕ Search this collection…"
-    )
+    expect(search).toHaveAttribute("placeholder", "⌕ Search this collection…")
     expect(search.className).toContain("h-10")
     expect(search.className).toContain("w-[440px]")
     expect(search.className).toContain("rounded-sm")
@@ -135,7 +134,9 @@ describe("CollectionToolbar — controls (design spec §3.3)", () => {
     await user.click(screen.getByTestId("collection-filter"))
 
     expect(props.onFilterClick).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId("collection-filter-dot")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("collection-filter-dot")
+    ).not.toBeInTheDocument()
   })
 
   it("shows an active dot when a filter is applied", () => {
@@ -181,12 +182,7 @@ describe("CollectionToolbar — omitted mockup elements (design spec §7)", () =
   it("renders no topic pills", () => {
     renderToolbar()
 
-    for (const label of [
-      "Terminal",
-      "Tools",
-      "Self-hosting",
-      "Linux Tips",
-    ]) {
+    for (const label of ["Terminal", "Tools", "Self-hosting", "Linux Tips"]) {
       expect(
         screen.queryByRole("button", { name: label })
       ).not.toBeInTheDocument()

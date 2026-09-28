@@ -19,8 +19,7 @@ import {
  * boundary.
  */
 
-const params = (entries: Record<string, string>) =>
-  new URLSearchParams(entries)
+const params = (entries: Record<string, string>) => new URLSearchParams(entries)
 
 describe("gallery-query — defensive URL parsing (DISC-07)", () => {
   it("treats a URL with no params as the default view", () => {
@@ -31,7 +30,9 @@ describe("gallery-query — defensive URL parsing (DISC-07)", () => {
   })
 
   it("falls back to the default for an unknown or empty sort", () => {
-    expect(parseGalleryQuery(params({ sort: "newest" })).sort).toBe("saved_desc")
+    expect(parseGalleryQuery(params({ sort: "newest" })).sort).toBe(
+      "saved_desc"
+    )
     expect(parseGalleryQuery(params({ sort: "" })).sort).toBe("saved_desc")
   })
 
@@ -125,7 +126,10 @@ describe("gallery-query — request params (DISC-01, DISC-04, DISC-05)", () => {
   })
 
   it("omits an empty search entirely", () => {
-    const result = galleryQueryToPostsParams({ q: "   ", sort: "saved_desc" }, 30)
+    const result = galleryQueryToPostsParams(
+      { q: "   ", sort: "saved_desc" },
+      30
+    )
 
     expect(result.q).toBeUndefined()
   })
@@ -152,10 +156,7 @@ describe("gallery-query — request params (DISC-01, DISC-04, DISC-05)", () => {
   })
 
   it("omits a cleared field and an inverted range", () => {
-    const cleared = galleryQueryToPostsParams(
-      { q: "", sort: "saved_desc" },
-      30
-    )
+    const cleared = galleryQueryToPostsParams({ q: "", sort: "saved_desc" }, 30)
     expect(cleared.tweet_from).toBeUndefined()
     expect(cleared.saved_to).toBeUndefined()
 
@@ -176,14 +177,17 @@ describe("gallery-query — request params (DISC-01, DISC-04, DISC-05)", () => {
 describe("gallery-query — activity helpers", () => {
   it("reports an applied date filter for the Filter dot", () => {
     expect(
-      hasActiveDateFilters({ ...DEFAULT_GALLERY_QUERY, savedFrom: "2026-09-01" })
+      hasActiveDateFilters({
+        ...DEFAULT_GALLERY_QUERY,
+        savedFrom: "2026-09-01",
+      })
     ).toBe(true)
     expect(
       hasActiveDateFilters({ ...DEFAULT_GALLERY_QUERY, tweetTo: "2026-09-01" })
     ).toBe(true)
-    expect(hasActiveDateFilters({ ...DEFAULT_GALLERY_QUERY, q: "wayland" })).toBe(
-      false
-    )
+    expect(
+      hasActiveDateFilters({ ...DEFAULT_GALLERY_QUERY, q: "wayland" })
+    ).toBe(false)
     expect(
       hasActiveDateFilters({
         ...DEFAULT_GALLERY_QUERY,
@@ -195,7 +199,9 @@ describe("gallery-query — activity helpers", () => {
 
   it("treats search or dates as an active query for the empty state", () => {
     expect(hasActiveQuery(DEFAULT_GALLERY_QUERY)).toBe(false)
-    expect(hasActiveQuery({ ...DEFAULT_GALLERY_QUERY, q: "wayland" })).toBe(true)
+    expect(hasActiveQuery({ ...DEFAULT_GALLERY_QUERY, q: "wayland" })).toBe(
+      true
+    )
     expect(hasActiveQuery({ ...DEFAULT_GALLERY_QUERY, q: "   " })).toBe(false)
     expect(
       hasActiveQuery({ ...DEFAULT_GALLERY_QUERY, savedTo: "2026-09-27" })

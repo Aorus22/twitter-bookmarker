@@ -11,16 +11,16 @@ import {
   normalizeOrder,
   normalizeStore,
 } from "../src/shared/storage.ts";
-import { isValidFilename } from "../src/shared/filename.ts";
+import { isValidSlug } from "../src/shared/slug.ts";
 
 function category(id, name, order, extra = {}) {
-  return { id, name, filename: `${name.toLowerCase()}.csv`, color: "#4f46e5", order, ...extra };
+  return { id, name, slug: name.toLowerCase(), color: "#4f46e5", order, ...extra };
 }
 
 test("normalizeStore returns PRD defaults for empty/missing input", () => {
   for (const raw of [undefined, null, 0, "nope", [], {}]) {
     const store = normalizeStore(raw);
-    assert.equal(store.version, 1);
+    assert.equal(store.version, 2);
     assert.deepEqual(store.settings, DEFAULT_SETTINGS);
     assert.deepEqual(store.settings, { unbookmarkAfterSave: false, displayMode: "popover" });
     assert.deepEqual(store.categories, []);
@@ -32,14 +32,14 @@ test("normalizeStore keeps valid values and rejects invalid ones", () => {
     version: 99,
     settings: { unbookmarkAfterSave: true, displayMode: "inline" },
     categories: [
-      { id: "a", name: "Linux", filename: "linux.csv", color: "#ABCDEF", order: 0 },
-      { id: "b", name: "AI & LLM", filename: "not-valid.CSV", color: "red", order: 1 },
-      { id: "", name: "No id", filename: "x.csv", color: "#000000", order: 2 },
+      { id: "a", name: "Linux", slug: "linux", color: "#ABCDEF", order: 0 },
+      { id: "b", name: "AI & LLM", slug: "not-valid SLUG", color: "red", order: 1 },
+      { id: "", name: "No id", slug: "x", color: "#000000", order: 2 },
       { id: "d", name: "Read Later", order: 3 },
     ],
   });
 
-  assert.equal(store.version, 1);
+  assert.equal(store.version, 2);
   assert.deepEqual(store.settings, { unbookmarkAfterSave: true, displayMode: "inline" });
 
   assert.deepEqual(
@@ -48,18 +48,18 @@ test("normalizeStore keeps valid values and rejects invalid ones", () => {
     "entry without an id is dropped",
   );
   assert.equal(store.categories[0].color, "#abcdef", "colors are lowercased");
-  assert.equal(store.categories[1].filename, "ai-llm.csv", "invalid filename is recomputed from name");
+  assert.equal(store.categories[1].slug, "ai-llm", "invalid slug is recomputed from name");
   assert.equal(store.categories[1].color, DEFAULT_CATEGORY_COLOR, "invalid color falls back");
-  assert.equal(store.categories[2].filename, "read-later.csv", "missing filename is derived");
-  for (const c of store.categories) assert.ok(isValidFilename(c.filename));
+  assert.equal(store.categories[2].slug, "read-later", "missing slug is derived");
+  for (const c of store.categories) assert.ok(isValidSlug(c.slug));
 });
 
 test("normalizeStore normalizes order to 0..n-1", () => {
   const store = normalizeStore({
     categories: [
-      { id: "c", name: "C", filename: "c.csv", color: "#000000", order: 9 },
-      { id: "a", name: "A", filename: "a.csv", color: "#000000", order: 0 },
-      { id: "b", name: "B", filename: "b.csv", color: "#000000", order: 5 },
+      { id: "c", name: "C", slug: "c", color: "#000000", order: 9 },
+      { id: "a", name: "A", slug: "a", color: "#000000", order: 0 },
+      { id: "b", name: "B", slug: "b", color: "#000000", order: 5 },
     ],
   });
 
@@ -76,11 +76,62 @@ test("normalizeStore normalizes order to 0..n-1", () => {
 test("normalizeStore tie-breaks equal orders stably (insertion order wins)", () => {
   const store = normalizeStore({
     categories: [
-      { id: "first", name: "First", filename: "first.csv", color: "#000000", order: 0 },
-      { id: "second", name: "Second", filename: "second.csv", color: "#000000", order: 0 },
+      { id: "first", name: "First", slug: "first", color: "#000000", order: 0 },
+      { id: "second", name: "Second", slug: "second", color: "#000000", order: 0 },
     ],
   });
   assert.deepEqual(store.categories.map((c) => c.id), ["first", "second"]);
+});
+
+test("a v1 store whose categories carry `filename` migrates to `slug` losslessly", () => {
+  // This is the real upgrade path: chrome.storage.local holds a record written by
+  // the previous version of the extension. The derived value used to be
+  // `slugify(name) + ".csv"`, so recomputing it from the name reproduces exactly
+  // the same key — which is why nothing is read from the old field at all.
+  const legacy = [
+    { id: "a", name: "Linux", filename: "linux.csv", color: "#10b981", order: 0 },
+    { id: "b", name: "AI & LLM", filename: "ai-llm.csv", color: "#4f46e5", order: 1 },
+    { id: "c", name: "Read Later", filename: "read-later.csv", color: "#ef4444", order: 2 },
+    {
+      id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+      name: "!!!",
+      filename: "category-3f2504e0.csv",
+      color: "#0ea5e9",
+      order: 3,
+    },
+  ];
+  const store = normalizeStore({
+    version: 1,
+    settings: { unbookmarkAfterSave: true, displayMode: "inline" },
+    categories: legacy,
+  });
+
+  assert.equal(store.version, 2, "the record is rewritten at the current version");
+  assert.deepEqual(
+    store.categories.map((c) => c.slug),
+    ["linux", "ai-llm", "read-later", "category-3f2504e0"],
+    "every v1 filename maps onto the slug it was derived from",
+  );
+  // The stronger, mechanical form of the same claim: the migrated slug is exactly
+  // the old filename minus its extension, for every category including the
+  // empty-name fallback.
+  assert.deepEqual(
+    store.categories.map((c) => `${c.slug}.csv`),
+    legacy.map((c) => c.filename),
+    "migrating filename -> slug loses nothing",
+  );
+  assert.deepEqual(
+    store.categories.map((c) => c.name),
+    ["Linux", "AI & LLM", "Read Later", "!!!"],
+    "names and every other field survive the migration",
+  );
+  assert.deepEqual(store.categories.map((c) => c.color), ["#10b981", "#4f46e5", "#ef4444", "#0ea5e9"]);
+  assert.deepEqual(store.categories.map((c) => c.order), [0, 1, 2, 3]);
+  assert.deepEqual(store.settings, { unbookmarkAfterSave: true, displayMode: "inline" });
+  for (const c of store.categories) {
+    assert.equal(c.filename, undefined, "the old field is not carried over");
+    assert.ok(isValidSlug(c.slug));
+  }
 });
 
 test("normalizeOrder does not mutate its input", () => {

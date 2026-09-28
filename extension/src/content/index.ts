@@ -35,7 +35,7 @@ import type { UnbookmarkResult } from "./unbookmark.ts";
  */
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 
-/** Warning copy when the CSV write succeeded but X still holds the bookmark (PRD §38). */
+/** Warning copy when the save succeeded but X still holds the bookmark (PRD §38). */
 export function unbookmarkFailedToast(categoryName: string): string {
   return `Saved to ${categoryName}, but failed to remove from X bookmarks`;
 }
@@ -58,8 +58,9 @@ export interface SavedHookDeps {
  * The gate is deliberately first: with `unbookmarkAfterSave === false` the
  * native bookmark control is never queried, observed, or clicked (UNB-01).
  * When enabled, a `"failed"` verification or an unexpected throw emits the
- * warning toast and leaves CSV/index/`✓ Saved` untouched (UNB-03). Nothing in
- * this hook ever rolls back or re-enables controls, and it never rethrows.
+ * warning toast and leaves the saved record and `✓ Saved` untouched (UNB-03).
+ * Nothing in this hook ever rolls back or re-enables controls, and it never
+ * rethrows.
  */
 export function createSavedHook(deps: SavedHookDeps): (context: SavedTweetContext) => Promise<void> {
   return async (context: SavedTweetContext): Promise<void> => {

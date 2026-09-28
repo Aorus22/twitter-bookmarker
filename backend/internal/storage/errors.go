@@ -23,17 +23,3 @@ func (e *DuplicateError) Unwrap() error { return ErrDuplicate }
 
 // ErrDuplicate is the sentinel duplicate error.
 var ErrDuplicate = errors.New("duplicate tweet")
-
-// SchemaMismatchError marks a CSV file whose header predates the current
-// schema, i.e. one that still uses the pre-media six-column layout. The API
-// maps it to HTTP 500: the request itself was fine, the on-disk data needs the
-// one-off migration documented in Scripts/README.md of the data repository.
-type SchemaMismatchError struct {
-	Filename string
-	Found    string
-}
-
-func (e *SchemaMismatchError) Error() string {
-	return "csv " + e.Filename + " has an outdated header (" + e.Found +
-		"); run Scripts/migrate_schema.py before saving"
-}

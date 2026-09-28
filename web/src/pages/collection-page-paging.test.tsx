@@ -3,7 +3,12 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 
 import { CollectionPage } from "./collection-page"
-import { jsonResponse, makeCollection, makePost, stubGalleryFetch } from "@/test/fixtures"
+import {
+  jsonResponse,
+  makeCollection,
+  makePost,
+  stubGalleryFetch,
+} from "@/test/fixtures"
 import { MockIntersectionObserver } from "@/test/intersection-observer"
 
 /**
@@ -18,7 +23,7 @@ import { MockIntersectionObserver } from "@/test/intersection-observer"
  */
 
 const LINUX = makeCollection({
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux",
   post_count: 75,
   media_count: 3,
@@ -40,9 +45,9 @@ const PAGE_3 = ["five"]
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/collections/linux.csv"]}>
+    <MemoryRouter initialEntries={["/collections/linux"]}>
       <Routes>
-        <Route path="/collections/:filename" element={<CollectionPage />} />
+        <Route path="/collections/:slug" element={<CollectionPage />} />
       </Routes>
     </MemoryRouter>
   )
@@ -113,7 +118,9 @@ describe("CollectionPage — first-load and page-load affordances (SCROLL-02)", 
     expect(
       screen.getByRole("status", { name: "Loading posts" })
     ).toBeInTheDocument()
-    expect(screen.queryByTestId("gallery-bottom-loader")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("gallery-bottom-loader")
+    ).not.toBeInTheDocument()
 
     await act(async () => {
       resolvePage(page(PAGE_1, "c1", true))
@@ -122,7 +129,9 @@ describe("CollectionPage — first-load and page-load affordances (SCROLL-02)", 
     await screen.findByTestId("gallery-masonry")
     expect(screen.getAllByTestId("post-card")).toHaveLength(2)
     // The first page is not an "append": no bottom loader without a fetch.
-    expect(screen.queryByTestId("gallery-bottom-loader")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("gallery-bottom-loader")
+    ).not.toBeInTheDocument()
   })
 
   it("keeps the loaded posts mounted under a bottom loader while page two loads", async () => {
@@ -161,7 +170,9 @@ describe("CollectionPage — first-load and page-load affordances (SCROLL-02)", 
     await waitFor(() => {
       expect(screen.getAllByTestId("post-card")).toHaveLength(4)
     })
-    expect(screen.queryByTestId("gallery-bottom-loader")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("gallery-bottom-loader")
+    ).not.toBeInTheDocument()
     expect(cardUsernames()).toEqual([
       "@user-one",
       "@user-two",
@@ -248,9 +259,9 @@ describe("CollectionPage — sentinel-driven accumulation (SCROLL-01, SCROLL-03,
     expect(postsRequests(fetchMock)).toHaveLength(3)
     expect(postsRequests(fetchMock)[1]).toContain("cursor=c1")
     expect(postsRequests(fetchMock)[2]).toContain("cursor=c2")
-    expect(postsRequests(fetchMock).every((url) => url.includes("limit=30"))).toBe(
-      true
-    )
+    expect(
+      postsRequests(fetchMock).every((url) => url.includes("limit=30"))
+    ).toBe(true)
     // Order is stable across appends: each page follows the previous one.
     expect(cardUsernames()).toEqual([
       "@user-one",
@@ -294,17 +305,37 @@ describe("CollectionPage — sentinel-driven accumulation (SCROLL-01, SCROLL-03,
         cursorOf(url) === null
           ? jsonResponse({
               items: [
-                makePost({ tweet_id: "d1", username: "user-d1", text: "first d1" }),
-                makePost({ tweet_id: "d2", username: "user-d2", text: "first d2" }),
-                makePost({ tweet_id: "d3", username: "user-d3", text: "first d3" }),
+                makePost({
+                  tweet_id: "d1",
+                  username: "user-d1",
+                  text: "first d1",
+                }),
+                makePost({
+                  tweet_id: "d2",
+                  username: "user-d2",
+                  text: "first d2",
+                }),
+                makePost({
+                  tweet_id: "d3",
+                  username: "user-d3",
+                  text: "first d3",
+                }),
               ],
               next_cursor: "c1",
               has_more: true,
             })
           : jsonResponse({
               items: [
-                makePost({ tweet_id: "d3", username: "user-d3", text: "duplicate d3" }),
-                makePost({ tweet_id: "d4", username: "user-d4", text: "first d4" }),
+                makePost({
+                  tweet_id: "d3",
+                  username: "user-d3",
+                  text: "duplicate d3",
+                }),
+                makePost({
+                  tweet_id: "d4",
+                  username: "user-d4",
+                  text: "first d4",
+                }),
               ],
               next_cursor: null,
               has_more: false,
@@ -336,7 +367,8 @@ describe("CollectionPage — sentinel-driven accumulation (SCROLL-01, SCROLL-03,
       resolvePage2 = resolve
     })
     stubGalleryFetch({
-      posts: (url) => (cursorOf(url) === null ? page(PAGE_1, "c1", true) : pending),
+      posts: (url) =>
+        cursorOf(url) === null ? page(PAGE_1, "c1", true) : pending,
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
@@ -362,7 +394,9 @@ describe("CollectionPage — sentinel-driven accumulation (SCROLL-01, SCROLL-03,
   it("keeps the exact masonry measures while pages are appended", async () => {
     stubGalleryFetch({
       posts: (url) =>
-        cursorOf(url) === null ? page(PAGE_1, "c1", true) : page(PAGE_2, null, false),
+        cursorOf(url) === null
+          ? page(PAGE_1, "c1", true)
+          : page(PAGE_2, null, false),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
@@ -405,7 +439,9 @@ describe("CollectionPage — refetch policy (SCROLL-05)", () => {
   it("resets to page one on window focus without duplicating posts", async () => {
     const fetchMock = stubGalleryFetch({
       posts: (url) =>
-        cursorOf(url) === null ? page(PAGE_1, "c1", true) : page(PAGE_2, null, false),
+        cursorOf(url) === null
+          ? page(PAGE_1, "c1", true)
+          : page(PAGE_2, null, false),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
@@ -436,7 +472,9 @@ describe("CollectionPage — refetch policy (SCROLL-05)", () => {
     const scrollTo = vi.spyOn(window, "scrollTo")
     stubGalleryFetch({
       posts: (url) =>
-        cursorOf(url) === null ? page(PAGE_1, "c1", true) : page(PAGE_2, null, false),
+        cursorOf(url) === null
+          ? page(PAGE_1, "c1", true)
+          : page(PAGE_2, null, false),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 

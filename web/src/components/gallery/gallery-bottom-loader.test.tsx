@@ -26,9 +26,7 @@ describe("GalleryBottomLoader — polite bottom status (SCROLL-02, a11y)", () =>
   it("accepts a custom visually-hidden label", () => {
     render(<GalleryBottomLoader label="Fetching the next 30" />)
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Fetching the next 30"
-    )
+    expect(screen.getByRole("status")).toHaveTextContent("Fetching the next 30")
   })
 
   it("hides the spinner from the accessibility tree", () => {
@@ -45,8 +43,8 @@ describe("GalleryBottomLoader — polite bottom status (SCROLL-02, a11y)", () =>
 
     const loader = screen.getByTestId("gallery-bottom-loader")
     expect(loader).toHaveClass("py-6")
-    expect(loader.querySelectorAll("[data-testid='collection-card-skeleton']")).toHaveLength(
-      0
-    )
+    expect(
+      loader.querySelectorAll("[data-testid='collection-card-skeleton']")
+    ).toHaveLength(0)
   })
 })

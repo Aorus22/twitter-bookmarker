@@ -1,11 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { FilterControl } from "./filter-control"
-import {
-  DEFAULT_GALLERY_QUERY,
-  type GalleryQuery,
-} from "@/lib/gallery-query"
+import { DEFAULT_GALLERY_QUERY, type GalleryQuery } from "@/lib/gallery-query"
 
 /**
  * DISC-02 / DISC-03 — the `Filter` control: Popover at/above `md`, Sheet below

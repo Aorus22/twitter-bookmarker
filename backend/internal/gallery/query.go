@@ -1,12 +1,14 @@
 package gallery
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"twitter-bookmarker/internal/db"
 	"twitter-bookmarker/internal/storage"
 )
 
@@ -105,15 +107,27 @@ func (q Query) Normalize() (Query, error) {
 
 // Posts applies search, both date filters, sorting and cursor pagination to one
 // collection, in exactly that order, before any pagination happens (GAL-13).
-// The filename is validated and contained by storage.SafeJoin before any file
-// is opened (GAL-15).
-func (r *Reader) Posts(filename string, query Query) (Page, error) {
+//
+// The slug is validated by the read layer before it reaches the database
+// (GAL-15), and the filtering happens in Go rather than in SQL: the search is a
+// Unicode-aware case-insensitive substring match, which SQLite's ASCII-only
+// LIKE/lower() would silently narrow.
+func (r *Reader) Posts(slug string, query Query) (Page, error) {
 	normalized, err := query.Normalize()
 	if err != nil {
 		return Page{}, err
 	}
 
-	rows, err := r.readRows(filename)
+	conn, err := r.open()
+	if err != nil {
+		if errors.Is(err, db.ErrNoDatabase) {
+			return Page{}, fmt.Errorf("%w: %s", ErrCollectionNotFound, slug)
+		}
+		return Page{}, err
+	}
+	defer conn.Close()
+
+	rows, err := r.readRows(conn, slug)
 	if err != nil {
 		return Page{}, err
 	}

@@ -118,9 +118,7 @@ export function isFirstSlot(index: number, total: number): boolean {
 /** True when `index` is the last slot of a non-empty sequence. */
 export function isLastSlot(index: number, total: number): boolean {
   const count = normalizeCount(total)
-  return (
-    count > 0 && Number.isFinite(index) && Math.trunc(index) === count - 1
-  )
+  return count > 0 && Number.isFinite(index) && Math.trunc(index) === count - 1
 }
 
 /**
@@ -217,7 +215,7 @@ export function stepPostIndex(
 /**
  * At most this many media dots are rendered at once (design spec §3.5).
  *
- * Tweet media counts are unbounded in the CSV — a thread can carry dozens of
+ * Tweet media counts are unbounded in storage — a thread can carry dozens of
  * images — and a dot per image would become an unreadable bead necklace. Above
  * the limit the dots become a sliding window centred on the active media, the
  * usual carousel treatment; the exact position stays available to assistive

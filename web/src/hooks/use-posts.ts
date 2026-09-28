@@ -15,7 +15,7 @@ import type { GalleryCollection, GalleryPost, GallerySort } from "@/types"
 /**
  * Collection posts hook — first page plus cursor paging (PRD-2 §34/§40/§44).
  *
- * - One page-1 `GET /api/gallery/collections/{filename}/posts?limit=30&sort=…`
+ * - One page-1 `GET /api/gallery/collections/{slug}/posts?limit=30&sort=…`
  *   on mount and per `refetch()`; {@link UsePostsResult.loadMore} appends the
  *   next page with the **opaque** `next_cursor` echoed back verbatim.
  * - Pages accumulate in {@link UsePostsResult.posts}; an overlapping `tweet_id`
@@ -97,7 +97,7 @@ const EMPTY_POSTS_STATE = {
 }
 
 export function usePosts(
-  filename: string | undefined,
+  slug: string | undefined,
   options: UsePostsOptions = {}
 ): UsePostsResult {
   const {
@@ -116,7 +116,7 @@ export function usePosts(
   // The signature of the query this render wants. A change to any part of it
   // means the view's pages and cursor no longer belong to the current query.
   const requestKey = [
-    filename ?? "",
+    slug ?? "",
     effectiveLimit,
     sort,
     q ?? "",
@@ -135,7 +135,7 @@ export function usePosts(
     undefined
   )
 
-  const hasFilename = filename !== undefined && filename !== ""
+  const hasSlug = slug !== undefined && slug !== ""
 
   // Mirrors the committed state so `loadMore` can read the current cursor
   // without re-creating itself on every page.
@@ -155,8 +155,8 @@ export function usePosts(
   }, [])
 
   useEffect(() => {
-    if (!hasFilename) {
-      // No filename means no collection to load. This is derived into the
+    if (!hasSlug) {
+      // No slug means no collection to load. This is derived into the
       // returned state below rather than set from the effect body.
       return
     }
@@ -170,7 +170,7 @@ export function usePosts(
 
     let cancelled = false
 
-    fetchPosts(filename, {
+    fetchPosts(slug, {
       limit: effectiveLimit,
       sort,
       q,
@@ -216,7 +216,7 @@ export function usePosts(
           return
         }
         setCollection(
-          collections.find((entry) => entry.filename === filename) ?? undefined
+          collections.find((entry) => entry.slug === slug) ?? undefined
         )
       },
       () => {
@@ -232,8 +232,8 @@ export function usePosts(
       cancelled = true
     }
   }, [
-    hasFilename,
-    filename,
+    hasSlug,
+    slug,
     requestId,
     requestKey,
     effectiveLimit,
@@ -249,7 +249,7 @@ export function usePosts(
     const current = stateRef.current
 
     // The page-1 data for the current query must be committed before paging.
-    if (!hasFilename || current.key !== requestKey) {
+    if (!hasSlug || current.key !== requestKey) {
       return
     }
     // Stop at the end and on the defensive `has_more: true` + null-cursor case.
@@ -273,7 +273,7 @@ export function usePosts(
       prev.key === requestKey ? { ...prev, loadingMore: true } : prev
     )
 
-    fetchPosts(filename, {
+    fetchPosts(slug, {
       limit: effectiveLimit,
       sort,
       q,
@@ -317,8 +317,8 @@ export function usePosts(
       }
     )
   }, [
-    hasFilename,
-    filename,
+    hasSlug,
+    slug,
     requestKey,
     effectiveLimit,
     sort,
@@ -340,7 +340,7 @@ export function usePosts(
     }
   }, [refetch])
 
-  if (!hasFilename) {
+  if (!hasSlug) {
     return {
       posts: [],
       status: "error",

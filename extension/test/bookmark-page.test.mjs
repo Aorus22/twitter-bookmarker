@@ -153,7 +153,7 @@ test("loadSavedIndexFromServiceWorker tolerates ok:false and thrown messages", a
     runtime: {
       sendMessage: async () => ({
         ok: true,
-        index: { items: { 111: { url: "u", filename: "f.csv", saved_at: "t" }, 222: { url: "u", filename: "f.csv", saved_at: "t" } } },
+        index: { items: { 111: { url: "u", slug: "f", saved_at: "t" }, 222: { url: "u", slug: "f", saved_at: "t" } } },
       }),
     },
   };
@@ -275,8 +275,8 @@ test("refresh rerenders order and display mode on existing controls (PRD §51)",
   );
 
   const reordered = [
-    { id: "cat-linux", name: "Linux", filename: "linux.csv", color: "#10b981", order: 0 },
-    { id: "cat-ai", name: "AI", filename: "ai.csv", color: "#4f46e5", order: 1 },
+    { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 },
+    { id: "cat-ai", name: "AI", slug: "ai", color: "#4f46e5", order: 1 },
   ];
   refreshBookmarksPage(makeStore(reordered, "popover"));
 

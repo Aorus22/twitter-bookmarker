@@ -1,5 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom"
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { CollectionPage } from "./collection-page"
@@ -22,7 +28,7 @@ import {
  */
 
 const LINUX = makeCollection({
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux",
   post_count: 2,
   media_count: 1,
@@ -73,7 +79,7 @@ function renderPage(initialEntries: string[], initialIndex?: number) {
       <LocationProbe />
       <HistoryControls />
       <Routes>
-        <Route path="/collections/:filename" element={<CollectionPage />} />
+        <Route path="/collections/:slug" element={<CollectionPage />} />
       </Routes>
     </MemoryRouter>
   )
@@ -108,12 +114,13 @@ afterEach(() => {
 describe("CollectionPage — URL drives the request (DISC-01, DISC-04, DISC-05, DISC-07)", () => {
   it("sends the query, sort and both inclusive date ranges read from the URL", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
     renderPage([
-      "/collections/linux.csv?q=wayland&sort=tweet_asc&tweet_from=2026-01-01&tweet_to=2026-09-01&saved_from=2026-09-20&saved_to=2026-09-27",
+      "/collections/linux?q=wayland&sort=tweet_asc&tweet_from=2026-01-01&tweet_to=2026-09-01&saved_from=2026-09-20&saved_to=2026-09-27",
     ])
 
     await screen.findByTestId("gallery-masonry")
@@ -130,11 +137,12 @@ describe("CollectionPage — URL drives the request (DISC-01, DISC-04, DISC-05, 
 
   it("shows the active dot for a filtered URL without any interaction", async () => {
     stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv?saved_from=2026-09-20&saved_to=2026-09-27"])
+    renderPage(["/collections/linux?saved_from=2026-09-20&saved_to=2026-09-27"])
 
     await screen.findByTestId("gallery-masonry")
     expect(screen.getByTestId("collection-filter-dot")).toBeInTheDocument()
@@ -144,11 +152,12 @@ describe("CollectionPage — URL drives the request (DISC-01, DISC-04, DISC-05, 
 describe("CollectionPage — search (DISC-01)", () => {
   it("debounces the typed text into one request and into the URL", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv"])
+    renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
 
     const search = screen.getByTestId("collection-search")
@@ -163,7 +172,9 @@ describe("CollectionPage — search (DISC-01)", () => {
     })
     await waitFor(() => {
       expect(
-        postsRequests(fetchMock).some((url) => paramsOf(url).get("q") === "linux")
+        postsRequests(fetchMock).some(
+          (url) => paramsOf(url).get("q") === "linux"
+        )
       ).toBe(true)
     })
     expect(
@@ -175,11 +186,12 @@ describe("CollectionPage — search (DISC-01)", () => {
 describe("CollectionPage — filter panel (DISC-02, DISC-03, DISC-06)", () => {
   it("applies a manual Bookmarked range to the URL and the request", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv"])
+    renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
 
     fireEvent.click(screen.getByTestId("collection-filter"))
@@ -212,11 +224,12 @@ describe("CollectionPage — filter panel (DISC-02, DISC-03, DISC-06)", () => {
 
   it("seeds the Bookmarked range from a quick preset", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv"])
+    renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
 
     fireEvent.click(screen.getByTestId("collection-filter"))
@@ -236,19 +249,20 @@ describe("CollectionPage — filter panel (DISC-02, DISC-03, DISC-06)", () => {
     // A 7-day window: the two bounds are six days apart.
     const from = new Date(`${params.get("saved_from")}`)
     const to = new Date(`${params.get("saved_to")}`)
-    expect(to.getTime() - from.getTime()).toBeGreaterThan(5 * 24 * 60 * 60 * 1000)
+    expect(to.getTime() - from.getTime()).toBeGreaterThan(
+      5 * 24 * 60 * 60 * 1000
+    )
     expect(to.getTime() - from.getTime()).toBeLessThan(7 * 24 * 60 * 60 * 1000)
   })
 
   it("clears the applied filter through Reset + Apply", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage([
-      "/collections/linux.csv?saved_from=2026-09-20&saved_to=2026-09-27",
-    ])
+    renderPage(["/collections/linux?saved_from=2026-09-20&saved_to=2026-09-27"])
     await screen.findByTestId("gallery-masonry")
     expect(screen.getByTestId("collection-filter-dot")).toBeInTheDocument()
     const requestsBeforeReset = postsRequests(fetchMock).length
@@ -266,7 +280,9 @@ describe("CollectionPage — filter panel (DISC-02, DISC-03, DISC-06)", () => {
       expect(locationProbe()).not.toContain("saved_from")
     })
     await waitFor(() => {
-      expect(screen.queryByTestId("collection-filter-dot")).not.toBeInTheDocument()
+      expect(
+        screen.queryByTestId("collection-filter-dot")
+      ).not.toBeInTheDocument()
     })
     expect(
       postsRequests(fetchMock)
@@ -282,11 +298,12 @@ describe("CollectionPage — filter panel (DISC-02, DISC-03, DISC-06)", () => {
       configurable: true,
     })
     stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv"])
+    renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
 
     fireEvent.click(screen.getByTestId("collection-filter"))
@@ -300,11 +317,12 @@ describe("CollectionPage — filter panel (DISC-02, DISC-03, DISC-06)", () => {
 describe("CollectionPage — sort (DISC-06)", () => {
   it("pushes the chosen sort into the URL and refetches with it", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv"])
+    renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
 
     fireEvent.change(screen.getByTestId("collection-sort"), {
@@ -325,14 +343,12 @@ describe("CollectionPage — sort (DISC-06)", () => {
 
   it("restores the previous sort on Back and refetches", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(
-      ["/collections/linux.csv", "/collections/linux.csv?sort=tweet_asc"],
-      1
-    )
+    renderPage(["/collections/linux", "/collections/linux?sort=tweet_asc"], 1)
     await screen.findByTestId("gallery-masonry")
     expect(screen.getByTestId("collection-sort")).toHaveValue("tweet_asc")
 
@@ -358,16 +374,14 @@ describe("CollectionPage — empty states and reset (DISC-08, PRD-2 §77)", () =
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv?q=nothing-matches-this"])
+    renderPage(["/collections/linux?q=nothing-matches-this"])
 
     await screen.findByTestId("collection-filter-empty-state")
     expect(screen.getByTestId("collection-content")).toHaveAttribute(
       "data-view-state",
       "empty-filters"
     )
-    expect(
-      screen.getByText("No posts match your filters")
-    ).toBeInTheDocument()
+    expect(screen.getByText("No posts match your filters")).toBeInTheDocument()
     expect(screen.queryByTestId("post-card")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
@@ -383,11 +397,12 @@ describe("CollectionPage — empty states and reset (DISC-08, PRD-2 §77)", () =
   it("skips the scroll reset on mount and scrolls to the top on a query change", async () => {
     const scrollTo = vi.spyOn(window, "scrollTo")
     stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage(["/collections/linux.csv"])
+    renderPage(["/collections/linux"])
     await screen.findByTestId("gallery-masonry")
     expect(scrollTo).not.toHaveBeenCalled()
 

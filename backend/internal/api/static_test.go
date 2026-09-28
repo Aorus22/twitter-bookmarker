@@ -17,7 +17,6 @@ import (
 
 	"twitter-bookmarker/internal/api"
 	"twitter-bookmarker/internal/config"
-	"twitter-bookmarker/internal/index"
 	"twitter-bookmarker/internal/logging"
 	"twitter-bookmarker/internal/model"
 	"twitter-bookmarker/internal/storage"
@@ -66,12 +65,12 @@ func newServedServer(t *testing.T, dist string, log *logging.Logger) (http.Handl
 	if log == nil {
 		log = logging.Discard()
 	}
-	idx, err := index.LoadOrRebuild(dir, log)
+	store, err := storage.NewStore(dir, log)
 	if err != nil {
-		t.Fatalf("LoadOrRebuild() error = %v", err)
+		t.Fatalf("storage.NewStore() error = %v", err)
 	}
-	store := storage.NewStore(dir, idx, log)
-	return api.NewServer(store, idx, log), dir
+	t.Cleanup(func() { _ = store.Close() })
+	return api.NewServer(store, log), dir
 }
 
 // --------------------------------------------------------------- PROD-01
@@ -153,12 +152,12 @@ func TestSPAFallbackForClientRoutes(t *testing.T) {
 	dist := newDistFixture(t)
 	h, _ := newServedServer(t, dist, nil)
 
-	// The PRD's own example (/collections/linux.csv) plus deeper routes, plus
-	// the bare names the v1.0 suite calls "absent surfaces": with a built SPA
-	// they are client routes, not API endpoints.
+	// The PRD's own example (/collections/linux) plus deeper routes, plus the
+	// bare names the v1.0 suite calls "absent surfaces": with a built SPA they
+	// are client routes, not API endpoints.
 	for _, p := range []string{
-		"/collections/linux.csv",
-		"/collections/linux.csv/anything",
+		"/collections/linux",
+		"/collections/linux/anything",
 		"/anything/deep",
 		"/a/b/c/d/e/f",
 		"/settings",
@@ -207,7 +206,7 @@ func TestNonGetClientRouteIsNotTheSPA(t *testing.T) {
 	h, _ := newServedServer(t, dist, nil)
 
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		for _, p := range []string{"/collections/linux.csv", "/anything/deep", "/assets/index-YLi8pRYJ.js"} {
+		for _, p := range []string{"/collections/linux", "/anything/deep", "/assets/index-YLi8pRYJ.js"} {
 			rec := do(h, method, p, "")
 			if rec.Code != http.StatusMethodNotAllowed {
 				t.Errorf("%s %s status = %d, want 405", method, p, rec.Code)
@@ -280,7 +279,7 @@ func TestAPIPrecedenceOverStaticServing(t *testing.T) {
 	if strings.Contains(rec.Body.String(), `<div id="root">`) {
 		t.Errorf("gallery endpoint served the SPA shell: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"linux.csv"`) {
+	if !strings.Contains(rec.Body.String(), `"slug":"linux"`) {
 		t.Errorf("gallery body does not describe the seeded collection: %s", rec.Body.String())
 	}
 
@@ -346,13 +345,13 @@ func TestFrozenV1ContractsSurviveStaticServing(t *testing.T) {
 	if err := json.Unmarshal(saved.Body.Bytes(), &keys); err != nil {
 		t.Fatalf("decode save response %q: %v", saved.Body.String(), err)
 	}
-	for _, key := range []string{"status", "tweet_id", "url", "filename", "saved_at"} {
+	for _, key := range []string{"status", "tweet_id", "url", "slug", "saved_at"} {
 		if _, ok := keys[key]; !ok {
 			t.Errorf("save response missing %q: %v", key, keys)
 		}
 	}
-	if keys["status"] != "saved" || keys["filename"] != "linux.csv" {
-		t.Errorf("save response = %v, want status=saved filename=linux.csv", keys)
+	if keys["status"] != "saved" || keys["slug"] != "linux" {
+		t.Errorf("save response = %v, want status=saved slug=linux", keys)
 	}
 
 	// The duplicate path still answers 409 with the duplicate envelope.
@@ -373,7 +372,7 @@ func TestFrozenV1ContractsSurviveStaticServing(t *testing.T) {
 		{http.MethodDelete, "/health"},
 		{http.MethodGet, "/v1/bookmarks"},
 		{http.MethodPost, "/api/gallery/collections"},
-		{http.MethodDelete, "/api/gallery/collections/linux.csv/posts"},
+		{http.MethodDelete, "/api/gallery/collections/linux/posts"},
 	} {
 		rec := do(h, tc.method, tc.path, "")
 		if rec.Code != http.StatusMethodNotAllowed {
@@ -435,7 +434,7 @@ func TestMissingDistDegradesGracefully(t *testing.T) {
 	// Without a build there are no client routes, so unmatched paths keep the
 	// pre-SPA 404 contract for every method.
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
-		for _, p := range []string{"/nope", "/categories", "/settings", "/collections/linux.csv"} {
+		for _, p := range []string{"/nope", "/categories", "/settings", "/collections/linux"} {
 			rec := do(h, method, p, "")
 			if rec.Code != http.StatusNotFound {
 				t.Errorf("%s %s status = %d, want 404 while the SPA is unbuilt", method, p, rec.Code)

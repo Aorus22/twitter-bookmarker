@@ -15,7 +15,7 @@ type galleryCollectionsResponse struct {
 	Collections []gallery.Collection `json:"collections"`
 }
 
-// galleryPostsResponse is the GET /api/gallery/collections/{filename}/posts body
+// galleryPostsResponse is the GET /api/gallery/collections/{slug}/posts body
 // (PRD-2 §41). NextCursor is a pointer so an exhausted page serialises as JSON
 // null rather than an empty string.
 type galleryPostsResponse struct {
@@ -27,7 +27,7 @@ type galleryPostsResponse struct {
 // handleGalleryCollections serves the homepage collection list.
 //
 // The reader is rebuilt for every request (the constructor does no I/O), so a
-// changed TWITTER_BOOKMARKER_DIR and CSVs appended while the server runs are
+// changed TWITTER_BOOKMARKER_DIR and bookmarks saved while the server runs are
 // both visible without a restart (PRD-2 §39, §80.22).
 func (s *server) handleGalleryCollections(w http.ResponseWriter, _ *http.Request) {
 	reader, err := gallery.NewFromConfig(s.log)
@@ -65,8 +65,9 @@ func (s *server) handleGalleryPosts(w http.ResponseWriter, r *http.Request) {
 
 	// The path segment is handed to the read layer exactly as the mux unescaped
 	// it. Nothing here decodes, cleans or expands it, so `../` (arriving as
-	// %2e%2e%2f) and non-CSV names reach storage.SafeJoin and fail as 400.
-	filename := r.PathValue("filename")
+	// %2e%2e%2f) and any other non-slug value reaches storage.ValidateSlug and
+	// fails as 400.
+	slug := r.PathValue("slug")
 
 	values := r.URL.Query()
 	query, err := gallery.RawQuery{
@@ -84,9 +85,9 @@ func (s *server) handleGalleryPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := reader.Posts(filename, query)
+	page, err := reader.Posts(slug, query)
 	if err != nil {
-		// A malformed cursor, an unsafe filename and an unknown collection all
+		// A malformed cursor, an unsafe slug and an unknown collection all
 		// surface here; only the parse step would miss the cursor.
 		s.writeGalleryPostsError(w, err)
 		return
@@ -137,7 +138,7 @@ func (s *server) writeGalleryPostsError(w http.ResponseWriter, err error) {
 			Reason: invalid.Reason,
 		})
 	case errors.Is(err, gallery.ErrCollectionNotFound):
-		// The reason is fixed and never echoes the filename or the directory.
+		// The reason is fixed and never echoes the slug or the directory.
 		s.log.InvalidRequest("gallery collection not found")
 		writeJSON(w, http.StatusNotFound, model.ErrorResponse{
 			Status: "error",

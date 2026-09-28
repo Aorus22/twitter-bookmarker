@@ -81,11 +81,13 @@ describe("AppShell — brand and wordmark (HARD-03)", () => {
   it("still exposes the primary navigation and the theme control", () => {
     renderShell()
 
-    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Collections" })).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: /^Theme:/ })
+      screen.getByRole("navigation", { name: "Primary" })
     ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Collections" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Theme:/ })).toBeInTheDocument()
   })
 })

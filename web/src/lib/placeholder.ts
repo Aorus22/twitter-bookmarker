@@ -3,7 +3,7 @@
  *
  * Six `--grad-ph-*` pairs already exist in `src/index.css` (declared in Phase 3
  * and deliberately not duplicated here). A stable key — normally the collection
- * `filename` — is hashed with FNV-1a so a given collection always renders the
+ * `slug` — is hashed with FNV-1a so a given collection always renders the
  * same placeholder, while different collections spread across the palette.
  *
  * The gradient is applied as `background-image: var(--grad-ph-…)`, so no
@@ -48,7 +48,7 @@ export function placeholderGradientIndex(key: string): number {
   return (hash >>> 0) % PLACEHOLDER_GRADIENTS.length
 }
 
-/** Pick the placeholder gradient for a stable key (usually the filename). */
+/** Pick the placeholder gradient for a stable key (usually the slug). */
 export function pickPlaceholderGradient(key: string): PlaceholderGradient {
   const index = placeholderGradientIndex(key)
   return PLACEHOLDER_GRADIENTS[index] ?? PLACEHOLDER_GRADIENTS[0]

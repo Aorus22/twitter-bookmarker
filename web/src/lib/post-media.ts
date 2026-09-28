@@ -59,10 +59,7 @@ export function mediaGridClassName(layout: MediaLayout): string {
  * `single` keeps the image's natural aspect ratio and gives the *placeholder*
  * (and any broken image) a 160px minimum box so the card never collapses.
  */
-export function mediaTileClassName(
-  layout: MediaLayout,
-  index: number
-): string {
+export function mediaTileClassName(layout: MediaLayout, index: number): string {
   switch (layout.kind) {
     case "single":
       return "h-auto min-h-[160px] w-full rounded-md"

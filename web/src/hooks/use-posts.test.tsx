@@ -17,7 +17,7 @@ import {
  */
 
 const LINUX = makeCollection({
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux",
   post_count: 186,
   media_count: 220,
@@ -29,14 +29,14 @@ const POSTS = [
 ]
 
 describe("usePosts — first page (PRD-2 §40)", () => {
-  it("requests limit=30&sort=saved_desc for the URL-encoded filename", async () => {
+  it("requests limit=30&sort=saved_desc for the URL-encoded slug", async () => {
     const fetchMock = stubGalleryFetch({
       posts: () =>
         jsonResponse({ items: POSTS, next_cursor: "abc", has_more: true }),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("success")
@@ -44,7 +44,7 @@ describe("usePosts — first page (PRD-2 §40)", () => {
 
     const postUrl = String(fetchMock.mock.calls[0][0])
     expect(postUrl).toBe(
-      "/api/gallery/collections/linux.csv/posts?limit=30&sort=saved_desc"
+      "/api/gallery/collections/linux/posts?limit=30&sort=saved_desc"
     )
     expect(result.current.posts).toHaveLength(2)
     expect(result.current.posts[0].tweet_id).toBe("1")
@@ -53,10 +53,14 @@ describe("usePosts — first page (PRD-2 §40)", () => {
   it("keeps the cursor and has_more in state so Phase 7 can page without a rewrite", async () => {
     stubGalleryFetch({
       posts: () =>
-        jsonResponse({ items: POSTS, next_cursor: "next-page", has_more: true }),
+        jsonResponse({
+          items: POSTS,
+          next_cursor: "next-page",
+          has_more: true,
+        }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("success")
@@ -69,12 +73,15 @@ describe("usePosts — first page (PRD-2 §40)", () => {
 
   it("joins the header summary from the existing collections endpoint", async () => {
     stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () =>
-        jsonResponse({ collections: [makeCollection({ filename: "other.csv" }), LINUX] }),
+        jsonResponse({
+          collections: [makeCollection({ slug: "other" }), LINUX],
+        }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.collection).toBeDefined()
@@ -84,26 +91,24 @@ describe("usePosts — first page (PRD-2 §40)", () => {
     expect(result.current.collection?.post_count).toBe(186)
   })
 
-  it("URL-encodes a filename with spaces", async () => {
+  it("URL-encodes a slug with spaces", async () => {
     const fetchMock = stubGalleryFetch()
 
-    renderHook(() => usePosts("my folder.csv"))
+    renderHook(() => usePosts("my folder"))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalled()
     })
 
     expect(String(fetchMock.mock.calls[0][0])).toContain(
-      "/collections/my%20folder.csv/posts"
+      "/collections/my%20folder/posts"
     )
   })
 
   it("passes Phase 6 filter options through when supplied", async () => {
     const fetchMock = stubGalleryFetch()
 
-    renderHook(() =>
-      usePosts("linux.csv", { q: "wayland", sort: "tweet_asc" })
-    )
+    renderHook(() => usePosts("linux", { q: "wayland", sort: "tweet_asc" }))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalled()
@@ -121,7 +126,7 @@ describe("usePosts — failure handling (PRD-2 §61)", () => {
       posts: () => jsonResponse({ status: "error", reason: "not found" }, 404),
     })
 
-    const { result } = renderHook(() => usePosts("missing.csv"))
+    const { result } = renderHook(() => usePosts("missing"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("error")
@@ -136,7 +141,7 @@ describe("usePosts — failure handling (PRD-2 §61)", () => {
       posts: () => Promise.reject(new TypeError("Failed to fetch")),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("error")
@@ -149,11 +154,12 @@ describe("usePosts — failure handling (PRD-2 §61)", () => {
 
   it("keeps the posts when only the header summary fails", async () => {
     stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
       collections: () => jsonResponse({ status: "error", reason: "boom" }, 500),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("success")
@@ -163,7 +169,7 @@ describe("usePosts — failure handling (PRD-2 §61)", () => {
     expect(result.current.collection).toBeUndefined()
   })
 
-  it("errors on a missing filename without calling the API", async () => {
+  it("errors on a missing slug without calling the API", async () => {
     const fetchMock = stubGalleryFetch()
 
     const { result } = renderHook(() => usePosts(undefined))
@@ -180,10 +186,11 @@ describe("usePosts — failure handling (PRD-2 §61)", () => {
 describe("usePosts — refresh (PRD-2 §47/§78)", () => {
   it("refetches the first page when the window regains focus", async () => {
     const fetchMock = stubGalleryFetch({
-      posts: () => jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+      posts: () =>
+        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("success")
@@ -208,7 +215,7 @@ describe("usePosts — a query change resets the pages (PRD-2 §77, DISC-08)", (
     })
 
     const { result, rerender } = renderHook(
-      ({ q }: { q: string | undefined }) => usePosts("linux.csv", { q }),
+      ({ q }: { q: string | undefined }) => usePosts("linux", { q }),
       { initialProps: { q: undefined as string | undefined } }
     )
 
@@ -246,7 +253,7 @@ describe("usePosts — a query change resets the pages (PRD-2 §77, DISC-08)", (
     vi.stubGlobal("fetch", fetchMock)
 
     const { result, rerender } = renderHook(
-      ({ q }: { q: string }) => usePosts("linux.csv", { q }),
+      ({ q }: { q: string }) => usePosts("linux", { q }),
       { initialProps: { q: "first" } }
     )
 
@@ -321,7 +328,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
             }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("success")
@@ -357,7 +364,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
   it("keeps the first page size within the API maximum", async () => {
     const fetchMock = stubGalleryFetch()
 
-    renderHook(() => usePosts("linux.csv", { limit: 500 }))
+    renderHook(() => usePosts("linux", { limit: 500 }))
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalled()
@@ -382,7 +389,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
             }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
@@ -413,7 +420,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
         }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
@@ -445,7 +452,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
           : pending,
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
@@ -499,7 +506,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
             }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
@@ -537,7 +544,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
             }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
@@ -585,7 +592,7 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
     })
 
     const { result, rerender } = renderHook(
-      ({ q }: { q: string | undefined }) => usePosts("linux.csv", { q }),
+      ({ q }: { q: string | undefined }) => usePosts("linux", { q }),
       { initialProps: { q: undefined as string | undefined } }
     )
     await waitFor(() => {
@@ -633,7 +640,7 @@ describe("usePosts — refresh resets paging, nothing polls (SCROLL-05)", () => 
             }),
     })
 
-    const { result } = renderHook(() => usePosts("linux.csv"))
+    const { result } = renderHook(() => usePosts("linux"))
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
@@ -671,7 +678,7 @@ describe("usePosts — refresh resets paging, nothing polls (SCROLL-05)", () => 
           }),
       })
 
-      const { result } = renderHook(() => usePosts("linux.csv"))
+      const { result } = renderHook(() => usePosts("linux"))
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)

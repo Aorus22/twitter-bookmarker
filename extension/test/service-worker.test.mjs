@@ -67,7 +67,7 @@ test("HEALTH_CHECK resolves { ok, connected } from GET /health", async () => {
 });
 
 test("GET_SAVED_INDEX resolves the parsed index", async () => {
-  const body = { items: { 123456: { url: "u", filename: "linux.csv", saved_at: "t" } } };
+  const body = { items: { 123456: { url: "u", slug: "linux", saved_at: "t" } } };
   captureFetch(() => jsonResponse(200, body));
 
   const { response } = dispatch({ type: "GET_SAVED_INDEX" });
@@ -85,7 +85,8 @@ test("GET_SAVED_INDEX resolves a typed backend_unavailable failure instead of th
 
 test("SAVE_TWEET forwards the payload and resolves 201/409/5xx to typed shapes", async () => {
   const payload = {
-    filename: "linux.csv",
+    slug: "linux",
+    name: "Linux",
     tweet: {
       url: "https://x.com/foo/status/123456",
       media: ["https://pbs.twimg.com/media/AAA.jpg"],
@@ -99,7 +100,7 @@ test("SAVE_TWEET forwards the payload and resolves 201/409/5xx to typed shapes",
     status: "saved",
     tweet_id: "123456",
     url: payload.tweet.url,
-    filename: "linux.csv",
+    slug: "linux",
     saved_at: "2026-09-27T01:05:00Z",
   };
 
@@ -123,7 +124,7 @@ test("SAVE_TWEET forwards the payload and resolves 201/409/5xx to typed shapes",
     error: "internal",
   });
 
-  captureFetch(() => jsonResponse(400, { error: "bad filename" }));
+  captureFetch(() => jsonResponse(400, { error: "bad slug" }));
   assert.deepEqual(await dispatch({ type: "SAVE_TWEET", payload }).response, {
     ok: false,
     error: "invalid_request",

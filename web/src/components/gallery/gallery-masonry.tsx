@@ -162,7 +162,8 @@ export function GalleryMasonry({
     }
 
     const measuredTotal = memory.heights.reduce(
-      (sum, height) => sum + (Number.isFinite(height) && height > 0 ? height : 0),
+      (sum, height) =>
+        sum + (Number.isFinite(height) && height > 0 ? height : 0),
       0
     )
     const estimatedHeight =

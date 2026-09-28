@@ -15,8 +15,8 @@
  * saving ──extraction ──▶ idle    (controls restored, error toast "Could not read tweet data")
  * ```
  *
- * No path in this module unbookmarks, rolls back CSV data, or sends a partial
- * record. `onSaved` is invoked only after a confirmed `201`; Phase 5 owns the
+ * No path in this module unbookmarks, rolls back a saved record, or sends a
+ * partial record. `onSaved` is invoked only after a confirmed `201`; Phase 5 owns the
  * unbookmark click behind it.
  */
 
@@ -116,7 +116,8 @@ export function createSaveController(options: SaveControllerOptions): OrganizerC
 
   async function save(category: Category, article: HTMLElement, tweetId: string, tweet: ExtractedTweet): Promise<void> {
     const payload: SaveRequest = {
-      filename: category.filename,
+      slug: category.slug,
+      name: category.name,
       tweet: {
         url: tweet.url,
         media: tweet.media ?? [],
@@ -142,7 +143,7 @@ export function createSaveController(options: SaveControllerOptions): OrganizerC
       // Ordering is part of the contract (PRD §4.2, §37): the tweet is already
       // persisted and rendered as `✓ Saved` *before* any unbookmark is even
       // attempted. The persisted state is never touched again below, so the
-      // window between CSV success and an unbookmark failure can never alter it.
+      // window between save success and an unbookmark failure can never alter it.
       setSaved(tweetId);
       toast("success", savedToast(category.name));
 

@@ -26,11 +26,7 @@ import {
  */
 
 /** `[2 media, 0 media (text-only), 1 media]` — the canonical mixed dataset. */
-const MIXED = [
-  { media: ["a1", "a2"] },
-  { media: [] },
-  { media: ["c1"] },
-]
+const MIXED = [{ media: ["a1", "a2"] }, { media: [] }, { media: ["c1"] }]
 
 describe("flattenMediaSlots — the flattened sequence (LIGHT-03)", () => {
   it("walks a post's media in order then continues into the next post", () => {
@@ -230,10 +226,16 @@ describe("stepPostIndex — between tweets, skipping the text-only ones", () => 
   it("never lands on a text-only post in either direction", () => {
     // Post 2 -> post 4 (post 3 has no media); post 2 -> post 0 (post 1 has none).
     const forward = stepPostIndex(3, SPARSE_SLOTS, "next")
-    expect(slotAt(SPARSE_SLOTS, forward)).toEqual({ postIndex: 4, mediaIndex: 0 })
+    expect(slotAt(SPARSE_SLOTS, forward)).toEqual({
+      postIndex: 4,
+      mediaIndex: 0,
+    })
 
     const backward = stepPostIndex(3, SPARSE_SLOTS, "prev")
-    expect(slotAt(SPARSE_SLOTS, backward)).toEqual({ postIndex: 0, mediaIndex: 0 })
+    expect(slotAt(SPARSE_SLOTS, backward)).toEqual({
+      postIndex: 0,
+      mediaIndex: 0,
+    })
   })
 
   it("clamps at both loaded edges instead of wrapping", () => {

@@ -12,10 +12,7 @@ import type { GalleryFilterDates } from "@/lib/gallery-query"
  */
 
 export type QuickRangeId =
-  | "today"
-  | "last-7-days"
-  | "last-30-days"
-  | "this-year"
+  "today" | "last-7-days" | "last-30-days" | "this-year"
 
 export interface QuickRangePreset {
   id: QuickRangeId

@@ -1,9 +1,6 @@
 import { ClampedPostText } from "@/components/gallery/clamped-post-text"
 import { displayHandle, formatLightboxMeta } from "@/lib/post-meta"
-import {
-  LIGHTBOX_CLOSE_LABEL,
-  OPEN_ON_X_LABEL,
-} from "@/lib/messages"
+import { LIGHTBOX_CLOSE_LABEL, OPEN_ON_X_LABEL } from "@/lib/messages"
 import type { GalleryPost } from "@/types"
 
 /**
@@ -26,7 +23,7 @@ import type { GalleryPost } from "@/types"
  */
 export interface LightboxInfoPanelProps {
   post: GalleryPost
-  /** Backend collection `DisplayName` — never the filename. */
+  /** Backend collection `DisplayName` — never the slug. */
   collectionName: string
   /** Closes the lightbox (the `×` control). */
   onClose: () => void
@@ -56,7 +53,7 @@ export function LightboxInfoPanel({
         data-testid="lightbox-close"
         aria-label={LIGHTBOX_CLOSE_LABEL}
         onClick={onClose}
-        className="absolute top-4 right-4 flex size-8 items-center justify-center rounded-sm text-[22px] leading-none font-medium text-muted outline-none transition-colors hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="absolute top-4 right-4 flex size-8 items-center justify-center rounded-sm text-[22px] leading-none font-medium text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         ×
       </button>
@@ -90,7 +87,7 @@ export function LightboxInfoPanel({
         href={post.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="mt-auto flex h-[42px] w-full items-center justify-center rounded-sm border border-border bg-surface text-[12px] leading-[1.4] font-semibold text-ink outline-none transition-colors hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="mt-auto flex h-[42px] w-full items-center justify-center rounded-sm border border-border bg-surface text-[12px] leading-[1.4] font-semibold text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         {OPEN_ON_X_LABEL}
       </a>

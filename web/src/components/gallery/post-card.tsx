@@ -18,8 +18,8 @@ import type { GalleryPost } from "@/types"
  *      panel from `TextPostCard` when `media` is empty. With `onOpenMedia` each
  *      tile is a named, focusable lightbox trigger (Phase 8, LIGHT-01);
  *   2. avatar `28×28` r14 (deterministic gradient seeded from `username`; the
- *      CSV has no avatar URL, spec §5) + author Inter SemiBold 11 + `@username`
- *      Inter Regular 9 muted. The row is inset 4px inside the 10px padding, which
+ *      stored post has no avatar URL, spec §5) + author Inter SemiBold 11 +
+ *      `@username` Inter Regular 9 muted. The row is inset 4px inside the 10px padding, which
  *      puts the avatar at x=14 and the author at x=50 exactly as Figma measures;
  *   3. body text Inter Regular 11 ink, 264 wide, 12px below the header row,
  *      with the controlled clamp + `Show more` (COLL-08);
@@ -105,7 +105,7 @@ export function PostCard({ post, now, onOpenMedia }: PostCardProps) {
         href={post.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="mt-1.5 w-fit rounded-sm px-1 text-[10px] leading-[1.4] font-semibold text-ink outline-none transition-colors hover:text-accent focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="mt-1.5 w-fit rounded-sm px-1 text-[10px] leading-[1.4] font-semibold text-ink transition-colors outline-none hover:text-accent focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         {OPEN_ON_X_LABEL}
       </a>

@@ -13,7 +13,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { FILENAME_PATTERN, isValidFilename, slugifyFilename } from "../src/shared/filename.ts";
+import { SLUG_PATTERN, isValidSlug, slugify } from "../src/shared/slug.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "dist");
@@ -101,30 +101,30 @@ async function verifyManifest() {
 function verifySlug() {
   const id = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
 
-  assert.equal(slugifyFilename("Linux", id), "linux.csv");
-  pass("slug: Linux -> linux.csv");
+  assert.equal(slugify("Linux", id), "linux");
+  pass("slug: Linux -> linux");
 
-  assert.equal(slugifyFilename("AI & LLM", id), "ai-llm.csv");
-  pass("slug: AI & LLM -> ai-llm.csv");
+  assert.equal(slugify("AI & LLM", id), "ai-llm");
+  pass("slug: AI & LLM -> ai-llm");
 
-  assert.equal(slugifyFilename("Read Later", id), "read-later.csv");
-  pass("slug: Read Later -> read-later.csv");
+  assert.equal(slugify("Read Later", id), "read-later");
+  pass("slug: Read Later -> read-later");
 
-  const fallback = slugifyFilename("!!!", id);
-  assert.equal(fallback, "category-3f2504e0.csv");
-  assert.match(fallback, FILENAME_PATTERN);
-  assert.ok(isValidFilename(fallback));
-  pass(`slug fallback: "!!!" -> ${fallback} (matches ${FILENAME_PATTERN})`);
+  const fallback = slugify("!!!", id);
+  assert.equal(fallback, "category-3f2504e0");
+  assert.match(fallback, SLUG_PATTERN);
+  assert.ok(isValidSlug(fallback));
+  pass(`slug fallback: "!!!" -> ${fallback} (matches ${SLUG_PATTERN})`);
 
-  const pathTraversal = slugifyFilename("../../etc/passwd", id);
-  assert.match(pathTraversal, FILENAME_PATTERN);
+  const pathTraversal = slugify("../../etc/passwd", id);
+  assert.match(pathTraversal, SLUG_PATTERN);
   pass(`slug safety: "../../etc/passwd" -> ${pathTraversal}`);
 }
 
 async function verifyPopupCopy() {
   const popupJs = await readFile(path.join(DIST, "popup/popup.js"), "utf8");
   assert.ok(popupJs.includes("Delete category \""));
-  assert.ok(popupJs.includes("Existing CSV data will not be deleted."));
+  assert.ok(popupJs.includes("Existing bookmarks will not be deleted."));
   pass("built popup bundle contains the exact delete-confirmation copy");
 
   const popupHtml = await readFile(path.join(DIST, "popup/popup.html"), "utf8");
@@ -134,6 +134,32 @@ async function verifyPopupCopy() {
   assert.ok(popupHtml.includes("Popover"));
   assert.ok(popupHtml.includes("Inline"));
   pass("built popup markup contains the empty state, add-category, and settings rows");
+}
+
+/**
+ * Prove every asset the popup stylesheet pulls in exists in `dist/`.
+ *
+ * The popup's typography is self-hosted (no CDN), so a missing `.woff2` would
+ * silently fall back to a system font. `verifyManifest` only walks the HTML's
+ * `src`/`href`; `@font-face` urls live in the CSS, so they need this pass.
+ */
+async function verifyPopupAssets() {
+  const css = await readFile(path.join(DIST, "popup/popup.css"), "utf8");
+
+  const urls = [...css.matchAll(/url\((?:"|')?([^"')]+)(?:"|')?\)/g)]
+    .map((match) => match[1].trim())
+    .filter((value) => !/^(data:|https?:|#)/.test(value));
+  assert.ok(urls.length >= 3, "popup.css should reference the self-hosted font files");
+  for (const url of urls) {
+    await exists(path.posix.join("popup", url));
+    pass(`popup.css reference exists: dist/popup/${url}`);
+  }
+
+  assert.ok(css.includes("@font-face"), "popup.css must declare @font-face");
+  for (const family of ["Inter Variable", "Playfair Display"]) {
+    assert.ok(css.includes(family), `popup.css is missing the ${family} @font-face`);
+  }
+  pass("popup.css declares the self-hosted Inter + Playfair families");
 }
 
 /** Statically prove the popup modules and the popup markup agree on ids/classes. */
@@ -157,7 +183,7 @@ async function verifyPopupWiring() {
     "category-color",
     "category-name",
     "category-name-input",
-    "category-filename",
+    "category-slug",
     "category-rename",
     "category-delete",
     "drag-handle",
@@ -218,6 +244,7 @@ try {
   await verifyManifest();
   verifySlug();
   await verifyPopupCopy();
+  await verifyPopupAssets();
   await verifyPopupWiring();
   await verifySettingsWiring();
   await verifyBundleFormats();

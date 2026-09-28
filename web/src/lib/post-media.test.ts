@@ -14,7 +14,9 @@ describe("selectMediaLayout (PRD-2 §20, design spec §3.3)", () => {
   it("uses a single natural-aspect tile for one media", () => {
     expect(selectMediaLayout(1)).toEqual({ kind: "single", columns: 1 })
     expect(mediaTileClassName(selectMediaLayout(1), 0)).toContain("h-auto")
-    expect(mediaTileClassName(selectMediaLayout(1), 0)).toContain("min-h-[160px]")
+    expect(mediaTileClassName(selectMediaLayout(1), 0)).toContain(
+      "min-h-[160px]"
+    )
   })
 
   it("splits two media 50/50 side by side", () => {

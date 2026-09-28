@@ -65,7 +65,7 @@ export function ClampedPostText({
             setExpanded((current) => !current)
           }}
           className={cn(
-            "mt-1.5 rounded-sm text-[10px] leading-[1.4] font-semibold outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+            "mt-1.5 rounded-sm text-[10px] leading-[1.4] font-semibold transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
             variant === "quote"
               ? "text-white/90 hover:text-white"
               : "text-accent hover:text-ink"

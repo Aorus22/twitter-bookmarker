@@ -4,9 +4,9 @@ milestone: v2.0
 milestone_name: Local Web Gallery
 status: Awaiting next milestone
 stopped_at: Phase 10 complete — all phases complete
-last_updated: "2026-09-27T17:18:43.184Z"
+last_updated: "2026-09-28T13:16:51Z"
 last_activity: 2026-09-28
-last_activity_desc: Milestone v2.0 completed and archived
+last_activity_desc: Storage migrated from per-category CSVs + index.json to one SQLite database; docs updated
 state_head: 2e60204ec4baa91a7fd3f72ddabc2b5a32c74453
 progress:
   total_phases: 10
@@ -24,7 +24,7 @@ current_phase_name: Hardening, Accessibility & Responsive
 
 See: .planning/PROJECT.md (updated 2026-09-28)
 
-**Core value:** A categorized tweet is durably persisted to CSV before anything else happens — CSV is the source of truth, and nothing is ever unbookmarked before the CSV write succeeds. The Phase 2 gallery is a read-only projection of that CSV and may never become a second source of truth.
+**Core value:** A categorized tweet is durably persisted to the SQLite database before anything else happens — the database is the single source of truth, and nothing is ever unbookmarked before the write succeeds. The Phase 2 gallery is a read-only projection of that database and may never become a second source of truth; there is no derived index or cache.
 **Current focus:** None — v2.0 shipped and archived; the next milestone starts at Phase 11
 
 ## Current Position
@@ -74,7 +74,8 @@ Recent decisions affecting current work:
 - [v2.0 Bootstrap]: Web design authority is the Figma page `Gallery Mockups v2 — Editorial`, captured in `docs/design/phase2-design-spec.md`; the page-1 neutral variant is superseded.
 - [v2.0 Bootstrap]: Discuss skipped (`workflow.skip_discuss=true`); each phase's `NN-CONTEXT.md` is authored from the PRD + design spec and is authoritative.
 - [Phase 1]: Malformed cursor is rejected by `Reader.Posts` as a `*storage.ValidationError` (not by `RawQuery.Parse`) — Phase 2 must map `Posts` errors to 400 too. `limit=0` is only rejected via `RawQuery.Parse`, so the HTTP layer must build queries through `RawQuery.Parse`.
-- [Phase 1]: Two defects in the orchestrator's fixture/acceptance harness were found and fixed before Phase 2 (invalid CSV quoting for `media`; inverted `tweet_desc` expectation).
+- [Phase 1]: Two defects in the orchestrator's fixture/acceptance harness were found and fixed before Phase 2 (invalid quoting for the `media` field in the Phase 1 fixture; inverted `tweet_desc` expectation).
+- [post-v2.0 storage]: One CSV per category plus a derived `index.json` was replaced by one SQLite database (`tw-bookmarker.db`, schema version 1 in `PRAGMA user_version`). The backend has no CSV awareness; the one-time CSV→SQLite migration lives in the data repository (`Scripts/migrate_to_sqlite.py`). See `docs/design/sqlite-migration.md` and PROJECT.md Key Decisions.
 
 ### Pending Todos
 

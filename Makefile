@@ -14,16 +14,22 @@
 #   make clean          remove build outputs (never touches user data)
 #   make clean-storage  DESTRUCTIVE: delete the storage directory
 #
-# `clean` never deletes user CSV/index data; only `clean-storage` does.
+# `clean` never deletes user data; only `clean-storage` does.
 #
-# Where the CSVs live: `make run` passes TWITTER_BOOKMARKER_DIR to the server, so
-# the location is a property of this Makefile invocation and never needs a shell
-# profile. The value is resolved in this order:
+# Where the database lives: `make run` passes TWITTER_BOOKMARKER_DIR to the server,
+# so the location is a property of this Makefile invocation and never needs a shell
+# profile. The server stores everything in <dir>/tw-bookmarker.db and owns nothing
+# else in that directory. The value is resolved in this order:
 #
 #   1. `make run TWITTER_BOOKMARKER_DIR=/somewhere`
 #   2. `.env.local` (gitignored, so a personal path is never committed):
 #          TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 #   3. the historical default, $(HOME)/.twitter-bookmarker
+#
+# If the directory was migrated from the CSV era, it also holds a read-only
+# `backup/` folder with the original CSVs. The server never reads or writes it.
+# That migration is not a backend concern and has no Makefile target: the scripts
+# that perform it live with the data they migrate.
 #
 # Where the built web app lives: `make run` and `make dev-backend` pass
 # TWITTER_BOOKMARKER_WEB_DIR=$(WEB_DIR) so the server finds the SPA no matter
@@ -58,7 +64,9 @@ build: backend extension web ## Build the server binary, the loadable extension 
 
 backend: ## Build only the Go server binary.
 	mkdir -p backend/bin
-	cd backend && go build -o bin/twitter-bookmarker-server ./cmd/server
+	# CGO_ENABLED=0 keeps the binary pure-Go: modernc.org/sqlite needs no cgo, and a
+	# static build is what makes the released artifact portable.
+	cd backend && CGO_ENABLED=0 go build -o bin/twitter-bookmarker-server ./cmd/server
 
 extension: ## Build only the loadable extension dist/.
 	cd extension && npm ci && npm run build
@@ -118,19 +126,21 @@ lint: ## Fail on unformatted Go, vet errors, lint errors, or extension/web type 
 	cd web && pnpm run typecheck
 	cd web && pnpm run lint
 
-clean: ## Remove build outputs. User CSV/index data is never touched.
+clean: ## Remove build outputs. User data is never touched.
 	rm -rf backend/bin extension/dist web/dist
 
-clean-storage: ## DESTRUCTIVE: delete the storage directory (all CSVs + index).
+clean-storage: ## DESTRUCTIVE: delete the storage directory (database + backups).
 	@echo ""
 	@echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 	@echo "!!  DESTRUCTIVE COMMAND                                             !!"
-	@echo "!!  This permanently deletes EVERY category CSV and the derived     !!"
-	@echo "!!  index under:                                                   !!"
+	@echo "!!  This permanently deletes the bookmark database under:           !!"
 	@echo "!!      $(STORAGE_DIR)/"
 	@echo "!!                                                                  !!"
-	@echo "!!  Those CSVs are the durable source of truth and are not backed   !!"
-	@echo "!!  up anywhere else. There is no undo.                             !!"
+	@echo "!!  tw-bookmarker.db is the durable source of truth. If this dir    !!"
+	@echo "!!  was migrated from the CSV era, backup/ inside it holds the only !!"
+	@echo "!!  copy of the original CSVs and is deleted too.                   !!"
+	@echo "!!                                                                  !!"
+	@echo "!!  Nothing here is backed up anywhere else. There is no undo.      !!"
 	@echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 	@echo ""
 	@echo "Contents about to be deleted:"

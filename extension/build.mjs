@@ -5,7 +5,8 @@
 //   src/content/index.ts             -> dist/content/content.js           (iife, content script)
 //   src/popup/popup.ts               -> dist/popup/popup.js               (iife, popup page)
 //
-// Static assets copied verbatim into dist/: manifest.json, popup.html, popup.css.
+// Static assets copied verbatim into dist/: manifest.json, popup.html, popup.css,
+// and the self-hosted popup font subsets.
 //
 // Usage:
 //   node build.mjs           # clean + one-shot build
@@ -43,6 +44,17 @@ const STATIC_ASSETS = [
   ["manifest.json", "manifest.json"],
   ["src/popup/popup.html", "popup/popup.html"],
   ["src/popup/popup.css", "popup/popup.css"],
+  // Self-hosted popup fonts (v2 Editorial typography). Vendored woff2 subsets
+  // so the popup never reaches a CDN — see popup.css `@font-face`.
+  ["src/popup/fonts/inter-latin-wght-normal.woff2", "popup/fonts/inter-latin-wght-normal.woff2"],
+  [
+    "src/popup/fonts/playfair-display-latin-400-normal.woff2",
+    "popup/fonts/playfair-display-latin-400-normal.woff2",
+  ],
+  [
+    "src/popup/fonts/playfair-display-latin-700-normal.woff2",
+    "popup/fonts/playfair-display-latin-700-normal.woff2",
+  ],
 ];
 
 async function copyStaticAssets() {

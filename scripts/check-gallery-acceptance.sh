@@ -2,8 +2,9 @@
 # check-gallery-acceptance.sh — independent orchestrator check of PRD-2 §80
 # (backend acceptance criteria) and the §81/§82 integration surface.
 #
-# Builds the server, seeds a fixture, runs the server against it, and asserts the
-# documented API behaviour over real HTTP. This is deliberately NOT the project's
+# Builds the server, seeds a tw-bookmarker.db fixture (written by python3's own
+# sqlite3 module, never by the Go code under test), runs the server against it,
+# and asserts the documented API behaviour over real HTTP. This is deliberately NOT the project's
 # own test suite: it re-derives the acceptance criteria from the PRD so a passing
 # `go test` cannot mask a contract mismatch.
 #
@@ -78,6 +79,17 @@ echo "  server healthy on $BASE (pid $SERVER_PID)"
 j() { curl -fsS --max-time 10 "$@"; }
 code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@"; }
 
+# Inspect and mutate the fixture database from outside the server. Every query goes
+# through the sqlite3 CLI, so these assertions are independent of the Go code they
+# are checking. Two details matter:
+#   * `.timeout` waits out the server's write lock.
+#   * `foreign_keys=ON` mirrors the server's DSN. The CLI defaults it OFF, and with
+#     it off a collection delete silently orphans its bookmarks instead of
+#     cascading — which then lets SQLite reuse the freed rowid and hand an orphaned
+#     bookmark to the next collection created.
+DB="$FIXTURE/tw-bookmarker.db"
+dbq() { sqlite3 -cmd '.timeout 5000' -cmd 'PRAGMA foreign_keys=ON' "$DB" "$@"; }
+
 # ------------------------------------------------- §80.1-3 existing contract
 hdr "§80.1-3  Existing v1.0 contracts unchanged"
 
@@ -93,12 +105,16 @@ check "$([ "$idx_code" = "200" ] && echo true || echo false)" "§80.2 /v1/index 
 check "$idx_shape" "§80.2 /v1/index returns {\"items\":{...}}" 
 
 save_code="$(code -X POST "$BASE/v1/bookmarks" -H 'Content-Type: application/json' \
-  -d '{"filename":"smoke.csv","tweet":{"url":"https://x.com/smoke/status/9990000000000000001","media":[],"author":"Smoke","username":"@smoke","tweet_date":"2026-09-01T00:00:00Z","text":"acceptance smoke"}}')"
+  -d '{"slug":"smoke","name":"Smoke","tweet":{"url":"https://x.com/smoke/status/9990000000000000001","media":[],"author":"Smoke","username":"@smoke","tweet_date":"2026-09-01T00:00:00Z","text":"acceptance smoke"}}')"
 check "$([ "$save_code" = "201" ] || [ "$save_code" = "409" ] && echo true || echo false)" \
   "§80.3 POST /v1/bookmarks still accepts a save (201)" "got $save_code"
-# The save creates a real CSV, which is by design a new collection. Remove it so
-# the collection assertions below still describe the seeded fixture only.
-rm -f "$FIXTURE/smoke.csv"
+# The save creates a real collection, which is by design new. Remove it so the
+# collection assertions below still describe the seeded fixture only.
+dbq "DELETE FROM collections WHERE slug = 'smoke';"
+check "$([ "$(dbq "SELECT count(*) FROM collections WHERE slug='smoke';")" = "0" ] && echo true || echo false)" \
+  "the smoke save was cleaned up"
+check "$([ "$(dbq "SELECT count(*) FROM bookmarks WHERE tweet_id='9990000000000000001';")" = "0" ] && echo true || echo false)" \
+  "the schema cascaded the smoke collection delete to its bookmark"
 
 # ------------------------------------------------------ §80.4-10 collections
 hdr "§80.4-10  GET /api/gallery/collections"
@@ -109,7 +125,14 @@ check "$([ "$cols_code" = "200" ] && echo true || echo false)" "§80.4 collectio
 cols="$(j "$BASE/api/gallery/collections" 2>/dev/null || echo '{}')"
 names="$(jq -r '[.collections[].name] | sort | join(",")' <<<"$cols" 2>/dev/null || echo '')"
 check "$([ "$names" = "AI,Design,Linux" ] && echo true || echo false)" \
-  "§80.5 only *.csv collections appear (AI, Design, Linux — no index.json/.bak/.hidden)" "got [$names]"
+  "§80.5 only database collections appear (AI, Design, Linux)" "got [$names]"
+
+# The fixture deliberately contains a complete, valid CSV from the era before the
+# database, with a row that would make Linux 9 posts if anything still read it.
+check "$([ -f "$FIXTURE/linux.csv" ] && echo true || echo false)" \
+  "§80.5 a leftover linux.csv sits in the storage directory"
+check "$([ "$(dbq "SELECT count(*) FROM collections;")" = "3" ] && echo true || echo false)" \
+  "§80.5 the leftover linux.csv is not a collection (3 collections, not 4)"
 
 design_media="$(jq -r '[.collections[] | select(.name=="Design")][0].media_count' <<<"$cols" 2>/dev/null || echo x)"
 check "$([ "$design_media" = "0" ] && echo true || echo false)" \
@@ -132,9 +155,9 @@ check "$([ "$linux_last" != "null" ] && [ -n "$linux_last" ] && echo true || ech
 design_last="$(jq -r '[.collections[] | select(.name=="Design")][0].last_saved_at' <<<"$cols" 2>/dev/null || echo x)"
 check "$([ "$design_last" = "null" ] && echo true || echo false)" "§80.9 empty collection last_saved_at is null" "got $design_last"
 
-first_files="$(jq -r '[.collections[].filename] | .[0]' <<<"$cols" 2>/dev/null || echo '')"
-check "$([ "$first_files" = "linux.csv" ] && echo true || echo false)" \
-  "§80.9 collections ordered by last_saved_at DESC (linux.csv first)" "got $first_files"
+first_slug="$(jq -r '[.collections[].slug] | .[0]' <<<"$cols" 2>/dev/null || echo '')"
+check "$([ "$first_slug" = "linux" ] && echo true || echo false)" \
+  "§80.9 collections ordered by last_saved_at DESC (linux first)" "got $first_slug"
 
 cover_n="$(jq -r '[.collections[] | select(.name=="Linux")][0].cover_media | length' <<<"$cols" 2>/dev/null || echo x)"
 check "$([ "$cover_n" = "4" ] && echo true || echo false)" "§80.10 cover_media capped at 4" "got $cover_n"
@@ -145,12 +168,12 @@ case "$cover_first" in
 esac
 
 # ---------------------------------------------------------- §80.11-18 posts
-hdr "§80.11-18  GET /api/gallery/collections/{filename}/posts"
+hdr "§80.11-18  GET /api/gallery/collections/{slug}/posts"
 
-posts_code="$(code "$BASE/api/gallery/collections/linux.csv/posts")"
+posts_code="$(code "$BASE/api/gallery/collections/linux/posts")"
 check "$([ "$posts_code" = "200" ] && echo true || echo false)" "§80.11 posts endpoint available" "got $posts_code"
 
-page1="$(j "$BASE/api/gallery/collections/linux.csv/posts?limit=30" 2>/dev/null || echo '{}')"
+page1="$(j "$BASE/api/gallery/collections/linux/posts?limit=30" 2>/dev/null || echo '{}')"
 n1="$(jq -r '.items | length' <<<"$page1" 2>/dev/null || echo 0)"
 shape="$(jq -r 'has("items") and has("next_cursor") and has("has_more") and (.items|type=="array")' <<<"$page1" 2>/dev/null || echo false)"
 check "$shape" "§80.11 response shape {items,next_cursor,has_more}"
@@ -162,12 +185,12 @@ check "$([ "$media4" = "4" ] && echo true || echo false)" "§80.12 media JSON pa
 textonly="$(jq -r '[.items[] | select(.tweet_id=="1000000000000000005")][0] | (.media|length==0)' <<<"$page1" 2>/dev/null || echo false)"
 check "$textonly" "§80.13 text-only tweet returned with media == []"
 
-q1="$(j "$BASE/api/gallery/collections/linux.csv/posts?q=wayland" 2>/dev/null || echo '{}')"
+q1="$(j "$BASE/api/gallery/collections/linux/posts?q=wayland" 2>/dev/null || echo '{}')"
 qn="$(jq -r '.items | length' <<<"$q1" 2>/dev/null || echo x)"
 qall="$(jq -r '[.items[].text] | map(test("wayland";"i")) | all' <<<"$q1" 2>/dev/null || echo false)"
 check "$([ "$qn" = "2" ] && [ "$qall" = "true" ] && echo true || echo false)" "§80.14 search matches text case-insensitively (2 hits)" "got $qn all_match=$qall"
 
-qa="$(j "$BASE/api/gallery/collections/linux.csv/posts?q=LINUXGUY" 2>/dev/null || echo '{}')"
+qa="$(j "$BASE/api/gallery/collections/linux/posts?q=LINUXGUY" 2>/dev/null || echo '{}')"
 qan="$(jq -r '.items | length' <<<"$qa" 2>/dev/null || echo x)"
 check "$([ "$qan" = "4" ] && echo true || echo false)" "§80.14 search covers username (LINUXGUY → 4)" "got $qan"
 
@@ -177,42 +200,42 @@ check "$([ "$qan" = "4" ] && echo true || echo false)" "§80.14 search covers us
 # and immune to the few seconds between seeding and querying.
 CUT="$(date -u -d '-5 days -12 hours' +%Y-%m-%dT%H:%M:%SZ)"
 
-tf="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_from=$CUT" 2>/dev/null || echo '{}')"
+tf="$(j "$BASE/api/gallery/collections/linux/posts?tweet_from=$CUT" 2>/dev/null || echo '{}')"
 tfn="$(jq -r '.items | length' <<<"$tf" 2>/dev/null || echo x)"
 check "$([ "$tfn" = "5" ] && echo true || echo false)" \
   "§80.15 tweet_from lower bound inclusive (>= $CUT → 5 of 8)" "got $tfn of 8"
 
-tto="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_to=$CUT" 2>/dev/null || echo '{}')"
+tto="$(j "$BASE/api/gallery/collections/linux/posts?tweet_to=$CUT" 2>/dev/null || echo '{}')"
 tton="$(jq -r '.items | length' <<<"$tto" 2>/dev/null || echo x)"
 check "$([ "$tton" = "3" ] && echo true || echo false)" \
   "§80.15 tweet_to upper bound inclusive (<= $CUT → 3 of 8)" "got $tton of 8"
 
-sf="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$CUT" 2>/dev/null || echo '{}')"
+sf="$(j "$BASE/api/gallery/collections/linux/posts?saved_from=$CUT" 2>/dev/null || echo '{}')"
 sfn="$(jq -r '.items | length' <<<"$sf" 2>/dev/null || echo x)"
 check "$([ "$sfn" = "6" ] && echo true || echo false)" \
   "§80.15 saved_from lower bound inclusive (>= $CUT → 6 of 8)" "got $sfn of 8"
 
-sto="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_to=$CUT" 2>/dev/null || echo '{}')"
+sto="$(j "$BASE/api/gallery/collections/linux/posts?saved_to=$CUT" 2>/dev/null || echo '{}')"
 ston="$(jq -r '.items | length' <<<"$sto" 2>/dev/null || echo x)"
 check "$([ "$ston" = "2" ] && echo true || echo false)" \
   "§80.15 saved_to upper bound inclusive (<= $CUT → 2 of 8)" "got $ston of 8"
 
-both="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$CUT&tweet_from=$CUT" 2>/dev/null || echo '{}')"
+both="$(j "$BASE/api/gallery/collections/linux/posts?saved_from=$CUT&tweet_from=$CUT" 2>/dev/null || echo '{}')"
 bn="$(jq -r '.items | length' <<<"$both" 2>/dev/null || echo x)"
 check "$([ "$bn" = "5" ] && [ "$bn" -le "$tfn" ] 2>/dev/null && [ "$bn" -le "$sfn" ] 2>/dev/null && echo true || echo false)" \
   "§80.16 both date filters combine (AND → 5, <= each alone)" "combined=$bn tweet=$tfn saved=$sfn"
 
-win="$(j "$BASE/api/gallery/collections/linux.csv/posts?tweet_from=$CUT&tweet_to=$CUT" 2>/dev/null || echo '{}')"
+win="$(j "$BASE/api/gallery/collections/linux/posts?tweet_from=$CUT&tweet_to=$CUT" 2>/dev/null || echo '{}')"
 winn="$(jq -r '.items | length' <<<"$win" 2>/dev/null || echo x)"
 check "$([ "$winn" = "0" ] && echo true || echo false)" \
   "§80.16 an empty date window returns [] not a fallback to all" "got $winn"
 
-asc="$(j "$BASE/api/gallery/collections/linux.csv/posts?sort=saved_asc" 2>/dev/null || echo '{}')"
+asc="$(j "$BASE/api/gallery/collections/linux/posts?sort=saved_asc" 2>/dev/null || echo '{}')"
 asc_first="$(jq -r '.items[0].tweet_id' <<<"$asc" 2>/dev/null || echo x)"
 check "$([ "$asc_first" = "1000000000000000008" ] && echo true || echo false)" \
   "§80.17 sort=saved_asc orders oldest-saved first" "got $asc_first"
 
-cus="$(j "$BASE/api/gallery/collections/linux.csv/posts?sort=tweet_desc" 2>/dev/null || echo '{}')"
+cus="$(j "$BASE/api/gallery/collections/linux/posts?sort=tweet_desc" 2>/dev/null || echo '{}')"
 cus_first="$(jq -r '.items[0].tweet_id' <<<"$cus" 2>/dev/null || echo x)"
 check "$([ "$cus_first" = "1000000000000000001" ] && echo true || echo false)" \
   "§80.17 sort=tweet_desc orders newest-posted first" "got $cus_first"
@@ -220,7 +243,7 @@ check "$([ "$cus_first" = "1000000000000000001" ] && echo true || echo false)" \
 # cursor walk: limit=3 across 8 posts
 seen=""; cursor=""; pages=0
 while :; do
-  url="$BASE/api/gallery/collections/linux.csv/posts?limit=3&sort=saved_desc"
+  url="$BASE/api/gallery/collections/linux/posts?limit=3&sort=saved_desc"
   [ -n "$cursor" ] && url="$url&cursor=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$cursor")"
   pg="$(j "$url" 2>/dev/null || echo '{}')"
   ids="$(jq -r '.items[].tweet_id' <<<"$pg" 2>/dev/null || echo '')"
@@ -245,19 +268,20 @@ check "$([ "$end_more" = "false" ] && [ "$end_cur" = "null" ] && echo true || ec
 hdr "§80.19-23  Validation, security, robustness, freshness, read-only"
 
 for q in "limit=0" "limit=101" "limit=abc" "sort=bogus" "saved_from=not-a-date"; do
-  c="$(code "$BASE/api/gallery/collections/linux.csv/posts?$q")"
+  c="$(code "$BASE/api/gallery/collections/linux/posts?$q")"
   check "$([ "$c" = "400" ] && echo true || echo false)" "§80.19 invalid '$q' → 400" "got $c"
 done
 
-nf="$(code "$BASE/api/gallery/collections/nope.csv/posts")"
-check "$([ "$nf" = "404" ] && echo true || echo false)" "§80.5 unknown collection → 404" "got $nf"
+nf="$(code "$BASE/api/gallery/collections/nope/posts")"
+check "$([ "$nf" = "404" ] && echo true || echo false)" \
+  "§80.5 a valid slug for an unknown collection → 404" "got $nf"
 
-for p in "../secret.csv" "..%2Fsecret.csv" "%2e%2e%2fsecret.csv" "a%2Fb.csv"; do
+for p in "../secret" "..%2Fsecret" "%2e%2e%2fsecret" "a%2Fb" "linux.csv" "Linux"; do
   c="$(code "$BASE/api/gallery/collections/$p/posts")"
   check "$([ "$c" = "400" ] || [ "$c" = "404" ] && echo true || echo false)" \
-    "§80.20 traversal '$p' rejected ($c)"
+    "§80.20 unusable slug '$p' rejected ($c)"
 done
-body="$(curl -s --max-time 10 "$BASE/api/gallery/collections/nope.csv/posts")"
+body="$(curl -s --max-time 10 "$BASE/api/gallery/collections/nope/posts")"
 check "$(python3 - "$FIXTURE" "$body" <<'PY'
 import sys
 fixture, body = sys.argv[1], sys.argv[2]
@@ -265,20 +289,25 @@ print("true" if fixture not in body and "/tmp/" not in body else "false")
 PY
 )" "§80.20 error body does not leak the storage path"
 
-mal="$(j "$BASE/api/gallery/collections/ai.csv/posts" 2>/dev/null || echo '{}')"
+mal="$(j "$BASE/api/gallery/collections/ai/posts" 2>/dev/null || echo '{}')"
 malrow="$(jq -r '[.items[] | select(.tweet_id=="2000000000000000002")][0].media | length == 0' <<<"$mal" 2>/dev/null || echo x)"
 check "$([ "$malrow" = "true" ] && echo true || echo false)" \
   "§80.21 malformed media JSON yields media=[] (server alive)" "got $malrow"
 alive="$(code "$BASE/health")"
 check "$([ "$alive" = "200" ] && echo true || echo false)" "§80.21 server still healthy after malformed input"
 
-before="$(jq -r '.items | length' <<<"$(j "$BASE/api/gallery/collections/design.csv/posts" 2>/dev/null || echo '{}')" 2>/dev/null || echo x)"
-printf '%s\n' 'https://x.com/fresh/status/3000000000000000001,"[]",Fresh,@fresh,2026-09-26T00:00:00Z,2026-09-27T12:00:00Z,"appended while running"' >> "$FIXTURE/design.csv"
-after="$(jq -r '.items | length' <<<"$(j "$BASE/api/gallery/collections/design.csv/posts" 2>/dev/null || echo '{}')" 2>/dev/null || echo x)"
+before="$(jq -r '.items | length' <<<"$(j "$BASE/api/gallery/collections/design/posts" 2>/dev/null || echo '{}')" 2>/dev/null || echo x)"
+dbq "INSERT INTO bookmarks(tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+     VALUES('3000000000000000001',
+            (SELECT id FROM collections WHERE slug = 'design'),
+            'https://x.com/fresh/status/3000000000000000001',
+            'Fresh', '@fresh', '2026-09-26T00:00:00Z', '2026-09-27T12:00:00Z',
+            'written by an outside process while the server runs', '[]');"
+after="$(jq -r '.items | length' <<<"$(j "$BASE/api/gallery/collections/design/posts" 2>/dev/null || echo '{}')" 2>/dev/null || echo x)"
 check "$([ "$before" = "0" ] && [ "$after" = "1" ] && echo true || echo false)" \
-  "§80.22 new CSV data visible without restart" "before=$before after=$after"
+  "§80.22 a row written by an outside process is visible without a restart" "before=$before after=$after"
 
-ro_code="$(code -X POST "$BASE/api/gallery/collections/linux.csv/posts" -d '{}')"
+ro_code="$(code -X POST "$BASE/api/gallery/collections/linux/posts" -d '{}')"
 check "$([ "$ro_code" = "405" ] && echo true || echo false)" "§80.23 gallery API rejects writes (405)" "got $ro_code"
 sum_before="$(jq -r '[.collections[] | select(.name=="Linux")][0].post_count' <<<"$(j "$BASE/api/gallery/collections")" 2>/dev/null || echo x)"
 check "$([ "$sum_before" = "8" ] && echo true || echo false)" "§80.23 gallery API did not mutate data" "got $sum_before"
@@ -290,12 +319,17 @@ check "$([ "$sum_before" = "8" ] && echo true || echo false)" "§80.23 gallery A
 # docs/MANUAL-TEST-CHECKLIST.md.
 hdr "§82  Integration acceptance scenario (HARD-05)"
 
-# Steps 1-2: backend running; the seeded dir holds the three named CSVs.
+# Steps 1-2: backend running; the database holds the three named collections.
 check "$([ "$(code "$BASE/health")" = "200" ] && echo true || echo false)" \
   "§82.1 backend is running (/health 200)"
-for f in ai.csv linux.csv design.csv; do
-  check "$([ -f "$FIXTURE/$f" ] && echo true || echo false)" "§82.2 storage contains $f"
+check "$([ -f "$FIXTURE/tw-bookmarker.db" ] && echo true || echo false)" \
+  "§82.2 the storage directory holds tw-bookmarker.db"
+for slug82 in ai linux design; do
+  n82="$(dbq "SELECT count(*) FROM collections WHERE slug = '$slug82';")"
+  check "$([ "$n82" = "1" ] && echo true || echo false)" "§82.2 the database holds the $slug82 collection"
 done
+check "$([ "$(dbq "SELECT count(*) FROM collections WHERE slug = 'leftover';")" = "0" ] && echo true || echo false)" \
+  "§82.2 the leftover linux.csv was never imported as a collection"
 
 # Steps 3-4: the homepage lists AI, Linux and Design.
 scenario_names="$(jq -r '[.collections[].name] | sort | join(",")' <<<"$(j "$BASE/api/gallery/collections")" 2>/dev/null || echo '')"
@@ -304,7 +338,7 @@ check "$([ "$scenario_names" = "AI,Design,Linux" ] && echo true || echo false)" 
 
 # Steps 5-8: open Linux; posts render; the 4-image tweet shows 4 media; the
 # text-only tweet still appears as a text card.
-linux82="$(j "$BASE/api/gallery/collections/linux.csv/posts?limit=30" 2>/dev/null || echo '{}')"
+linux82="$(j "$BASE/api/gallery/collections/linux/posts?limit=30" 2>/dev/null || echo '{}')"
 check "$([ "$(jq -r '.items|length' <<<"$linux82")" = "8" ] && echo true || echo false)" \
   "§82.5-6 opening Linux returns its 8 posts"
 check "$([ "$(jq -r '[.items[]|select(.tweet_id=="1000000000000000001")][0].media|length' <<<"$linux82")" = "4" ] && echo true || echo false)" \
@@ -313,43 +347,43 @@ check "$(jq -r '[.items[]|select(.tweet_id=="1000000000000000005")][0] | ((.medi
   "§82.8 the text-only tweet is present with empty media and text"
 
 # Steps 9-11: search "wayland"; then Bookmark Date → Last 7 Days changes results.
-wl82="$(j "$BASE/api/gallery/collections/linux.csv/posts?q=wayland" 2>/dev/null || echo '{}')"
+wl82="$(j "$BASE/api/gallery/collections/linux/posts?q=wayland" 2>/dev/null || echo '{}')"
 check "$([ "$(jq -r '.items|length' <<<"$wl82")" = "2" ] && echo true || echo false)" \
   "§82.9 search 'wayland' narrows the result set to 2"
 # Half a day off the 7-day boundary so the check is immune to the seconds
 # between seeding and querying (rows are saved 0..7 days ago).
 SCEN_CUT="$(date -u -d '-6 days -12 hours' +%Y-%m-%dT%H:%M:%SZ)"
-last7="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$SCEN_CUT" 2>/dev/null || echo '{}')"
+last7="$(j "$BASE/api/gallery/collections/linux/posts?saved_from=$SCEN_CUT" 2>/dev/null || echo '{}')"
 l7="$(jq -r '.items|length' <<<"$last7" 2>/dev/null || echo x)"
 check "$([ "$l7" = "7" ] && echo true || echo false)" \
   "§82.10-11 Bookmark Date → Last 7 Days changes the results (7 of 8)" "got $l7 of 8"
 
 # Steps 12-13: add a Tweet Date filter too; every result must satisfy both ranges.
-both82="$(j "$BASE/api/gallery/collections/linux.csv/posts?saved_from=$SCEN_CUT&tweet_from=$CUT" 2>/dev/null || echo '{}')"
+both82="$(j "$BASE/api/gallery/collections/linux/posts?saved_from=$SCEN_CUT&tweet_from=$CUT" 2>/dev/null || echo '{}')"
 b82="$(jq -r '.items|length' <<<"$both82" 2>/dev/null || echo x)"
 both_ok="$(jq -r --arg s "$SCEN_CUT" --arg t "$CUT" '[.items[] | ((.saved_at >= $s) and (.tweet_date >= $t))] | all' <<<"$both82" 2>/dev/null || echo false)"
 check "$([ "$b82" -le "$l7" ] 2>/dev/null && [ "$both_ok" = "true" ] && echo true || echo false)" \
   "§82.12-13 both ranges applied (AND → $b82 of 8, every row satisfies both)" "combined=$b82 saved=$l7 all_match=$both_ok"
 
 # Step 14: sort → Newest Posted.
-newest82="$(j "$BASE/api/gallery/collections/linux.csv/posts?sort=tweet_desc" 2>/dev/null || echo '{}')"
+newest82="$(j "$BASE/api/gallery/collections/linux/posts?sort=tweet_desc" 2>/dev/null || echo '{}')"
 check "$([ "$(jq -r '.items[0].tweet_id' <<<"$newest82")" = "1000000000000000001" ] && echo true || echo false)" \
   "§82.14 sort Newest Posted puts the newest tweet first"
 
 # Step 15: infinite scroll fetches the next page.
-p82="$(j "$BASE/api/gallery/collections/linux.csv/posts?limit=3&sort=saved_desc" 2>/dev/null || echo '{}')"
+p82="$(j "$BASE/api/gallery/collections/linux/posts?limit=3&sort=saved_desc" 2>/dev/null || echo '{}')"
 curl82="$(jq -r '.next_cursor // empty' <<<"$p82" 2>/dev/null || echo '')"
 check "$([ -n "$curl82" ] && [ "$(jq -r '.has_more' <<<"$p82")" = "true" ] && echo true || echo false)" \
   "§82.15 the first page reports has_more plus a cursor for the next page"
 
 # Steps 22-24: the extension saves a new tweet; returning to the gallery shows it
 # with no backend restart.
-before82="$(code "$BASE/api/gallery/collections/scenario.csv/posts")"
+before82="$(code "$BASE/api/gallery/collections/scenario/posts")"
 saved82="$(code -X POST "$BASE/v1/bookmarks" -H 'Content-Type: application/json' \
-  -d '{"filename":"scenario.csv","tweet":{"url":"https://x.com/scenario/status/5000000000000000001","media":[],"author":"Scenario","username":"@scenario","tweet_date":"2026-09-26T00:00:00Z","text":"integration scenario row"}}')"
+  -d '{"slug":"scenario","name":"Scenario","tweet":{"url":"https://x.com/scenario/status/5000000000000000001","media":[],"author":"Scenario","username":"@scenario","tweet_date":"2026-09-26T00:00:00Z","text":"integration scenario row"}}')"
 check "$([ "$before82" = "404" ] && { [ "$saved82" = "201" ] || [ "$saved82" = "409" ]; } && echo true || echo false)" \
   "§82.22 the extension-style save lands a new row (before=$before82, save=$saved82)"
-scenario_view="$(j "$BASE/api/gallery/collections/scenario.csv/posts" 2>/dev/null || echo '{}')"
+scenario_view="$(j "$BASE/api/gallery/collections/scenario/posts" 2>/dev/null || echo '{}')"
 check "$([ "$(jq -r '.items|length' <<<"$scenario_view")" = "1" ] && echo true || echo false)" \
   "§82.23-24 returning to the gallery shows the new data without a restart"
 check "$([ "$(code "$BASE/health")" = "200" ] && echo true || echo false)" \
@@ -369,7 +403,7 @@ if grep -qi 'text/html' <<<"$root_ct" && grep -qi '<div id="\?root' <<<"$root_pr
 if [ "$serves_spa" = "true" ]; then
   check "$([ -f "$ROOT/web/dist/index.html" ] && echo true || echo false)" \
     "§80.24 / serves web/dist HTML" "$root_ct"
-  deep="$(curl -s --max-time 10 "$BASE/collections/linux.csv")"
+  deep="$(curl -s --max-time 10 "$BASE/collections/linux")"
   check "$(grep -qi '<div id="root"\|<div id=root' <<<"$deep" && echo true || echo false)" \
     "§80.25 deep SPA route serves index.html"
   apinope="$(curl -s -w '\n%{http_code}' --max-time 10 "$BASE/api/nope")"

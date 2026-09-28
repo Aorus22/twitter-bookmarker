@@ -9,8 +9,9 @@
 # sheet, decoded images, and screenshots for visual review (PRD §81, §82;
 # HARD-03/04).
 #
-# Fixture = the shared gallery fixture + `bulk.csv` (70 posts) so infinite scroll
-# has more than one page, and design.csv stays empty for the empty-state check.
+# Fixture = the shared gallery fixture (a tw-bookmarker.db seeded by python3's own
+# sqlite3 module) plus a `bulk` collection of 70 posts so infinite scroll has more
+# than one page; `design` stays empty for the empty-state check.
 #
 # Usage: scripts/check-web-acceptance.sh [--out DIR] [--keep]
 #
@@ -92,33 +93,57 @@ trap cleanup EXIT
   echo "failed to seed the gallery fixture" >&2; exit 1
 }
 
-# bulk.csv — 70 posts so the collection paginates (limit 30), and every 5th row
-# matches "needle" so a search can be proven to actually narrow the result set.
-python3 - "$STORAGE/bulk.csv" <<'PY'
-import csv, json, sys
-path = sys.argv[1]
-header = ["url", "media", "author", "username", "tweet_date", "saved_at", "text"]
-with open(path, "w", newline="", encoding="utf-8") as fh:
-    w = csv.writer(fh)
-    w.writerow(header)
-    for i in range(1, 71):
-        n = (i % 3) + 1                      # 1..3 media, never text-only
-        needle = "needle" if i % 5 == 0 else "straw"
-        day = 30 - (i % 28)
-        media = json.dumps([f"https://pbs.twimg.com/media/bulk{i:03d}_{k}.jpg" for k in range(1, n + 1)])
-        w.writerow([
-            f"https://x.com/bulkuser/status/3000000000000000{i:03d}",
-            media,
+# Write to the database from outside the server. `foreign_keys=ON` mirrors the
+# server's DSN; the CLI defaults it OFF. `.timeout` waits out the server's own write
+# lock. Every mutation below is what the extension's POST /v1/bookmarks would do,
+# minus the HTTP hop — which is the point: the SPA must pick up data that appeared
+# behind its back.
+DB="$STORAGE/tw-bookmarker.db"
+dbq() { sqlite3 -cmd '.timeout 5000' -cmd 'PRAGMA foreign_keys=ON' "$DB" "$@"; }
+
+# bulk — 70 posts so the collection paginates (limit 30), and every 5th row matches
+# "needle" so a search can be proven to actually narrow the result set. Media points
+# at the local stub over plain HTTP (see media-stub-server.mjs), so no TLS is tried.
+python3 - "$DB" <<'PY'
+import json, sqlite3, sys
+
+conn = sqlite3.connect(sys.argv[1])
+conn.execute("PRAGMA foreign_keys = ON")
+cur = conn.execute(
+    "INSERT INTO collections(slug, name, created_at) VALUES('bulk', 'Bulk', '2026-04-01T00:00:00Z')"
+)
+cid = cur.lastrowid
+for i in range(1, 71):
+    n = (i % 3) + 1                      # 1..3 media, never text-only
+    needle = "needle" if i % 5 == 0 else "straw"
+    day = 30 - (i % 28)
+    tweet_id = f"3000000000000000{i:03d}"
+    media = json.dumps(
+        [f"http://pbs.twimg.com/media/bulk{i:03d}_{k}.jpg" for k in range(1, n + 1)]
+    )
+    conn.execute(
+        """INSERT INTO bookmarks
+             (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+           VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            tweet_id,
+            cid,
+            f"https://x.com/bulkuser/status/{tweet_id}",
             f"Bulk Author {i % 7}",
             f"@bulk{i:03d}",
             f"2026-03-{day:02d}T10:{i % 60:02d}:00Z",
             f"2026-04-{day:02d}T11:{i % 60:02d}:00Z",
             f"Bulk post {i}: a {needle} in the haystack.",
-        ])
+            media,
+        ),
+    )
+conn.commit()
+conn.close()
 PY
 
-# Point media at the local stub over plain HTTP (see media-stub-server.mjs).
-sed -i 's|https://pbs\.twimg\.com/media|http://pbs.twimg.com/media|g' "$STORAGE"/*.csv
+# The shared fixture's own media URLs are https; rewrite them to http so the stub
+# is reached without a TLS handshake.
+dbq "UPDATE bookmarks SET media = replace(media, 'https://pbs.twimg.com/media', 'http://pbs.twimg.com/media');"
 
 # --- servers ----------------------------------------------------------------
 node "$ROOT/scripts/media-stub-server.mjs" "$MEDIA_PORT" >"$MEDIA_LOG" 2>&1 &
@@ -227,15 +252,20 @@ agent-browser click '[data-theme-preference]' >/dev/null 2>&1
 chk "light -> dark applies dark" "dark" "$(js "document.documentElement.classList.contains('dark') ? 'dark' : 'light'")"
 shot "homepage-dark"
 agent-browser reload >/dev/null 2>&1
-agent-browser wait 900 >/dev/null 2>&1
+# The inline pre-paint script applies the stored class before first paint, but the
+# toggle itself only exists once React has rendered. Poll for it instead of
+# sampling a fixed delay, so a slow reload cannot look like a lost preference.
+poll_js "!!document.querySelector('[data-theme-preference]')" "true" >/dev/null
 chk "dark preference persists across reload" "dark" "$(js "document.documentElement.classList.contains('dark') ? 'dark' : 'light'")"
+chk "the reloaded page still knows the stored preference" "dark" \
+  "$(js "document.querySelector('[data-theme-preference]').getAttribute('data-theme-preference')")"
 agent-browser click '[data-theme-preference]' >/dev/null 2>&1
 chk "dark -> system" "system" "$(js "document.querySelector('[data-theme-preference]').getAttribute('data-theme-preference')")"
 
 # --- collection route -------------------------------------------------------
 echo
 echo "Collection route (PROD-03, PRD §82)"
-goto_collection bulk.csv
+goto_collection bulk
 chk "direct deep-link renders posts" "true" "$(js "document.querySelectorAll('[data-testid=\"post-card\"]').length == 30")"
 chk "toolbar present" "true" "$(js "!!document.querySelector('[data-testid=\"collection-toolbar\"]')")"
 shot "collection-route"
@@ -294,7 +324,7 @@ agent-browser wait 700 >/dev/null 2>&1 || true
 # --- infinite scroll --------------------------------------------------------
 echo
 echo "Infinite scroll (SCROLL-01..05)"
-goto_collection bulk.csv
+goto_collection bulk
 chk "first page is capped at the page limit" "30" "$(count '[data-testid="post-card"]')"
 agent-browser scroll down 4000 >/dev/null 2>&1
 agent-browser wait 1500 >/dev/null 2>&1
@@ -305,7 +335,7 @@ shot "infinite-scroll"
 echo
 echo "Lightbox (LIGHT-01..06)"
 # Open a tweet that owns more than one image, so the media-arrow checks below
-# have somewhere to step to. bulk.csv cycles 1..3 media per row, so the
+# have somewhere to step to. bulk cycles 1..3 media per row, so the
 # `data-media-count="3"` card is deterministic.
 LT_SEL='[data-testid="post-card"][data-media-count="3"] [data-testid="post-media-trigger"]'
 # Identity of the open tweet, for the post-navigation checks below.
@@ -375,7 +405,7 @@ chk "§82.19 ArrowLeft returns to the first media" "$lt_media0" "$(js "document.
 
 # The post axis is the other pair: ArrowDown leaves this tweet for the next one
 # that has media, and lands on its first image. Identity is taken from the tweet
-# URL rather than the author name — bulk.csv reuses `Bulk Author {i % 7}`, so two
+# URL rather than the author name — bulk reuses `Bulk Author {i % 7}`, so two
 # consecutive posts can share an author and the check would pass vacuously.
 lt_post0=$(lt_href)
 agent-browser press ArrowDown >/dev/null 2>&1
@@ -396,7 +426,7 @@ chk "focus is restored to the originating tile" "post-media-trigger" \
 # --- states -----------------------------------------------------------------
 echo
 echo "States (PRD §31/§33)"
-goto_collection design.csv
+goto_collection design
 chk "empty collection shows its own state" "true" "$(js "!!document.querySelector('[data-testid=\"collection-empty-state\"]')")"
 shot "collection-empty"
 open_url "$BASE/definitely/not/a/route"
@@ -404,25 +434,30 @@ agent-browser wait 900 >/dev/null 2>&1
 chk "unknown client route renders the app (SPA fallback)" "true" \
   "$(js "!!document.querySelector('[data-testid=\"gallery-hero\"]') || document.body.innerText.length > 0")"
 
-# --- live CSV + window-focus refetch (HARD-06, PRD §80.22/§82.22-24) ---------
+# --- live write + window-focus refetch (HARD-06, PRD §80.22/§82.22-24) ------
 echo
-echo "Live CSV + window focus (HARD-06, PRD §80.22/§82.22-24)"
-goto_collection design.csv
-chk "§82.22 design.csv is empty before the append" "0" "$(count '[data-testid="post-card"]')"
-# §82.22: a new row is written to the live CSV, exactly as the extension would.
-printf '%s\n' 'https://x.com/freshapp/status/4000000000000000001,"[]",Fresh App,@freshapp,2026-09-26T00:00:00Z,2026-09-27T12:00:00Z,"appended while the server was running"' >> "$STORAGE/design.csv"
+echo "Live write + window focus (HARD-06, PRD §80.22/§82.22-24)"
+goto_collection design
+chk "§82.22 design is empty before the append" "0" "$(count '[data-testid="post-card"]')"
+# §82.22: a new row is written to the live database, exactly as the extension would.
+dbq "INSERT INTO bookmarks(tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+     VALUES('4000000000000000001',
+            (SELECT id FROM collections WHERE slug = 'design'),
+            'https://x.com/freshapp/status/4000000000000000001',
+            'Fresh App', '@freshapp', '2026-09-26T00:00:00Z', '2026-09-27T12:00:00Z',
+            'appended while the server was running', '[]');"
 chk "the new row is not shown before anything asks for it" "0" "$(count '[data-testid="post-card"]')"
 # §82.23: the user returns to the gallery / the window regains focus.
 js "window.dispatchEvent(new Event('focus'))" >/dev/null 2>&1
 chk "§82.24 the appended row appears after window focus, without a restart" "1" "$(poll_count '[data-testid="post-card"]' 1)"
 chk "§82.24 the fresh card is the appended tweet" "true" \
   "$(js "[...document.querySelectorAll('[data-testid=\"post-card\"]')].some((c) => c.textContent.includes('Fresh App'))")"
-shot "live-csv-focus-refetch"
+shot "live-write-focus-refetch"
 
 # --- responsive -------------------------------------------------------------
 echo
 echo "Responsive (HARD-03)"
-goto_collection bulk.csv
+goto_collection bulk
 cols() { agent-browser set viewport "$1" "$2" >/dev/null 2>&1; agent-browser wait 400 >/dev/null 2>&1; poll_js "$(cols_expr)" "$3"; }
 d=$(cols 1440 1100 4); shot "responsive-desktop"
 t768=$(cols 768 1100 2); shot "responsive-tablet-768"
@@ -481,7 +516,7 @@ agent-browser set media dark >/dev/null 2>&1
 agent-browser wait 400 >/dev/null 2>&1
 axe_check "homepage, dark, 1440px"
 
-goto_collection bulk.csv
+goto_collection bulk
 axe_check "collection page, dark, 1440px"
 agent-browser set media light >/dev/null 2>&1
 agent-browser wait 400 >/dev/null 2>&1
@@ -529,7 +564,7 @@ agent-browser set viewport 1440 1100 >/dev/null 2>&1
 # --- HARD-04 accessibility: keyboard, focus, alt, dialog semantics -----------
 echo
 echo "Keyboard, focus and dialog semantics (HARD-04, PRD §67)"
-goto_collection bulk.csv
+goto_collection bulk
 # Keyboard reachability: Tab from the top of the document. Chrome matches
 # :focus-visible for every Tab-driven focus, so each stop must also paint a ring.
 agent-browser press Tab >/dev/null 2>&1

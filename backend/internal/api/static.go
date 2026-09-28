@@ -172,7 +172,7 @@ func isAPIPath(p string) bool {
 // output, and a root-level name carrying an extension (favicon.svg,
 // robots.txt) is a file too. Everything else unmatched is a client route.
 // A generic "the path has an extension" test cannot be used because a valid
-// client route in this app is /collections/linux.csv.
+// client route in this app is /collections/linux.
 func isAssetPath(p string) bool {
 	if strings.HasPrefix(p, assetsPrefix) {
 		return true

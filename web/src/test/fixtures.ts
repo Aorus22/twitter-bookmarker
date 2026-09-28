@@ -24,8 +24,9 @@ export const POST_SAVED_AT = new Date(2026, 3, 3, 12, 0, 0).toISOString()
 export function makePost(
   overrides: Partial<GalleryPost> & { tweet_id: string }
 ): GalleryPost {
-  // Real CSVs store the sigil (extension `getUsername` returns "@foo"), so the
-  // default fixture carries it too — a bare "tester" once hid a `@@handle` bug.
+  // The stored handle carries the sigil (extension `getUsername` returns "@foo"),
+  // so the default fixture carries it too — a bare "tester" once hid a
+  // `@@handle` bug.
   const username = overrides.username ?? "@tester"
   return {
     url: `https://x.com/${username.replace(/^@+/, "")}/status/${overrides.tweet_id}`,
@@ -39,12 +40,21 @@ export function makePost(
   }
 }
 
-/** One collection summary row. */
+/** Turn a slug like `linux-tips` into the human name `Linux Tips`. */
+function humanizeSlug(slug: string): string {
+  return slug
+    .split(/[^a-zA-Z0-9]+/)
+    .filter((word) => word !== "")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
+}
+
+/** One collection summary row; `name` defaults to a humanised slug. */
 export function makeCollection(
-  overrides: Partial<GalleryCollection> & { filename: string }
+  overrides: Partial<GalleryCollection> & { slug: string }
 ): GalleryCollection {
   return {
-    name: overrides.filename.replace(/\.csv$/, ""),
+    name: humanizeSlug(overrides.slug),
     post_count: 0,
     media_count: 0,
     last_saved_at: null,
@@ -65,7 +75,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
 export interface GalleryFetchRoutes {
   /** `GET /api/gallery/collections` (header summary). */
   collections?: () => Response | Promise<Response>
-  /** `GET /api/gallery/collections/{filename}/posts`. */
+  /** `GET /api/gallery/collections/{slug}/posts`. */
   posts?: (url: string) => Response | Promise<Response>
 }
 
@@ -82,7 +92,8 @@ export function stubGalleryFetch(routes: GalleryFetchRoutes = {}) {
     if (url.includes("/posts")) {
       const response = routes.posts?.(url)
       return Promise.resolve(
-        response ?? jsonResponse({ items: [], next_cursor: null, has_more: false })
+        response ??
+          jsonResponse({ items: [], next_cursor: null, has_more: false })
       )
     }
 

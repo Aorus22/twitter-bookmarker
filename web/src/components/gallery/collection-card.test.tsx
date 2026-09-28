@@ -9,7 +9,7 @@ const NOW = new Date(2026, 8, 28, 12, 0, 0)
 const SAVED_AT = new Date(2026, 8, 27, 12, 0, 0).toISOString()
 
 const LINUX: GalleryCollection = {
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux",
   post_count: 83,
   media_count: 126,
@@ -33,22 +33,23 @@ function renderCard(collection: GalleryCollection = LINUX) {
 }
 
 describe("CollectionCard", () => {
-  it("renders the name, filename, counts and last-saved date (PRD-2 §16)", () => {
+  it("renders the name, counts and last-saved date (PRD-2 §16)", () => {
     renderCard()
 
     expect(screen.getByRole("heading", { name: "Linux" })).toBeInTheDocument()
-    expect(screen.getByText("linux.csv")).toBeInTheDocument()
+    // The description slot shows the human name, never the bare slug.
+    expect(screen.getAllByText("Linux")).toHaveLength(2)
     expect(
       screen.getByText("83 posts · 126 media · Last saved Sep 27")
     ).toBeInTheDocument()
   })
 
-  it("links the whole card to /collections/:filename", () => {
+  it("links the whole card to /collections/:slug", () => {
     renderCard()
 
     expect(
       screen.getByRole("link", { name: /Linux, 83 posts/ })
-    ).toHaveAttribute("href", "/collections/linux.csv")
+    ).toHaveAttribute("href", "/collections/linux")
   })
 
   it("surfaces the bookmark total as a chip on the cover", () => {
@@ -67,12 +68,12 @@ describe("CollectionCard", () => {
     expect(screen.getByTestId("collection-card-count")).toHaveTextContent("0")
   })
 
-  it("URL-encodes the filename in the href", () => {
-    renderCard({ ...LINUX, filename: "a b/c.csv", name: "Odd" })
+  it("URL-encodes the slug in the href", () => {
+    renderCard({ ...LINUX, slug: "a b/c", name: "Odd" })
 
     expect(screen.getByRole("link")).toHaveAttribute(
       "href",
-      "/collections/a%20b%2Fc.csv"
+      "/collections/a%20b%2Fc"
     )
   })
 
@@ -87,7 +88,7 @@ describe("CollectionCard", () => {
   it("renders a gradient placeholder for a collection with no media (PRD-2 §17)", () => {
     renderCard({
       ...LINUX,
-      filename: "quiet.csv",
+      slug: "quiet",
       name: "Quiet",
       post_count: 0,
       media_count: 0,

@@ -14,11 +14,7 @@
 export type PostsStatus = "loading" | "success" | "error"
 
 export type PostsViewState =
-  | "loading"
-  | "error"
-  | "empty-collection"
-  | "empty-filters"
-  | "posts"
+  "loading" | "error" | "empty-collection" | "empty-filters" | "posts"
 
 export function selectPostsViewState(
   status: PostsStatus,
@@ -32,7 +28,9 @@ export function selectPostsViewState(
     return "error"
   }
 
-  const count = Number.isFinite(postCount) ? Math.max(0, Math.trunc(postCount)) : 0
+  const count = Number.isFinite(postCount)
+    ? Math.max(0, Math.trunc(postCount))
+    : 0
   if (count > 0) {
     return "posts"
   }

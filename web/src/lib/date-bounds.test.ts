@@ -82,7 +82,8 @@ describe("date-bounds — inclusive boundaries (DISC-05)", () => {
     expect(bounds.to).toMatch(/T\d{2}:\d{2}:\d{2}\.999Z$/)
     expect(bounds.to).not.toBe(toUtcFrom("2026-09-28"))
 
-    const span = Date.parse(bounds.to as string) - Date.parse(bounds.from as string)
+    const span =
+      Date.parse(bounds.to as string) - Date.parse(bounds.from as string)
     expect(span).toBeGreaterThanOrEqual(23 * 60 * 60 * 1000)
     expect(span).toBeLessThan(25 * 60 * 60 * 1000)
   })
@@ -129,7 +130,9 @@ describe("date-bounds — inclusive boundaries (DISC-05)", () => {
       to: undefined,
       inverted: false,
     })
-    expect(localDateToUtcBounds({ from: "23/09/2026", to: "2026-09-27" })).toEqual({
+    expect(
+      localDateToUtcBounds({ from: "23/09/2026", to: "2026-09-27" })
+    ).toEqual({
       from: undefined,
       to: toUtcTo("2026-09-27"),
       inverted: false,
@@ -207,9 +210,9 @@ describe("date-bounds — formatted range summary (design spec §3.4)", () => {
     expect(
       formatLocalDateRange({ from: "2026-01-01" }, { locale: "en-US" })
     ).toBe("From Jan 1, 2026")
-    expect(formatLocalDateRange({ to: "2026-09-27" }, { locale: "en-US" })).toBe(
-      "Until Sep 27, 2026"
-    )
+    expect(
+      formatLocalDateRange({ to: "2026-09-27" }, { locale: "en-US" })
+    ).toBe("Until Sep 27, 2026")
     expect(formatLocalDateRange({})).toBe("Any date")
     expect(
       formatLocalDateRange({ from: "2026-02-31" }, { locale: "en-US" })

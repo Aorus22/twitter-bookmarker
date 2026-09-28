@@ -113,18 +113,18 @@ export async function fetchCollections(): Promise<GalleryCollection[]> {
 }
 
 /**
- * `GET /api/gallery/collections/{filename}/posts`
+ * `GET /api/gallery/collections/{slug}/posts`
  *
- * @param filename a `*.csv` filename, URL-encoded here (never interpolated raw).
+ * @param slug the collection slug, URL-encoded here (never interpolated raw).
  * @param params optional query parameters; undefined/null/empty values are
  * omitted from the URL.
  */
 export async function fetchPosts(
-  filename: string,
+  slug: string,
   params: GalleryPostsParams = {}
 ): Promise<GalleryPostsResponse> {
   const path =
-    `${GALLERY_API_BASE}/collections/${encodeURIComponent(filename)}/posts` +
+    `${GALLERY_API_BASE}/collections/${encodeURIComponent(slug)}/posts` +
     toQueryString(params)
 
   const body = await request<GalleryPostsResponse>(path)

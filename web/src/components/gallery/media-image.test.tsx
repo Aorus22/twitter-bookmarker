@@ -6,7 +6,7 @@ import { MediaImage } from "./media-image"
 describe("MediaImage", () => {
   it("renders a lazy, async-decoded, decorative image", () => {
     render(
-      <MediaImage src="https://example.test/a.jpg" fallbackSeed="linux.csv:0" />
+      <MediaImage src="https://example.test/a.jpg" fallbackSeed="linux:0" />
     )
 
     const img = screen.getByTestId("media-image")
@@ -21,7 +21,7 @@ describe("MediaImage", () => {
     render(
       <MediaImage
         src="https://example.test/broken.jpg"
-        fallbackSeed="linux.csv:1"
+        fallbackSeed="linux:1"
         className="h-full w-full rounded-md"
       />
     )
@@ -36,7 +36,7 @@ describe("MediaImage", () => {
   })
 
   it("renders the placeholder immediately for an empty source", () => {
-    render(<MediaImage src="   " fallbackSeed="linux.csv:2" />)
+    render(<MediaImage src="   " fallbackSeed="linux:2" />)
 
     expect(screen.getByTestId("media-placeholder")).toBeInTheDocument()
     expect(screen.queryByTestId("media-image")).not.toBeInTheDocument()
@@ -46,7 +46,7 @@ describe("MediaImage", () => {
     render(
       <MediaImage
         src="https://example.test/a.jpg"
-        fallbackSeed="linux.csv:3"
+        fallbackSeed="linux:3"
         alt="A tweet image"
       />
     )

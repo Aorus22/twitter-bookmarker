@@ -6,11 +6,16 @@ an observable expected result, and what to inspect on disk.
 
 > This file is the manual half of Phase 6. The automated half is
 > `go test ./... -race` (backend, PRD §65 items 1–20) and `npm test`
-> (extension, 157 tests). Anything automated there is **not** repeated here.
+> (extension, 158 tests). Anything automated there is **not** repeated here.
 >
 > A literal `~/.twitter-bookmarker/...` below is the **default** storage path. If
 > you started the backend with `TWITTER_BOOKMARKER_DIR`, substitute that
 > directory — see [Disk locations](#disk-locations-and-inspection-commands).
+>
+> Storage is one SQLite database (`tw-bookmarker.db`). The schema, the pragmas
+> and the read path are specified in
+> [`design/sqlite-migration.md`](design/sqlite-migration.md); inspect it with the
+> `sqlite3` CLI (see the table below).
 
 ---
 
@@ -21,7 +26,8 @@ an observable expected result, and what to inspect on disk.
 | Go ≥ 1.22 | `go version` |
 | Node ≥ 20 + npm | `node --version && npm --version` |
 | Chrome / Chromium | any recent stable |
-| `python3` (CSV/JSON inspection) | `python3 --version` |
+| `sqlite3` (database inspection) | `sqlite3 --version` |
+| `python3` (JSON inspection) | `python3 --version` |
 | A signed-in X account with at least 6 bookmarks | `https://x.com/i/history` |
 
 ### Build and run
@@ -55,24 +61,33 @@ Everything below uses `<storage>`: `$TWITTER_BOOKMARKER_DIR` when that is set,
 
 | What | Path / command |
 |---|---|
-| Category CSV | `$STORAGE/linux.csv` |
-| Derived index | `$STORAGE/index.json` |
 | Storage dir | `ls -la "$STORAGE"` |
+| Database | `$STORAGE/tw-bookmarker.db` |
+| Schema version | `sqlite3 "$DB" 'PRAGMA user_version;'` |
+| Collections + post counts | `sqlite3 -header -column "$DB" "SELECT c.slug, c.name, count(b.tweet_id) AS posts FROM collections c LEFT JOIN bookmarks b ON b.collection_id = c.id GROUP BY c.id ORDER BY c.slug;"` |
+| One collection's newest rows | `sqlite3 -header -column "$DB" "SELECT b.tweet_id, b.author, b.saved_at, b.text FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 5;"` |
 | Health | `curl -s http://127.0.0.1:43121/health` |
 | Index over HTTP | `curl -s http://127.0.0.1:43121/v1/index \| python3 -m json.tool` |
-| Raw CSV | `cat "$STORAGE/linux.csv"` |
-| Strict CSV parse | `python3 -c "import csv,sys; rows=list(csv.reader(open(sys.argv[1], newline=''), strict=True)); print(len(rows), rows[0])" "$STORAGE/linux.csv"` |
-| Index parse | `python3 -m json.tool "$STORAGE/index.json"` |
+| Gallery collections | `curl -s http://127.0.0.1:43121/api/gallery/collections \| python3 -m json.tool` |
 
 ```bash
 export STORAGE="${TWITTER_BOOKMARKER_DIR:-$HOME/.twitter-bookmarker}"
+export DB="$STORAGE/tw-bookmarker.db"
 ```
+
+> The `sqlite3` CLI defaults `PRAGMA foreign_keys` to **off**. Reads are
+> unaffected; before any manual `DELETE FROM collections`, run
+> `PRAGMA foreign_keys=ON` in the same session (or pass
+> `-cmd 'PRAGMA foreign_keys=ON'`) so `ON DELETE CASCADE` fires. The server's own
+> connections always have it on because it is set in the DSN
+> ([`design/sqlite-migration.md`](design/sqlite-migration.md) §4).
 
 > **Isolated smoke run (never touches real data):**
 > `TWITTER_BOOKMARKER_DIR=$(mktemp -d) ./backend/bin/twitter-bookmarker-server`
-> An explicit env var wins over `$HOME`, so CSV/index land in the temp dir. Use
-> this for the pure-backend scenarios (A1–A8) if you do not want to touch real
-> data.
+> An explicit env var wins over `$HOME`, so the database lands in the temp dir.
+> Use this for the pure-backend scenarios (A1–A5) if you do not want to touch
+> real data. To seed a disposable database with known contents instead, run
+> `bash scripts/seed-gallery-fixture.sh /tmp/twbm-manual --fresh`.
 
 ### Reading the UI
 
@@ -97,8 +112,8 @@ export STORAGE="${TWITTER_BOOKMARKER_DIR:-$HOME/.twitter-bookmarker}"
 | B1 | Rename category | Browser (popup) |
 | B2 | Delete category | Browser (popup) |
 | B3 | Browser reload shows `✓ Saved` | Browser |
-| B4 | Backend restart without `index.json` | Backend + browser |
-| B5 | Corrupt `index.json` | Backend + browser |
+| B4 | Backend restart (no derived index) | Backend + browser |
+| B5 | Stray CSV/index sidecars ignored | Backend + browser |
 | B6 | Popup live reorder without reload | Browser (popup) |
 | B7 | Popup Connected / Disconnected | Browser (popup) |
 | B8 | Double-click category → one request | Browser + backend log |
@@ -120,7 +135,7 @@ export STORAGE="${TWITTER_BOOKMARKER_DIR:-$HOME/.twitter-bookmarker}"
 
 **Steps**
 1. `make run` (the server logs `listening=127.0.0.1:43121` and the storage dir
-   as structured `slog` text).
+   as structured `slog` text, plus `collections=N bookmarks=M`).
 2. Open `https://x.com/i/history`; wait for organizers to appear.
 3. Click **Linux** on any tweet.
 
@@ -131,11 +146,11 @@ export STORAGE="${TWITTER_BOOKMARKER_DIR:-$HOME/.twitter-bookmarker}"
 
 **Inspect on disk**
 ```bash
-cat "$STORAGE/linux.csv"
+sqlite3 -header -column "$DB" "SELECT b.tweet_id, b.url, b.author, b.username, b.tweet_date, b.saved_at, b.text, b.media FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 1;"
 curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 ```
-- CSV has exactly one header row `url,media,author,username,tweet_date,saved_at,text`
-  and exactly one data row for the tweet.
+- The `linux` collection holds exactly one bookmark row for the tweet (and the
+  `collections` table has one `slug='linux'`, `name='Linux'` row).
 - The row's `saved_at` ends in `Z` (UTC) and the URL is canonical
   (`https://x.com/<handle>/status/<id>`, no `?s=` tracking suffix).
 - `media` parses as a JSON array. On a tweet with a photo it holds
@@ -144,15 +159,17 @@ curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
   on a text-only tweet it is exactly `[]`:
 
   ```bash
-  python3 -c "import csv,json; r=list(csv.DictReader(open('$STORAGE/linux.csv',newline=''))); print([json.loads(x['media']) for x in r])"
+  sqlite3 "$DB" "SELECT b.media FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 1;" | python3 -c "import json,sys; print(json.load(sys.stdin))"
   ```
-- `index.json` has one `tweets["<id>"]` entry pointing at `linux.csv`.
+- `/v1/index` has one `items["<id>"]` entry with `"slug":"linux"`.
 
-> **Prerequisite for existing installs:** a directory whose CSVs still carry the
-> six-column header must be migrated first (backend answers 500 by design).
-> Run `Scripts/migrate_schema.py --apply`, `Scripts/backfill_media.py --apply`,
-> then `Scripts/rebuild_index.sh` from the private data repository. Save a fresh
-> tweet afterwards to prove the 7-column path end to end.
+> **Prerequisite for existing installs:** a directory from the CSV era must be
+> migrated before the server can see its data, because the backend no longer
+> reads CSVs at all. Run the data repository's
+> `Scripts/migrate_to_sqlite.py` (see
+> [`design/sqlite-migration.md`](design/sqlite-migration.md) §9); it moves the
+> CSVs and `index.json` into `backup/` and leaves `tw-bookmarker.db` in place.
+> Save a fresh tweet afterwards to prove the database path end to end.
 
 ---
 
@@ -168,11 +185,14 @@ curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 
 **Inspect on disk**
 ```bash
-ls -la ~/.twitter-bookmarker/          # ai.csv must NOT exist (or gain a row)
-python3 -c "import csv; print(len(list(csv.reader(open('$STORAGE/linux.csv')))))"
+sqlite3 -header -column "$DB" "SELECT c.slug, c.name, count(b.tweet_id) AS posts FROM collections c LEFT JOIN bookmarks b ON b.collection_id = c.id GROUP BY c.id ORDER BY c.slug;"
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux';"
 ```
-- Row count in `linux.csv` is unchanged.
-- No `ai.csv` row for that tweet id (the duplicate key is global, across files).
+- The `linux` post count is unchanged.
+- There is no `ai` bookmark row for that tweet id, and no `ai` collection was
+  created (the duplicate check runs before the collection upsert; the duplicate
+  key is global, across collections, enforced by `bookmarks.tweet_id` being the
+  primary key).
 
 ---
 
@@ -189,7 +209,8 @@ python3 -c "import csv; print(len(list(csv.reader(open('$STORAGE/linux.csv')))))
   auto-unbookmark is enabled (PRD §4.2).
 
 **Inspect on disk**
-- No new `design.csv`; `index.json` unchanged (or absent).
+- No new `design` collection or bookmark row; the database is byte-identical
+  (compare `ls -l "$DB"` before and after).
 
 ---
 
@@ -201,13 +222,16 @@ python3 -c "import csv; print(len(list(csv.reader(open('$STORAGE/linux.csv')))))
 
 **Expected**
 - Success toast `Saved to <Category>` first.
-- CSV row exists, then the tweet disappears from X Bookmarks (or its native
-  bookmark icon turns back to the un-bookmarked state).
+- The database row is committed, then the tweet disappears from X Bookmarks (or
+  its native bookmark icon turns back to the un-bookmarked state).
 - No warning toast.
 
 **Inspect on disk**
-- The new row is present and complete **before** the tweet leaves X.
-- `index.json` contains the id.
+- The new row is present and complete **before** the tweet leaves X:
+  ```bash
+  sqlite3 -header -column "$DB" "SELECT c.slug, b.tweet_id, b.saved_at FROM bookmarks b JOIN collections c ON c.id = b.collection_id ORDER BY b.saved_at DESC LIMIT 1;"
+  ```
+- `/v1/index` contains the id (the endpoint reads the same tables).
 
 ---
 
@@ -222,55 +246,72 @@ python3 -c "import csv; print(len(list(csv.reader(open('$STORAGE/linux.csv')))))
 
 **Expected**
 - Warning toast `Saved to <Category>, but failed to remove from X bookmarks`.
-- The CSV row **remains**; `✓ Saved` remains; nothing is rolled back.
+- The database row **remains**; `✓ Saved` remains; nothing is rolled back.
 - The tweet may still be bookmarked on X — that is the accepted outcome.
 
 **Inspect on disk**
-- The CSV row written by this save is still present after the warning.
+- The bookmark row written by this save is still present after the warning:
+  ```bash
+  sqlite3 -header -column "$DB" "SELECT c.slug, b.tweet_id, b.url FROM bookmarks b JOIN collections c ON c.id = b.collection_id ORDER BY b.saved_at DESC LIMIT 1;"
+  ```
 
 ---
 
 ### B1 — Rename category  ·  PRD §68 *Rename category*
 
 **Steps**
-1. Save one tweet to **Linux** so `linux.csv` exists.
+1. Save one tweet to **Linux** so the `linux` collection exists.
 2. In the popup, rename **Linux** → **Linux Stuff** and confirm.
 3. Save a different tweet to the renamed category.
 
 **Expected**
-- Old CSV untouched; new saves use the new filename.
-- No toast error; the popup shows the new name and the new filename slug.
+- The old `linux` collection and its rows are untouched; new saves use the new
+  slug `linux-stuff`.
+- No toast error; the popup shows the new name and the new slug.
 
 **Inspect on disk**
 ```bash
-ls -la ~/.twitter-bookmarker/          # linux.csv AND linux-stuff.csv both exist
-cat ~/.twitter-bookmarker/linux-stuff.csv
+sqlite3 -header -column "$DB" "SELECT id, slug, name FROM collections ORDER BY slug;"
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux';"
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux-stuff';"
 ```
-- `linux.csv` still has exactly its original rows (byte-for-byte).
-- `linux-stuff.csv` has the header plus the new row.
-- `index.json` maps each tweet id to the filename used at save time.
+- `linux` still has exactly its original row.
+- `linux-stuff` is a **new** collection row with the new bookmark. Renaming
+  changes the slug (which is derived from the name), so it never rewrites the old
+  bookmark rows.
+- `/v1/index` maps each tweet id to the slug used at save time.
 
 ---
 
 ### B2 — Delete category  ·  PRD §68 *Delete category*
 
 **Steps**
-1. With `linux.csv` populated, delete the **Linux Stuff** category in the popup.
-2. Confirm the native dialog: `Delete category "Linux Stuff"? Existing CSV data will not be deleted.`
+1. With the `linux` collection populated, delete the **Linux Stuff** category in
+   the popup.
+2. Confirm the native dialog: `Delete category "Linux Stuff"? Existing CSV data
+   will not be deleted.`
 3. Save a different tweet to another category (e.g. **AI**).
 
 **Expected**
 - The category disappears from the popup.
 - No backend request is made for the delete (no server log line).
-- The CSV is untouched; index entries for deleted categories are untouched.
+- The database is untouched; `/v1/index` entries for deleted categories are
+  untouched.
 
 **Inspect on disk**
 ```bash
-ls ~/.twitter-bookmarker/              # linux.csv / linux-stuff.csv still there
-cat ~/.twitter-bookmarker/linux-stuff.csv   # unchanged
+sqlite3 -header -column "$DB" "SELECT slug, name FROM collections ORDER BY slug;"
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug IN ('linux','linux-stuff');"
 ```
+- The `linux` / `linux-stuff` collections and their bookmark rows are still
+  there — deleting a category only edits `chrome.storage.local`.
 - Previously saved tweets still show `✓ Saved` on reload (edge case §64
   *"tweet saved in category that no longer exists"*).
+
+> The popup's confirm text still says "Existing CSV data will not be deleted."
+> That string lives in `extension/src/popup/category-manager.ts` and was not part
+> of the storage migration; quote it as-is when matching the dialog, and read it
+> as "existing bookmark data".
 
 ---
 
@@ -287,49 +328,65 @@ cat ~/.twitter-bookmarker/linux-stuff.csv   # unchanged
   per page entry (check the service worker console / network tab).
 
 **Inspect on disk**
-- `index.json` unchanged by the reload.
+- `/v1/index` unchanged by the reload (it is computed from the database, never
+  written back).
 
 ---
 
-### B4 — Backend restart without `index.json`  ·  PRD §68 *Backend restart without index.json*
+### B4 — Backend restart (no derived index)  ·  PRD §68 *Backend restart without index.json*
 
 **Steps**
-1. Stop the server. Delete only the derived index:
-   `rm ~/.twitter-bookmarker/index.json`
-2. `make run` again.
+1. Stop the server.
+2. `make run` again (there is no derived index file to delete first — that is the
+   point of the scenario).
 3. Reload `https://x.com/i/history`.
 
 **Expected**
-- Startup log reports an index rebuild; the server starts normally.
+- Startup log reports `collections=N bookmarks=M` for the existing database; the
+  server starts normally.
 - Previously saved tweets show `✓ Saved` again.
 
 **Inspect on disk**
 ```bash
-python3 -m json.tool ~/.twitter-bookmarker/index.json   # recreated
-ls -la ~/.twitter-bookmarker/*.csv                      # byte-identical
+sqlite3 "$DB" "SELECT count(*) FROM collections;"   # unchanged
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks;"     # unchanged
+sqlite3 "$DB" "PRAGMA integrity_check;"             # 'ok'
 ```
-- Every CSV is untouched; `index.json` is a fresh valid file listing every id.
+- The database is byte-identical across the restart (the server only reads it at
+  startup to count, and never rewrites it on open).
+- `/v1/index` lists every id.
 
 ---
 
-### B5 — Corrupt `index.json`  ·  PRD §68 *Corrupt index.json*
+### B5 — Stray CSV/index sidecars ignored  ·  PRD §68 *Corrupt index.json*
 
 **Steps**
 1. Stop the server.
-2. Corrupt the index, e.g. `printf 'not json' > ~/.twitter-bookmarker/index.json`
-   (or `head -c 20 /dev/urandom > ~/.twitter-bookmarker/index.json`).
+2. Drop CSV-era leftovers into the storage directory (this is exactly what the
+   migration leaves behind, and what the fixture seeds as decoys):
+   ```bash
+   printf 'not json' > "$STORAGE/index.json"
+   printf 'url,media,author,username,tweet_date,saved_at,text\nhttps://x.com/leftover/status/1,"[]",Leftover,@leftover,2026-01-01T00:00:00Z,2026-01-01T00:00:00Z,decoy\n' > "$STORAGE/linux.csv"
+   ```
 3. `make run`; reload X Bookmarks.
 
 **Expected**
-- The server **does not** fail; it logs the malformed index and rebuilds from
-  the CSVs.
+- The server starts normally and logs the **same** collection and bookmark
+  counts — the backend owns only `tw-bookmarker.db` and never scans the directory
+  (no `backup/` handling, no CSV reader).
 - Saved tweets still show `✓ Saved`; duplicates are still rejected.
 
 **Inspect on disk**
 ```bash
-python3 -m json.tool ~/.twitter-bookmarker/index.json   # valid again
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks;"   # unchanged — the decoy row is not read
+sqlite3 "$DB" "SELECT count(*) FROM collections WHERE slug = 'leftover';"   # -> 0
+curl -s http://127.0.0.1:43121/api/gallery/collections | python3 -m json.tool  # no 'leftover'
 ```
-- CSV files are byte-identical to before the corruption.
+- The database is byte-identical to before the decoys were added.
+- A corrupt `index.json` cannot break the server, because nothing reads it.
+
+> Clean up the decoys afterwards if you plan to run the migration script:
+> `rm -f "$STORAGE/index.json" "$STORAGE/linux.csv"`.
 
 ---
 
@@ -368,14 +425,14 @@ python3 -m json.tool ~/.twitter-bookmarker/index.json   # valid again
 
 **Expected**
 - Exactly **one** `POST /v1/bookmarks` in the server log.
-- One success toast; one row in the CSV.
+- One success toast; one bookmark row in the database.
 - The controls disable immediately, so the second click is ignored.
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; rows=list(csv.reader(open('$STORAGE/linux.csv'))); print(len(rows))"
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux';"
 ```
-- Exactly header + 1 row for that tweet.
+- Exactly 1 row for that tweet (the primary key makes a second insert impossible).
 
 ---
 
@@ -386,14 +443,15 @@ python3 -c "import csv; rows=list(csv.reader(open('$STORAGE/linux.csv'))); print
 2. Save it.
 
 **Expected**
-- Success toast; the CSV stays valid (quoted field spanning lines).
+- Success toast; the stored text stays intact (the internal newline is preserved
+  verbatim — there is no CSV quoting layer any more).
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; rows=list(csv.reader(open('$STORAGE/linux.csv', newline=''), strict=True)); print(len(rows)); print(repr(rows[-1][5]))"
+sqlite3 "$DB" "SELECT quote(b.text) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 1;"
 ```
-- `strict=True` parses without error; the `text` field keeps the internal
-  newline and trims only leading/trailing whitespace (PRD §14).
+- The `text` value keeps the internal newline and trims only leading/trailing
+  whitespace (PRD §14).
 
 ---
 
@@ -403,12 +461,12 @@ python3 -c "import csv; rows=list(csv.reader(open('$STORAGE/linux.csv', newline=
 1. Save a tweet whose display name contains an emoji (e.g. `Foo, Bar 🐧`).
 
 **Expected**
-- CSV writes raw UTF-8; no mojibake.
+- The text is stored as raw UTF-8; no mojibake.
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; print(repr(list(csv.reader(open('$STORAGE/linux.csv', newline='')))[-1][1]))"
-file ~/.twitter-bookmarker/linux.csv     # reports UTF-8 text
+sqlite3 "$DB" "SELECT b.author FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 1;"
+sqlite3 "$DB" "PRAGMA encoding;"     # reports UTF-8
 ```
 
 ---
@@ -419,11 +477,12 @@ file ~/.twitter-bookmarker/linux.csv     # reports UTF-8 text
 1. Save a quote tweet: outer comment + embedded quoted tweet.
 
 **Expected**
-- Only the **parent** text is saved. The quoted text never appears in the CSV.
+- Only the **parent** text is saved. The quoted text never appears in the
+  database.
 
 **Inspect on disk**
 ```bash
-grep -c "<distinctive quoted phrase>" ~/.twitter-bookmarker/linux.csv   # -> 0
+sqlite3 "$DB" "SELECT count(*) FROM bookmarks WHERE text LIKE '%<distinctive quoted phrase>%';"   # -> 0
 ```
 - The row's `text` equals the outer comment; the `url`/`author`/`username` are
   the parent tweet's, not the quoted one's.
@@ -436,11 +495,12 @@ grep -c "<distinctive quoted phrase>" ~/.twitter-bookmarker/linux.csv   # -> 0
 1. Save a bookmark that has media but no text.
 
 **Expected**
-- The row is created with an empty `text` field (the tweet is still saveable).
+- The row is created with an empty `text` value (the tweet is still saveable).
 
 **Inspect on disk**
 ```bash
-python3 -c "import csv; print(repr(list(csv.reader(open('$STORAGE/linux.csv', newline='')))[-1][5]))"   # -> ''
+sqlite3 "$DB" "SELECT quote(b.text) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 1;"   # -> ''
+sqlite3 "$DB" "SELECT b.media FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 1;"        # -> non-empty JSON array
 ```
 
 ---
@@ -537,7 +597,7 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 | # | Step | Expected |
 |---|---|---|
 | 1 | `curl -s http://127.0.0.1:43121/health` | `{"status":"ok"}` |
-| 2 | `ls "$FIXTURE"` | `ai.csv`, `linux.csv`, `design.csv` present |
+| 2 | `ls "$FIXTURE"` | `tw-bookmarker.db` present. The seeded CSV-era decoys (`linux.csv`, `index.json`, `linux.csv.bak`, `.hidden.csv`, `notes.txt`, `subdir/`) are all ignored by the server |
 | 3 | Open `http://127.0.0.1:43121/` | Homepage hero + **My Collections** |
 | 4 | Look at the collection cards | **AI**, **Linux**, **Design**, each with post/media counts and a cover |
 
@@ -545,7 +605,7 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 
 | # | Step | Expected |
 |---|---|---|
-| 5 | Click **Linux** | URL becomes `/collections/linux.csv` |
+| 5 | Click **Linux** | URL becomes `/collections/linux` |
 | 6 | Look at the masonry | 8 post cards, 1–4 columns by viewport width |
 | 7 | Find the 4-image tweet | Four tiles in a 2×2 grid, all decoded |
 | 8 | Find the text-only tweet | A text card with no media region — it is not dropped |
@@ -578,9 +638,15 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 
 | # | Step | Expected |
 |---|---|---|
-| 22 | Save a new tweet through the extension (or `POST /v1/bookmarks` with `{"filename":"scenario.csv", ...}`) | `201 Created`; the row is appended to the live CSV |
-| 23 | Return to the gallery (or refocus the window) | The collection list and the open collection re-read the CSVs on `focus` |
+| 22 | Save a new tweet through the extension (or `POST /v1/bookmarks` with `{"slug":"scenario","name":"Scenario","tweet":{…}}`) | `201 Created`; the row is inserted into the live database |
+| 23 | Return to the gallery (or refocus the window) | The collection list and the open collection re-read the database on `focus` |
 | 24 | Look at the gallery | The new collection/post appears **without restarting the backend**; `/health` still answers from the same process |
+
+Inspect step 22 directly in the database:
+
+```bash
+sqlite3 -header -column "$FIXTURE/tw-bookmarker.db" "SELECT c.slug, b.tweet_id, b.saved_at FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'scenario';"
+```
 
 **Accessibility sub-check (HARD-04).** Repeat steps 3–21 with a keyboard only
 (`Tab` / `Shift+Tab` / `Enter` / `Space` / arrows / `Esc`): every control is
@@ -596,10 +662,11 @@ indicator announces the exact position (`Media 2 of 4`).
 wordmark is hidden at 390 px (the logo and the accessible name stay).
 
 **Scroll-stability sub-check.** On a collection with more than one page (the
-`bulk.csv` fixture: 70 posts), scroll slowly from top to bottom while watching
-one card. It must never change column or jump: the packing is append-only, so a
-new page can only add cards at the bottom of a column. Resizing the window *does*
-re-pack (a real layout change), and that is expected.
+browser gate seeds a `bulk` collection of 70 posts into the same fixture
+database), scroll slowly from top to bottom while watching one card. It must
+never change column or jump: the packing is append-only, so a new page can only
+add cards at the bottom of a column. Resizing the window *does* re-pack (a real
+layout change), and that is expected.
 
 ---
 
@@ -617,4 +684,4 @@ re-pack (a real layout change), and that is expected.
 are locked by `cd backend && go test ./... -race`; extraction, quoted/media
 handling, slug generation, the double-click in-flight guard, DOM re-injection,
 observer resilience, bounded cleanup and the saved-index retry are locked by
-`cd extension && npm test` (147 tests).
+`cd extension && npm test` (158 tests).

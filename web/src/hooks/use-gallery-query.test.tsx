@@ -36,7 +36,7 @@ afterEach(() => {
 describe("useGalleryQuery — debounced search (DISC-01)", () => {
   it("echoes every keystroke immediately but writes the URL once after ~300ms", () => {
     vi.useFakeTimers()
-    const { result } = renderQuery(["/collections/linux.csv"])
+    const { result } = renderQuery(["/collections/linux"])
 
     act(() => {
       for (const value of ["w", "wa", "way", "wayl", "wayland"]) {
@@ -68,7 +68,7 @@ describe("useGalleryQuery — debounced search (DISC-01)", () => {
 
   it("keeps an explicit sort chosen while the search debounce is pending", () => {
     vi.useFakeTimers()
-    const { result } = renderQuery(["/collections/linux.csv"])
+    const { result } = renderQuery(["/collections/linux"])
 
     act(() => {
       result.current.gallery.setSearch("wayland")
@@ -86,7 +86,7 @@ describe("useGalleryQuery — debounced search (DISC-01)", () => {
   it("clears the query when the search box is emptied", () => {
     vi.useFakeTimers()
     const { result } = renderQuery([
-      "/collections/linux.csv?q=wayland&sort=saved_desc",
+      "/collections/linux?q=wayland&sort=saved_desc",
     ])
 
     act(() => {
@@ -103,7 +103,7 @@ describe("useGalleryQuery — debounced search (DISC-01)", () => {
 
 describe("useGalleryQuery — URL is the source of truth (DISC-07)", () => {
   it("behaves as the default view for a URL with no params", () => {
-    const { result } = renderQuery(["/collections/linux.csv"])
+    const { result } = renderQuery(["/collections/linux"])
 
     expect(result.current.gallery.query.sort).toBe("saved_desc")
     expect(result.current.gallery.search).toBe("")
@@ -113,7 +113,7 @@ describe("useGalleryQuery — URL is the source of truth (DISC-07)", () => {
 
   it("ignores an unknown sort and a malformed date", () => {
     const { result } = renderQuery([
-      "/collections/linux.csv?sort=bogus&saved_from=nope&tweet_to=2026-02-31",
+      "/collections/linux?sort=bogus&saved_from=nope&tweet_to=2026-02-31",
     ])
 
     expect(result.current.gallery.query.sort).toBe("saved_desc")
@@ -123,8 +123,8 @@ describe("useGalleryQuery — URL is the source of truth (DISC-07)", () => {
 
   it("restores the previous query on Back", () => {
     const { result } = renderQuery([
-      "/collections/linux.csv?q=first&sort=saved_desc",
-      "/collections/linux.csv?q=second&sort=saved_desc",
+      "/collections/linux?q=first&sort=saved_desc",
+      "/collections/linux?q=second&sort=saved_desc",
     ])
 
     expect(result.current.gallery.search).toBe("second")
@@ -141,8 +141,8 @@ describe("useGalleryQuery — URL is the source of truth (DISC-07)", () => {
   it("drops a pending debounce when history moves externally", () => {
     vi.useFakeTimers()
     const { result } = renderQuery([
-      "/collections/linux.csv",
-      "/collections/linux.csv?sort=tweet_desc",
+      "/collections/linux",
+      "/collections/linux?sort=tweet_desc",
     ])
 
     act(() => {
@@ -163,7 +163,7 @@ describe("useGalleryQuery — URL is the source of truth (DISC-07)", () => {
 
   it("derives inclusive RFC3339 UTC request params from URL dates", () => {
     const { result } = renderQuery([
-      "/collections/linux.csv?saved_from=2026-09-20&saved_to=2026-09-27&tweet_from=2026-01-01&sort=saved_desc",
+      "/collections/linux?saved_from=2026-09-20&saved_to=2026-09-27&tweet_from=2026-01-01&sort=saved_desc",
     ])
 
     expect(result.current.gallery.requestParams.saved_from).toBe(
@@ -183,7 +183,7 @@ describe("useGalleryQuery — URL is the source of truth (DISC-07)", () => {
 describe("useGalleryQuery — filter and sort commits (DISC-02, DISC-06)", () => {
   it("sleeps over the filter draft and clearFilters drops search + dates, keeping sort", () => {
     const { result } = renderQuery([
-      "/collections/linux.csv?q=wayland&saved_from=2026-09-20&sort=tweet_asc",
+      "/collections/linux?q=wayland&saved_from=2026-09-20&sort=tweet_asc",
     ])
 
     act(() => {
@@ -213,7 +213,7 @@ describe("useGalleryQuery — filter and sort commits (DISC-02, DISC-06)", () =>
   })
 
   it("makes all four sort modes selectable with saved_desc the default", () => {
-    const { result } = renderQuery(["/collections/linux.csv"])
+    const { result } = renderQuery(["/collections/linux"])
     expect(result.current.gallery.query.sort).toBe("saved_desc")
 
     for (const sort of [

@@ -75,7 +75,9 @@ describe("columnsForWidth (PRD-2 §21/§66)", () => {
   })
 
   it("never returns a count whose cards would overflow the available width", () => {
-    for (const width of [300, 500, 700, 900, 1000, 1200, 1300, 1400, 1600, 2000]) {
+    for (const width of [
+      300, 500, 700, 900, 1000, 1200, 1300, 1400, 1600, 2000,
+    ]) {
       const columns = columnsForWidth(width)
       if (width >= MASONRY_CARD_WIDTH) {
         expect(masonryContainerWidth(columns)).toBeLessThanOrEqual(width)
@@ -206,9 +208,9 @@ describe("distributeMasonryKeys — append-only packing (the scroll-shuffle fix)
     expect(distributeMasonryKeys(["a", "b", "c"], new Map(), 0)).toEqual([
       [0, 1, 2],
     ])
-    expect(distributeMasonryKeys(["a", "b", "c"], new Map(), Number.NaN)).toEqual(
-      [[0, 1, 2]]
-    )
+    expect(
+      distributeMasonryKeys(["a", "b", "c"], new Map(), Number.NaN)
+    ).toEqual([[0, 1, 2]])
   })
 
   it("ignores unusable measured heights", () => {

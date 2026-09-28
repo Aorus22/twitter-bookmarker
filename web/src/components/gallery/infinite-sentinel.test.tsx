@@ -68,9 +68,7 @@ describe("InfiniteSentinel — decorative trigger (SCROLL-01, a11y)", () => {
 
   it("stops observing while disabled and resumes when re-enabled", () => {
     const onIntersect = vi.fn()
-    const { rerender } = render(
-      <InfiniteSentinel onIntersect={onIntersect} />
-    )
+    const { rerender } = render(<InfiniteSentinel onIntersect={onIntersect} />)
     const observer = MockIntersectionObserver.latest()
     expect(observer?.observedCount).toBe(1)
 

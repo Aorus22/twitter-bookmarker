@@ -14,7 +14,7 @@ import { formatCount } from "@/lib/collection-meta"
  * Hero → section header → exactly one grid state:
  *   loading  → `MasonrySkeleton` (never a blank page, PRD-2 §35)
  *   error    → `GalleryErrorState` with the PRD-2 §61 copy and a working Retry
- *   success  → cards, or `GalleryEmptyState` when there are no CSVs
+ *   success  → cards, or `GalleryEmptyState` when there are no collections
  *
  * `Recently updated ▾` is a **static label**, not a menu: PRD-2 §38 fixes the
  * ordering to `last_saved_at DESC`, so there is nothing to choose. The footer
@@ -65,10 +65,7 @@ export function GalleryPage() {
           {status === "success" && collections.length > 0 ? (
             <ul className="flex flex-wrap gap-[18px]">
               {collections.map((collection) => (
-                <CollectionCard
-                  key={collection.filename}
-                  collection={collection}
-                />
+                <CollectionCard key={collection.slug} collection={collection} />
               ))}
             </ul>
           ) : null}
@@ -76,7 +73,8 @@ export function GalleryPage() {
       </section>
 
       <p className="text-[11px] leading-[1.4] text-muted">
-        Local-only · Powered by your CSV archive · No cloud, no algorithmic feed
+        Local-only · Powered by your local archive · No cloud, no algorithmic
+        feed
       </p>
     </div>
   )

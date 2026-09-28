@@ -5,7 +5,7 @@
  * as one `Store` object (PRD §7). `chrome.storage.sync` is never used.
  *
  * Invariants enforced here:
- *  - rename recomputes `filename` and touches no file and no backend (PRD §9);
+ *  - rename recomputes `slug` and touches no backend records (PRD §9);
  *  - delete only removes the category from storage (PRD §10);
  *  - `color` never leaves the extension UI (PRD §7);
  *  - no function in this module performs any network request.
@@ -17,7 +17,7 @@ import {
   SCHEMA_VERSION,
   STORAGE_KEY,
 } from "./constants.ts";
-import { isValidFilename, slugifyFilename } from "./filename.ts";
+import { isValidSlug, slugify } from "./slug.ts";
 import type { Category, DisplayMode, Settings, Store } from "./types.ts";
 
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
@@ -57,12 +57,16 @@ function normalizeCategory(value: unknown, index: number): Category | null {
 
   const name = typeof value.name === "string" ? value.name : "";
   const rawOrder = typeof value.order === "number" && Number.isFinite(value.order) ? value.order : index;
-  const rawFilename = typeof value.filename === "string" && isValidFilename(value.filename) ? value.filename : null;
+  // A stored slug that validates is kept as-is; anything else — including a
+  // v1 record whose `filename` held "linux.csv" — is recomputed from the name.
+  // Because the old value was `slugify(name) + ".csv"`, recomputing reproduces
+  // the same key, so upgrading from v1 loses nothing.
+  const rawSlug = typeof value.slug === "string" && isValidSlug(value.slug) ? value.slug : null;
 
   return {
     id,
     name,
-    filename: rawFilename ?? slugifyFilename(name, id),
+    slug: rawSlug ?? slugify(name, id),
     color: normalizeColor(value.color),
     order: rawOrder,
   };
@@ -167,7 +171,7 @@ export async function getSettings(): Promise<Settings> {
 }
 
 /**
- * Create a category: new uuid, derived filename, appended order.
+ * Create a category: new uuid, derived slug, appended order.
  * Throws on an empty or duplicate name so the popup can show an inline message.
  * Performs no backend call (PRD §45).
  */
@@ -183,7 +187,7 @@ export async function addCategory(input: { name: string; color?: string }): Prom
     const created: Category = {
       id,
       name,
-      filename: slugifyFilename(name, id),
+      slug: slugify(name, id),
       color: normalizeColor(input.color),
       order: nextOrder(store.categories),
     };
@@ -192,9 +196,10 @@ export async function addCategory(input: { name: string; color?: string }): Prom
 }
 
 /**
- * Rename a category and recompute its `filename`.
- * The old CSV is never renamed, migrated, or touched, and no backend request is
- * made (PRD §9, §46).
+ * Rename a category and recompute its `slug`.
+ * Nothing on disk is renamed or migrated, and no backend request is made
+ * (PRD §9, §46): the new slug simply becomes the one the next save uses, and the
+ * collection the old slug created stays where it is.
  */
 export async function updateCategoryName(id: string, name: string): Promise<Category> {
   const trimmed = name.trim();
@@ -206,7 +211,7 @@ export async function updateCategoryName(id: string, name: string): Promise<Cate
     if (hasNameConflict(store.categories, trimmed, id)) {
       throw new Error(`A category named "${trimmed}" already exists`);
     }
-    const updated: Category = { ...target, name: trimmed, filename: slugifyFilename(trimmed, target.id) };
+    const updated: Category = { ...target, name: trimmed, slug: slugify(trimmed, target.id) };
     return {
       store: {
         ...store,
@@ -234,8 +239,8 @@ export async function updateCategoryColor(id: string, color: string): Promise<Ca
 }
 
 /**
- * Remove a category from storage only. CSV files and backend index entries are
- * untouched and no backend call is made (PRD §10, §48).
+ * Remove a category from storage only. Saved bookmarks and the collections they
+ * belong to are untouched, and no backend call is made (PRD §10, §48).
  */
 export async function deleteCategory(id: string): Promise<void> {
   await mutateAndGet((store) => ({

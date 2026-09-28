@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,8 +20,9 @@ import (
 	"time"
 
 	"twitter-bookmarker/internal/config"
+	"twitter-bookmarker/internal/db"
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/model"
-	"twitter-bookmarker/internal/storage"
 )
 
 // serverBin is built once in TestMain and shared by every process-level test.
@@ -99,8 +101,8 @@ func TestProcessLiveServer(t *testing.T) {
 		t.Errorf("startup log suggests a non-loopback bind:\n%s", logOut)
 	}
 
-	// Item 6: POST /v1/bookmarks creates the CSV.
-	saveBody := `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123?s=20","author":"Foo Bar","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"Testing Linux today"}}`
+	// Item 6: POST /v1/bookmarks persists the bookmark into tw-bookmarker.db.
+	saveBody := `{"slug":"linux","name":"Linux","tweet":{"url":"https://x.com/foo/status/123?s=20","author":"Foo Bar","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"Testing Linux today"}}`
 	status, body = httpDo(t, http.MethodPost, "/v1/bookmarks", saveBody)
 	if status != http.StatusCreated {
 		t.Fatalf("POST /v1/bookmarks status = %d, want 201 (body %s)", status, body)
@@ -109,14 +111,11 @@ func TestProcessLiveServer(t *testing.T) {
 	if saved.Status != "saved" || saved.TweetID != "123" {
 		t.Fatalf("save response = %+v, want status=saved tweet_id=123", saved)
 	}
-	csvPath := filepath.Join(storageDir, "linux.csv")
-	raw, err := os.ReadFile(csvPath)
-	if err != nil {
-		t.Fatalf("linux.csv was not created in the storage dir: %v", err)
+	if saved.Slug != "linux" {
+		t.Fatalf("save response slug = %q, want linux", saved.Slug)
 	}
-	first := strings.SplitN(strings.TrimRight(string(raw), "\r\n"), "\n", 2)[0]
-	if first != storage.Header {
-		t.Fatalf("csv header = %q, want %q", first, storage.Header)
+	if saved.URL != "https://x.com/foo/status/123" {
+		t.Fatalf("save response url = %q, want canonical https://x.com/foo/status/123", saved.URL)
 	}
 
 	// Item 5: GET /v1/index returns the saved tweet.
@@ -129,14 +128,28 @@ func TestProcessLiveServer(t *testing.T) {
 	}
 
 	// Item 1 + PRD §58: the running process terminates cleanly on SIGTERM.
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("signal SIGTERM: %v", err)
-	}
-	if err := p.waitExit(t, procShutdownWait); err != nil {
-		t.Fatalf("server exit = %v, want code 0 after SIGTERM", err)
-	}
+	stopServer(t, p)
 	if logOut := p.out.String(); !strings.Contains(logOut, "shutdown signal received") {
 		t.Errorf("shutdown log missing clean-shutdown message:\n%s", logOut)
+	}
+
+	// The save is durable in the one database file the server owns: a fresh
+	// read-only handle sees exactly the row the HTTP request acknowledged.
+	conn := openDBReadOnly(t, storageDir)
+	if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 1 {
+		t.Fatalf("bookmarks in %s = %d, want 1", config.DBName, got)
+	}
+	if got := dbtest.Text(t, conn, `SELECT slug FROM collections`); got != "linux" {
+		t.Errorf("collection slug = %q, want linux", got)
+	}
+	if got := dbtest.Text(t, conn, `SELECT name FROM collections`); got != "Linux" {
+		t.Errorf("collection name = %q, want Linux", got)
+	}
+	if got := dbtest.Text(t, conn, `SELECT url FROM bookmarks WHERE tweet_id = ?`, "123"); got != saved.URL {
+		t.Errorf("stored url = %q, want %q", got, saved.URL)
+	}
+	if got := dbtest.Text(t, conn, `SELECT text FROM bookmarks WHERE tweet_id = ?`, "123"); got != "Testing Linux today" {
+		t.Errorf("stored text = %q, want %q", got, "Testing Linux today")
 	}
 }
 
@@ -223,6 +236,278 @@ func TestProcessStorageDirFailureExitsNonZero(t *testing.T) {
 	}
 }
 
+// TestProcessDatabaseLifecycle replaces the removed `--rebuild-index` test.
+//
+// That flag rebuilt a derived index file that no longer exists. The properties
+// it stood for are now properties of the database: a fresh storage directory
+// must get a working database, an existing one must be reused rather than
+// recreated (never silently emptied), and a file the server cannot understand
+// must make startup fail loudly.
+func TestProcessDatabaseLifecycle(t *testing.T) {
+	t.Run("fresh_storage_creates_working_database", func(t *testing.T) {
+		requireDefaultPortFree(t)
+
+		home := t.TempDir()
+		p := startServer(t, home)
+		waitForHealth(t, p)
+
+		// Startup created the one durable file, with the real schema.
+		dir := filepath.Join(home, config.DirName)
+		if _, err := os.Stat(config.DBPath(dir)); err != nil {
+			t.Fatalf("%s was not created on startup: %v", config.DBName, err)
+		}
+		conn := openDBReadOnly(t, dir)
+		if got := dbtest.Tables(t, conn); len(got) != 2 || got[0] != "bookmarks" || got[1] != "collections" {
+			t.Fatalf("tables = %v, want [bookmarks collections]", got)
+		}
+		if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 0 {
+			t.Fatalf("fresh database holds %d bookmarks, want 0", got)
+		}
+
+		// The database it created is immediately usable over the API.
+		body := `{"slug":"linux","name":"Linux","tweet":{"url":"https://x.com/foo/status/123","author":"Foo","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"fresh"}}`
+		if status, resp := httpDo(t, http.MethodPost, "/v1/bookmarks", body); status != http.StatusCreated {
+			t.Fatalf("POST /v1/bookmarks status = %d, want 201 (body %s)", status, resp)
+		}
+		stopServer(t, p)
+
+		if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 1 {
+			t.Fatalf("bookmarks after one save = %d, want 1", got)
+		}
+	})
+
+	t.Run("existing_database_is_reused_not_recreated", func(t *testing.T) {
+		requireDefaultPortFree(t)
+
+		home := t.TempDir()
+		dir := filepath.Join(home, config.DirName)
+		if err := os.MkdirAll(dir, config.FileMode); err != nil {
+			t.Fatalf("mkdir storage dir: %v", err)
+		}
+		// Seed the database before the server starts, then close the writer so
+		// the subprocess is the only handle on it.
+		seedConn, err := db.OpenRW(config.DBPath(dir))
+		if err != nil {
+			t.Fatalf("create database: %v", err)
+		}
+		dbtest.Seed(t, seedConn, "linux", "Linux",
+			dbtest.Row{TweetID: "111"},
+			dbtest.Row{TweetID: "222", Media: `["https://pbs.twimg.com/media/A.jpg"]`},
+		)
+		if err := seedConn.Close(); err != nil {
+			t.Fatalf("close seeded database: %v", err)
+		}
+
+		p := startServer(t, home)
+		waitForHealth(t, p)
+
+		// The running server read the pre-existing rows...
+		status, body := httpDo(t, http.MethodGet, "/v1/index", "")
+		if status != http.StatusOK {
+			t.Fatalf("GET /v1/index status = %d, want 200", status)
+		}
+		items := decodeBody[model.IndexResponse](t, body).Items
+		for _, id := range []string{"111", "222"} {
+			if _, ok := items[id]; !ok {
+				t.Fatalf("index does not contain seeded tweet %s: %v", id, items)
+			}
+		}
+		// ...and reported them in the startup log instead of starting empty.
+		if logOut := p.out.String(); !strings.Contains(logOut, "collections=1") || !strings.Contains(logOut, "bookmarks=2") {
+			t.Errorf("startup log did not report the existing database contents (want collections=1 bookmarks=2):\n%s", logOut)
+		}
+
+		stopServer(t, p)
+
+		// Reuse means no data loss: both seeded rows are still there.
+		conn := openDBReadOnly(t, dir)
+		if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 2 {
+			t.Fatalf("bookmarks after restart = %d, want 2 (existing database must be reused)", got)
+		}
+		if got := dbtest.Text(t, conn, `SELECT name FROM collections WHERE slug = ?`, "linux"); got != "Linux" {
+			t.Errorf("collection name after restart = %q, want Linux", got)
+		}
+	})
+
+	t.Run("corrupt_database_fails_loudly", func(t *testing.T) {
+		home := t.TempDir()
+		dir := filepath.Join(home, config.DirName)
+		if err := os.MkdirAll(dir, config.FileMode); err != nil {
+			t.Fatalf("mkdir storage dir: %v", err)
+		}
+		garbage := []byte("this is definitely not a SQLite database\n" + strings.Repeat("garbage!", 512))
+		if err := os.WriteFile(config.DBPath(dir), garbage, 0o600); err != nil {
+			t.Fatalf("write corrupt database: %v", err)
+		}
+
+		p := startServer(t, home)
+		err := p.waitExit(t, procFailureExitLimit)
+		if err == nil {
+			t.Fatalf("expected non-zero exit for a corrupt database, got exit code 0; output:\n%s", p.out.String())
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("exit error = %v, want *exec.ExitError", err)
+		}
+		if code := exitErr.ExitCode(); code == 0 {
+			t.Fatalf("exit code = %d, want non-zero", code)
+		}
+		if out := p.out.String(); !strings.Contains(out, "database") {
+			t.Errorf("stderr missing a clear database message:\n%s", out)
+		}
+
+		// Failing loudly must never mean replacing the file with a fresh one.
+		after, err := os.ReadFile(config.DBPath(dir))
+		if err != nil {
+			t.Fatalf("read database after failed startup: %v", err)
+		}
+		if !bytes.Equal(after, garbage) {
+			t.Fatalf("startup replaced the corrupt database: got %d bytes, want the original %d", len(after), len(garbage))
+		}
+	})
+
+	t.Run("unsupported_version_fails_loudly", func(t *testing.T) {
+		home := t.TempDir()
+		dir := filepath.Join(home, config.DirName)
+		if err := os.MkdirAll(dir, config.FileMode); err != nil {
+			t.Fatalf("mkdir storage dir: %v", err)
+		}
+
+		// A database from a future schema version must be refused, not migrated.
+		conn, err := db.OpenRW(config.DBPath(dir))
+		if err != nil {
+			t.Fatalf("create database: %v", err)
+		}
+		dbtest.Seed(t, conn, "linux", "Linux", dbtest.Row{TweetID: "111"})
+		dbtest.MustExec(t, conn, fmt.Sprintf("PRAGMA user_version = %d", db.Version+1))
+		if err := conn.Close(); err != nil {
+			t.Fatalf("close database: %v", err)
+		}
+
+		p := startServer(t, home)
+		err = p.waitExit(t, procFailureExitLimit)
+		if err == nil {
+			t.Fatalf("expected non-zero exit for an unsupported schema version, got exit code 0; output:\n%s", p.out.String())
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("exit error = %v, want *exec.ExitError", err)
+		}
+		if code := exitErr.ExitCode(); code == 0 {
+			t.Fatalf("exit code = %d, want non-zero", code)
+		}
+		if out := p.out.String(); !strings.Contains(out, "version") {
+			t.Errorf("stderr missing a clear schema-version message:\n%s", out)
+		}
+
+		// Refusing must not have damaged or emptied the file it refused.
+		ro, err := db.OpenRO(config.DBPath(dir))
+		if err != nil {
+			t.Fatalf("reopen database read-only: %v", err)
+		}
+		defer ro.Close()
+		if got := dbtest.Count(t, ro, `SELECT count(*) FROM bookmarks`); got != 1 {
+			t.Fatalf("bookmarks after refused startup = %d, want 1 (data must be preserved)", got)
+		}
+	})
+}
+
+// TestProcessHelpFlag proves -h/--help prints the usage text — naming the
+// address, the storage directory and the database — exits successfully and does
+// not touch the filesystem. It also proves the compiled binary accepts -h.
+func TestProcessHelpFlag(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		t.Run(arg, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			// The environment override would otherwise redirect storage away
+			// from the temp home this test asserts about.
+			t.Setenv(config.EnvDir, "")
+
+			var out bytes.Buffer
+			if err := run([]string{arg}, &out); err != nil {
+				t.Fatalf("run(%s) error = %v, want nil", arg, err)
+			}
+
+			usage := out.String()
+			for _, want := range []string{"Usage:", serverName, config.Addr(), config.DBName, config.EnvDir, config.DirName} {
+				if !strings.Contains(usage, want) {
+					t.Errorf("usage text missing %q:\n%s", want, usage)
+				}
+			}
+			// The removed flags must not be advertised.
+			for _, gone := range []string{"--rebuild-index", "--migrate-csv", "--dry-run", "--archive-csv"} {
+				if strings.Contains(usage, gone) {
+					t.Errorf("usage text still advertises removed flag %q:\n%s", gone, usage)
+				}
+			}
+
+			if _, err := os.Stat(filepath.Join(home, config.DirName)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("%s created storage on a help request (stat err = %v)", arg, err)
+			}
+		})
+	}
+
+	t.Run("binary", func(t *testing.T) {
+		home := t.TempDir()
+		ctx, cancel := context.WithTimeout(context.Background(), procFailureExitLimit)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, serverBin, "-h")
+		cmd.Env = envForServer(home)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("binary -h exit = %v, want 0 (output:\n%s)", err, out)
+		}
+		if !strings.Contains(string(out), "Usage:") {
+			t.Errorf("binary -h stdout missing usage text:\n%s", out)
+		}
+		if _, err := os.Stat(filepath.Join(home, config.DirName)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("binary -h created storage (stat err = %v)", err)
+		}
+	})
+}
+
+// TestProcessRemovedFlagsRejected proves every CLI flag the previous server
+// accepted is now rejected: the binary exits non-zero with a clear message and
+// never creates a storage directory, because argument parsing happens first.
+func TestProcessRemovedFlagsRejected(t *testing.T) {
+	flags := []string{
+		"--rebuild-index",
+		"--migrate-csv",
+		"--dry-run",
+		"--archive-csv",
+		"--definitely-unknown",
+	}
+	for _, flag := range flags {
+		t.Run(flag, func(t *testing.T) {
+			home := t.TempDir()
+			ctx, cancel := context.WithTimeout(context.Background(), procFailureExitLimit)
+			defer cancel()
+
+			cmd := exec.CommandContext(ctx, serverBin, flag)
+			cmd.Env = envForServer(home)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("expected non-zero exit for %s, got exit code 0; output:\n%s", flag, out)
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("exit error = %v, want *exec.ExitError", err)
+			}
+			if code := exitErr.ExitCode(); code == 0 {
+				t.Fatalf("exit code for %s = %d, want non-zero", flag, code)
+			}
+			if !strings.Contains(string(out), "unknown argument") {
+				t.Errorf("stderr missing a clear unknown-argument message for %s:\n%s", flag, out)
+			}
+			if _, err := os.Stat(filepath.Join(home, config.DirName)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("%s was rejected but still created a storage directory", flag)
+			}
+		})
+	}
+}
+
 // --- process helpers ---
 
 type lockedBuffer struct {
@@ -257,7 +542,7 @@ func startServer(t *testing.T, home string) *serverProc {
 	t.Helper()
 
 	cmd := exec.Command(serverBin)
-	cmd.Env = envWithHome(home)
+	cmd.Env = envForServer(home)
 	out := &lockedBuffer{}
 	cmd.Stdout = out
 	cmd.Stderr = out
@@ -285,6 +570,18 @@ func startServer(t *testing.T, home string) *serverProc {
 	return p
 }
 
+// stopServer sends SIGTERM and requires a clean exit, failing the test either
+// way. It is the shared "shut this instance down before the next one" helper.
+func stopServer(t *testing.T, p *serverProc) {
+	t.Helper()
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal SIGTERM: %v", err)
+	}
+	if err := p.waitExit(t, procShutdownWait); err != nil {
+		t.Fatalf("server exit = %v, want code 0 after SIGTERM; output:\n%s", err, p.out.String())
+	}
+}
+
 func (p *serverProc) waitExit(t *testing.T, timeout time.Duration) error {
 	t.Helper()
 	select {
@@ -307,17 +604,30 @@ func (p *serverProc) exitErr() error {
 	return p.waitErr
 }
 
-// envWithHome returns the parent environment with HOME replaced (not appended
-// twice, which some libc getenv implementations resolve to the first entry).
-func envWithHome(home string) []string {
+// envForServer returns the parent environment with HOME replaced and the
+// storage-directory override removed, so a developer's real
+// $TWITTER_BOOKMARKER_DIR can never leak into (or be written by) a test.
+func envForServer(home string) []string {
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") {
+		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, config.EnvDir+"=") {
 			continue
 		}
 		env = append(env, kv)
 	}
 	return append(env, "HOME="+home)
+}
+
+// openDBReadOnly opens the storage directory's database without ever creating
+// it, so a test can assert on exactly what a server process wrote.
+func openDBReadOnly(t *testing.T, dir string) *sql.DB {
+	t.Helper()
+	conn, err := db.OpenRO(config.DBPath(dir))
+	if err != nil {
+		t.Fatalf("open %s read-only in %s: %v", config.DBName, dir, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
 }
 
 // requireDefaultPortFree skips the test when the fixed production port cannot
@@ -402,70 +712,4 @@ func decodeBody[T any](t *testing.T, body []byte) T {
 		t.Fatalf("decode response %q: %v", body, err)
 	}
 	return v
-}
-
-// TestProcessRebuildIndexFlag proves `--rebuild-index` regenerates index.json
-// from the CSVs — with the same header-aware parser the server uses — and then
-// exits without opening a listener. The data migrates from the six-column
-// layout to the seven-column one, so both must be indexed correctly.
-func TestProcessRebuildIndexFlag(t *testing.T) {
-	home := t.TempDir()
-	dir := filepath.Join(home, config.DirName)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("mkdir storage dir: %v", err)
-	}
-
-	migrated := strings.Join([]string{
-		storage.Header,
-		`https://x.com/foo/status/111,"[""https://pbs.twimg.com/media/A.jpg""]",Foo,@foo,2026-09-27T01:00:00Z,2026-09-27T02:00:00Z,"hi"`,
-		`https://x.com/bar/status/222,[],Bar,@bar,2026-09-27T01:05:00Z,2026-09-27T02:05:00Z,"there"`,
-		"",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(dir, "linux.csv"), []byte(migrated), 0o600); err != nil {
-		t.Fatalf("write linux.csv: %v", err)
-	}
-
-	legacy := strings.Join([]string{
-		storage.LegacyHeader,
-		`https://x.com/baz/status/333,Baz,@baz,2026-09-27T01:10:00Z,2026-09-27T02:10:00Z,"old"`,
-		"",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(dir, "old.csv"), []byte(legacy), 0o600); err != nil {
-		t.Fatalf("write old.csv: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), procShutdownWait)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, serverBin, "--rebuild-index")
-	cmd.Env = envWithHome(home)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("--rebuild-index exit = %v, want 0 (output:\n%s)", err, out)
-	}
-	if !strings.Contains(string(out), "rebuilt index.json from CSVs: 3 tweets") {
-		t.Errorf("stdout missing the rebuild count:\n%s", out)
-	}
-
-	raw, err := os.ReadFile(filepath.Join(dir, "index.json"))
-	if err != nil {
-		t.Fatalf("index.json was not written: %v", err)
-	}
-	var file model.IndexFile
-	if err := json.Unmarshal(raw, &file); err != nil {
-		t.Fatalf("decode index.json: %v", err)
-	}
-
-	want := map[string]model.IndexEntry{
-		"111": {URL: "https://x.com/foo/status/111", Filename: "linux.csv", SavedAt: "2026-09-27T02:00:00Z"},
-		"222": {URL: "https://x.com/bar/status/222", Filename: "linux.csv", SavedAt: "2026-09-27T02:05:00Z"},
-		"333": {URL: "https://x.com/baz/status/333", Filename: "old.csv", SavedAt: "2026-09-27T02:10:00Z"},
-	}
-	if len(file.Tweets) != len(want) {
-		t.Fatalf("index has %d entries, want %d: %+v", len(file.Tweets), len(want), file.Tweets)
-	}
-	for id, wantEntry := range want {
-		if got := file.Tweets[id]; got != wantEntry {
-			t.Errorf("index[%s] = %+v, want %+v", id, got, wantEntry)
-		}
-	}
 }

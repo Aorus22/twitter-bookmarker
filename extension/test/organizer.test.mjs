@@ -290,7 +290,7 @@ test("rerenderAll updates order, colours, and display mode without duplicating r
   const { doc, article } = createTweetDocument({ text: "hi" });
   const root = inject(article, { displayMode: "inline" });
 
-  const categories = [{ id: "cat-z", name: "Zeta", filename: "zeta.csv", color: "#ef4444", order: 0 }];
+  const categories = [{ id: "cat-z", name: "Zeta", slug: "zeta", color: "#ef4444", order: 0 }];
   rerenderAll(doc, {
     categories,
     settings: { ...SETTINGS, displayMode: "popover" },

@@ -12,11 +12,7 @@ export class ApiError extends Error {
   /** HTTP status code, or `0` when the request never reached the backend. */
   readonly status: number
 
-  constructor(
-    reason: string,
-    status: number,
-    options?: { cause?: unknown }
-  ) {
+  constructor(reason: string, status: number, options?: { cause?: unknown }) {
     super(reason, options)
     this.name = "ApiError"
     this.reason = reason

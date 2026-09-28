@@ -15,18 +15,16 @@ import (
 const maxBodyBytes = 1 << 20 // 1 MiB
 
 // BookmarkStore is the persistence surface the API needs.
+//
+// Index is part of it rather than a separate interface because both read the
+// same database, so there is no second thing to keep in step.
 type BookmarkStore interface {
 	Save(req model.SaveRequest) (model.SaveResponse, error)
-}
-
-// IndexReader exposes the derived index to GET /v1/index.
-type IndexReader interface {
-	All() map[string]model.IndexEntry
+	Index() (map[string]model.IndexEntry, error)
 }
 
 type server struct {
 	store  BookmarkStore
-	idx    IndexReader
 	log    *logging.Logger
 	static *staticHandler
 }
@@ -42,7 +40,7 @@ type server struct {
 // override, then cwd, then executable-relative candidates) and reported once.
 // A missing build never prevents construction: the API keeps working and "/"
 // explains how to build the app (PROD-05).
-func NewServer(store BookmarkStore, idx IndexReader, log *logging.Logger) http.Handler {
+func NewServer(store BookmarkStore, log *logging.Logger) http.Handler {
 	if log == nil {
 		log = logging.Discard()
 	}
@@ -54,7 +52,6 @@ func NewServer(store BookmarkStore, idx IndexReader, log *logging.Logger) http.H
 	}
 	s := &server{
 		store:  store,
-		idx:    idx,
 		log:    log,
 		static: newStaticHandler(webDir),
 	}
@@ -66,7 +63,7 @@ func NewServer(store BookmarkStore, idx IndexReader, log *logging.Logger) http.H
 	// Read-only gallery API (PRD-2 §36). A non-GET method on either pattern is
 	// answered with 405, so the API can never be written to.
 	mux.HandleFunc("/api/gallery/collections", methodGate(http.MethodGet, s.handleGalleryCollections))
-	mux.HandleFunc("/api/gallery/collections/{filename}/posts", methodGate(http.MethodGet, s.handleGalleryPosts))
+	mux.HandleFunc("/api/gallery/collections/{slug}/posts", methodGate(http.MethodGet, s.handleGalleryPosts))
 
 	// Unknown /api/* and /v1/* paths are API 404s for every method, never the
 	// SPA shell (PROD-02, PROD-04, PRD-2 §56/§57). The trailing-slash patterns

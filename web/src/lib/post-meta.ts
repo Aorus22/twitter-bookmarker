@@ -50,10 +50,10 @@ export function formatPostMeta(
  * and PRD-2 §36 documents the stored value as `"username": "@foo"`, so the UI
  * prepending its own `@` rendered `@@foo` for every real bookmark. The jsdom
  * fixtures happened to use bare names ("tester"), which is why the unit tests
- * never caught it — only rendering real CSV data in a browser did.
+ * never caught it — only rendering real stored data in a browser did.
  *
- * Accepts both forms so hand-written or legacy CSVs keep working, and returns an
- * empty string for a missing handle rather than a bare `@`.
+ * Accepts both forms so hand-written or legacy values keep working, and returns
+ * an empty string for a missing handle rather than a bare `@`.
  */
 export function displayHandle(username: string): string {
   const handle = username.trim().replace(/^@+/, "")
@@ -66,7 +66,7 @@ export interface LightboxMetaLines {
   posted: string
   /** `Saved Apr 3` — the bookmark date, year-aware like the card meta row. */
   saved: string
-  /** `Collection Linux` — the backend `DisplayName`, never the filename. */
+  /** `Collection Linux` — the backend `DisplayName`, never the slug. */
   collection: string
 }
 
@@ -75,7 +75,7 @@ export interface LightboxMetaLines {
  *
  * The design spec §3.5 pins the shape `Posted <date>` / `Saved <date>` /
  * `Collection <name>`; the collection name comes from the posts hook's
- * collection summary (the backend's `DisplayName`) so the filename is never
+ * collection summary (the backend's `DisplayName`) so the slug is never
  * shown to the user. A missing/invalid date leaves its bare label rather than
  * printing `Invalid Date`.
  */
@@ -92,8 +92,6 @@ export function formatLightboxMeta(
     posted: `${POSTED_META_LABEL} ${posted}`.trim(),
     saved: `${SAVED_META_LABEL} ${saved}`.trim(),
     collection:
-      name === ""
-        ? COLLECTION_META_LABEL
-        : `${COLLECTION_META_LABEL} ${name}`,
+      name === "" ? COLLECTION_META_LABEL : `${COLLECTION_META_LABEL} ${name}`,
   }
 }

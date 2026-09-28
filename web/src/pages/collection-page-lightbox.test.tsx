@@ -26,7 +26,7 @@ import {
  */
 
 const LINUX = makeCollection({
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux Tips",
   post_count: 3,
   media_count: 3,
@@ -69,9 +69,9 @@ function renderPage(routes: GalleryFetchRoutes = {}) {
   })
 
   render(
-    <MemoryRouter initialEntries={["/collections/linux.csv"]}>
+    <MemoryRouter initialEntries={["/collections/linux"]}>
       <Routes>
-        <Route path="/collections/:filename" element={<CollectionPage />} />
+        <Route path="/collections/:slug" element={<CollectionPage />} />
       </Routes>
     </MemoryRouter>
   )
@@ -424,11 +424,11 @@ describe("CollectionPage — metadata panel (LIGHT-01/LIGHT-02)", () => {
     expect(within(info).getByTestId("lightbox-saved")).toHaveTextContent(
       /^Saved /
     )
-    // The display name from the collections summary, never the filename.
+    // The display name from the collections summary, never the slug.
     expect(within(info).getByTestId("lightbox-collection")).toHaveTextContent(
       "Collection Linux Tips"
     )
-    expect(info).not.toHaveTextContent("linux.csv")
+    expect(info).not.toHaveTextContent("linux")
   })
 
   it("links Open on X to the stored url in a new tab", async () => {
@@ -457,9 +457,9 @@ describe("CollectionPage — metadata panel (LIGHT-01/LIGHT-02)", () => {
         }),
     })
     render(
-      <MemoryRouter initialEntries={["/collections/linux.csv"]}>
+      <MemoryRouter initialEntries={["/collections/linux"]}>
         <Routes>
-          <Route path="/collections/:filename" element={<CollectionPage />} />
+          <Route path="/collections/:slug" element={<CollectionPage />} />
         </Routes>
       </MemoryRouter>
     )

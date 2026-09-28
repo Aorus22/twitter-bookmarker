@@ -33,6 +33,13 @@ Figma variable collections: `Gallery V2 Brand` (12 colors, single mode) and `The
 
 ## 2. Design tokens
 
+> **Storage note:** this document records the approved Figma-extracted design.
+> The current storage design is SQLite — one `tw-bookmarker.db` addressed by a
+> collection `slug` — specified in
+> [`sqlite-migration.md`](sqlite-migration.md). Naming in the token and layout
+> sections below (`filename`, `CSV`, `index.json`) is the vocabulary of the
+> design as extracted; the public collection key is now `slug`.
+
 ### 2.1 Palette — light (from `Gallery V2 Brand`)
 
 | Token | Value | Use |
@@ -137,8 +144,42 @@ Shadows must be reduced/removed in dark mode; rely on surface + border contrast 
 
 Placeholder gradient pairs (for 0-media covers, broken images, state art, quote panels):
 `gold→blue`, `violet→pink`, `green→lime`, `plum→rose`, `teal→mint`, `sand→sage`.
-Pick deterministically from a stable key (e.g. `hash(filename)` / `hash(tweet_id)`) so a
+Pick deterministically from a stable key (e.g. `hash(slug)` / `hash(tweet_id)`) so a
 given collection or post always renders the same placeholder.
+
+### 2.7 Extension popup (token reuse)
+
+The extension popup (`extension/src/popup/popup.css`) consumes §2.1/§2.2/§2.4/§2.5/§2.6
+verbatim. The raw custom properties are duplicated there on purpose: the extension has
+no CSS pipeline (no Tailwind), so there is nothing to import. It is the same warm
+editorial frame as the gallery, shrunk to a 360 px window — a `grad-hero` brand card, a
+gradient brand mark, `--surface` cards with `--sh-card`, coral `--accent` eyebrows, and
+the dark frame's `grad-night` page background.
+
+Typography is self-hosted for the same reason it is in the SPA: the latin subsets of
+Inter Variable (weight 100–900) and Playfair Display 400/700 are vendored under
+`extension/src/popup/fonts/`, copied to `dist/popup/fonts/` by `extension/build.mjs`,
+and `extension/scripts/verify-dist.mjs` asserts every `@font-face` url resolves in
+`dist/`.
+
+The popup adds two local status tokens; the gallery's `--accent-green` is collage-only
+and fails AA as text:
+
+| Token | Light | Dark | Contrast on surface / bg (light · dark) |
+|-------|-------|------|------------------------------------------|
+| `--ok` | `#2c7857` | `#7fc0a0` | 5.27 / 4.69 · 7.39 / 8.00 |
+| `--bad` | `#c2410c` | `#ff8b7d` | 5.11 / 4.54 · 6.87 / 8.10 |
+
+`--accent-foreground` (already defined in §2.1/§2.2) flips to `#161319` in dark so filled
+coral controls keep AA. Secondary text on the brand card's `grad-hero` uses a popup-local
+`--muted-on-grad` (`#6d646b` light, `--muted` in dark): the shared `--muted` measures
+4.35:1 against the gradient's `#f6e7ff` end, just under AA at 11px, while
+`--muted-on-grad` measures 4.83:1 there and 5.19:1 against `#fff2e8`. Dark mode is keyed
+on `prefers-color-scheme`, not the SPA's `localStorage` preference: the popup runs on a
+`chrome-extension://` origin and cannot read the web app's storage.
+
+The add-category colour palette (`extension/src/shared/constants.ts`) is drawn from the
+same accents, so new category dots start inside the theme.
 
 ---
 
@@ -206,7 +247,7 @@ placeholder with a neutral glyph. Never use an avatar as a cover.
 **PRD-required content the mockup omits:** the card must also show **last bookmarked date**
 (PRD §16). Render it in the meta row, e.g. `248 posts · 312 media · Last saved Sep 27`, styled
 as the mockup's Inter Medium 11 muted. The mockup's one-line collection *description* is
-dropped — CSV has no description field (§7).
+dropped — the stored schema has no description field (§7).
 
 **Spec validated against Figma** (2026-09-27, structural extraction of frame `6:16`
 "01 · Gallery / Editorial Desktop", 1440×1120). Every figure above was confirmed node-for-node:
@@ -216,7 +257,7 @@ dropped — CSV has no description field (§7).
 | Card box / radius | `244×330`, `r20` | same |
 | Collage tiles | `120×88`, `r14`, at x=0/125, y=0/93 | same → **5px** gaps, region `245×181` |
 | Name | `(18,198)`, Playfair Display Bold 22 | same |
-| Secondary line | `(18,231)`, Inter Regular 11 — a *description* | **dropped** (§7: no CSV field) |
+| Secondary line | `(18,231)`, Inter Regular 11 — a *description* | **dropped** (§7: no schema field) |
 | Meta | `(18,288)`, Inter Medium 11 | same, plus the PRD §16 last-saved date |
 | `•••` overflow | `(206,288)`, Inter Bold 11 | **omitted** (§7: no card action exists) |
 | Card pitch | x = 64, 326, 588, 850, 1112 | **18px** gap between 244-wide cards |
@@ -226,13 +267,13 @@ dropped — CSV has no description field (§7).
 
 Two consequences worth flagging for implementation: the grid fits **5 columns** at 1440px
 (5×244 + 4×18 = 1292 ≤ 1312), and the mockup's per-card description text exists in Figma but
-has no backing CSV column — so it must not be rendered.
+has no backing schema column — so it must not be rendered.
 
-### 3.3 Collection page (`/collections/:filename`) — frame `6:121`
+### 3.3 Collection page (`/collections/:slug`) — frame `6:121`
 
 1. **Back link** `← Collections` (Inter Medium 11, muted) at y=112.
 2. **Header block** at y=144:
-   - collection icon `96×96` `r24` gradient (deterministic from filename), white glyph
+   - collection icon `96×96` `r24` gradient (deterministic from the slug), white glyph
    - title Playfair Bold 38 at x=184
    - secondary line Inter Regular 12 muted at y=198 (description — **omit**, see §7)
    - meta `186 posts · 220 media` Inter Medium **24** muted at y=236 (`20` below `md`) — the
@@ -478,9 +519,9 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 - `last_saved_at` may be `null`; the frontend must render a neutral string (e.g. `No saves yet`)
   and must not sort such collections above real ones (PRD §38).
 - The collection icon gradient and all placeholder gradients are **frontend-derived** from
-  `filename` / `tweet_id` — the backend sends no colour data.
-- Avatar gradients are a frontend fallback only: the CSV has no avatar URL, so the design's
-  gradient avatar circle is the correct rendering, seeded from `username`.
+  `slug` / `tweet_id` — the backend sends no colour data.
+- Avatar gradients are a frontend fallback only: the stored schema has no avatar URL, so the
+  design's gradient avatar circle is the correct rendering, seeded from `username`.
 
 ---
 
@@ -504,8 +545,8 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 
 | Mockup element | Decision | Reason |
 |----------------|----------|--------|
-| Collection description line (homepage card + collection header) | **Omitted** | CSV has no description field; inventing one creates a second source of truth |
-| Topic/tag chips (`Terminal ×`, `Tools ×`, `Linux Tips ×`) | **Omitted** | No tags in the CSV schema; PRD §40 defines no such filter |
+| Collection description line (homepage card + collection header) | **Omitted** | The stored schema has no description field; inventing one creates a second source of truth |
+| Topic/tag chips (`Terminal ×`, `Tools ×`, `Linux Tips ×`) | **Omitted** | No tags in the stored schema; PRD §40 defines no such filter |
 | Media-type chips (`All`/`Images`/`Videos`/`Links`/`Text`) | **Omitted** | PRD defines no media-type filter and explicitly excludes video playback |
 | Homepage hero search field | **Omitted** | PRD §28 scopes search to the collection detail page; nav search has no endpoint |
 | `Explore` nav destination | **Omitted** | No such route or requirement; nav shows `Home` / `Collections` |

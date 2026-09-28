@@ -96,9 +96,9 @@ describe("formatCollectionMeta", () => {
 
 describe("formatCollectionCounts", () => {
   it("renders the collection-header counts line (design spec §3.3)", () => {
-    expect(
-      formatCollectionCounts({ post_count: 186, media_count: 220 })
-    ).toBe("186 posts · 220 media")
+    expect(formatCollectionCounts({ post_count: 186, media_count: 220 })).toBe(
+      "186 posts · 220 media"
+    )
   })
 
   it("singularises a one-post, one-media collection", () => {

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { QUERY_CHANGE_SCROLL_TOP, readScrollY, restoreScrollY, scrollNearTop } from "./scroll"
+import {
+  QUERY_CHANGE_SCROLL_TOP,
+  readScrollY,
+  restoreScrollY,
+  scrollNearTop,
+} from "./scroll"
 
 /**
  * LIGHT-06 scroll contract (PRD-2 §77): the query-change reset stays where it

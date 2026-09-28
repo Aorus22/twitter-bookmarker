@@ -4,7 +4,8 @@
  * Rendering plus handlers for add, inline rename, colour, delete, and
  * drag-and-drop reorder. Every mutation goes through `shared/storage.ts`, which
  * only writes `chrome.storage.local`: no category operation ever performs a
- * backend request or touches a CSV file.
+ * backend request. Removing a category here only removes it from the popup's
+ * list; the bookmarks it grouped stay in the database untouched.
  */
 
 import { CATEGORY_COLOR_PALETTE, DEFAULT_CATEGORY_COLOR } from "../shared/constants.ts";
@@ -24,7 +25,7 @@ export interface CategoryManager {
 
 /** Exact delete confirmation copy required by PRD §48. */
 export function deleteConfirmationText(name: string): string {
-  return `Delete category "${name}"?\n\nExisting CSV data will not be deleted.`;
+  return `Delete category "${name}"?\n\nExisting bookmarks will not be deleted.`;
 }
 
 function requireEl<T extends Element>(id: string): T {
@@ -40,6 +41,7 @@ function messageOf(error: unknown): string {
 export function initCategoryManager(): CategoryManager {
   const list = requireEl<HTMLUListElement>("category-list");
   const empty = requireEl<HTMLParagraphElement>("categories-empty");
+  const countEl = requireEl<HTMLSpanElement>("categories-count");
   const errorEl = requireEl<HTMLParagraphElement>("category-error");
   const form = requireEl<HTMLFormElement>("add-category-form");
   const toggle = requireEl<HTMLButtonElement>("add-category-toggle");
@@ -131,7 +133,7 @@ export function initCategoryManager(): CategoryManager {
 
     const colorEl = row.querySelector<HTMLInputElement>(".category-color");
     const nameEl = row.querySelector<HTMLSpanElement>(".category-name");
-    const filenameEl = row.querySelector<HTMLSpanElement>(".category-filename");
+    const slugEl = row.querySelector<HTMLSpanElement>(".category-slug");
     const renameButton = row.querySelector<HTMLButtonElement>(".category-rename");
     const deleteButton = row.querySelector<HTMLButtonElement>(".category-delete");
 
@@ -146,9 +148,9 @@ export function initCategoryManager(): CategoryManager {
     }
 
     if (nameEl) nameEl.textContent = category.name;
-    if (filenameEl) {
-      filenameEl.textContent = `\u2192 ${category.filename}`;
-      filenameEl.title = category.filename;
+    if (slugEl) {
+      slugEl.textContent = `\u2192 ${category.slug}`;
+      slugEl.title = category.slug;
     }
 
     if (renameButton) {
@@ -233,6 +235,12 @@ export function initCategoryManager(): CategoryManager {
   function render(store: Store): void {
     lastOrder = store.categories.map((category) => category.id);
     empty.hidden = store.categories.length > 0;
+
+    // The chip mirrors the gallery's "4 collections" count. `aria-label` carries
+    // the unit, since the visible text is the bare number.
+    const total = store.categories.length;
+    countEl.textContent = String(total);
+    countEl.setAttribute("aria-label", `${total} ${total === 1 ? "category" : "categories"}`);
 
     // Never destroy an open rename input on an unrelated storage change.
     if (activeRenameId !== null) return;

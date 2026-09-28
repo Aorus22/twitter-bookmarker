@@ -4,49 +4,20 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
+
+	"twitter-bookmarker/internal/model"
 )
 
-// csvExt is the only extension a collection file may carry.
-const csvExt = ".csv"
-
-// initialisms are the filename tokens that the PRD-2 §7 display-name contract
-// spells in upper case: `ai-and-llm.csv` becomes "AI And LLM", not "Ai And
-// Llm". Filenames only contain lower-case characters, so an exact match is
-// enough. Everything else is ordinary title case, so `linux.csv` is "Linux".
-var initialisms = map[string]string{
-	"ai":  "AI",
-	"llm": "LLM",
-}
-
-// DisplayName turns a collection filename into its human-readable name using
-// the filename alone: strip `.csv`, collapse `-`/`_` runs into a space and
-// title-case every word (PRD-2 §7, GAL-02). No extension category config is
-// consulted and renamed categories are never merged.
-func DisplayName(filename string) string {
-	base := strings.TrimSuffix(filename, csvExt)
-	words := strings.FieldsFunc(base, func(r rune) bool { return r == '-' || r == '_' })
-	for i, word := range words {
-		if upper, ok := initialisms[word]; ok {
-			words[i] = upper
-			continue
-		}
-		words[i] = titleWord(word)
+// displayName resolves the name to show for a collection.
+//
+// The database stores the name the extension sent, which is what the user
+// actually typed. A blank one — only reachable through a hand-edited row — falls
+// back to a name derived from the slug rather than rendering an empty card.
+func displayName(slug, stored string) string {
+	if name := strings.TrimSpace(stored); name != "" {
+		return name
 	}
-	return strings.Join(words, " ")
-}
-
-// titleWord upper-cases the first rune and lower-cases the rest.
-func titleWord(word string) string {
-	runes := []rune(word)
-	if len(runes) == 0 {
-		return word
-	}
-	runes[0] = unicode.ToUpper(runes[0])
-	for i := 1; i < len(runes); i++ {
-		runes[i] = unicode.ToLower(runes[i])
-	}
-	return string(runes)
+	return model.DeriveName(slug)
 }
 
 // collectionSummary is a Collection plus the parsed maximum saved_at used for
@@ -58,12 +29,12 @@ type collectionSummary struct {
 	hasLast    bool
 }
 
-// summarize computes the GAL-04 fields for one parsed file.
-func summarize(filename string, rows []parsedRow) collectionSummary {
+// summarize computes the GAL-04 fields for one collection.
+func summarize(slug, name string, rows []parsedRow) collectionSummary {
 	summary := collectionSummary{
 		collection: Collection{
-			Filename:   filename,
-			Name:       DisplayName(filename),
+			Slug:       slug,
+			Name:       displayName(slug, name),
 			PostCount:  len(rows),
 			CoverMedia: []string{},
 		},
@@ -108,20 +79,20 @@ func summarize(filename string, rows []parsedRow) collectionSummary {
 }
 
 // sortSummaries orders collections by last_saved_at DESC with timestamp-less
-// collections last; the filename is the deterministic tie-break (GAL-03).
+// collections last; the slug is the deterministic tie-break (GAL-03).
 func sortSummaries(summaries []collectionSummary) {
 	sort.SliceStable(summaries, func(i, j int) bool {
 		a, b := summaries[i], summaries[j]
 		switch {
 		case !a.hasLast && !b.hasLast:
-			return a.collection.Filename < b.collection.Filename
+			return a.collection.Slug < b.collection.Slug
 		case !a.hasLast:
 			return false
 		case !b.hasLast:
 			return true
 		}
 		if a.lastSaved.Equal(b.lastSaved) {
-			return a.collection.Filename < b.collection.Filename
+			return a.collection.Slug < b.collection.Slug
 		}
 		return a.lastSaved.After(b.lastSaved)
 	})

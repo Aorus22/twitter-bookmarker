@@ -14,7 +14,7 @@ export const COULD_NOT_CONNECT_MESSAGE =
 export const COULD_NOT_LOAD_COLLECTION_MESSAGE =
   "Could not load this collection"
 
-/** PRD-2 §59 — no CSV files exist yet. */
+/** PRD-2 §59 — no collections exist yet. */
 export const NO_COLLECTIONS_TITLE = "No collections yet"
 
 /** PRD-2 §59 — the supporting line for the empty gallery state. */

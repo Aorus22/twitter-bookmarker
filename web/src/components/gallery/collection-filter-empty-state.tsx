@@ -2,10 +2,7 @@ import { SearchX } from "lucide-react"
 
 import { GalleryStateCard } from "@/components/gallery/gallery-state-card"
 import { Button } from "@/components/ui/button"
-import {
-  CLEAR_FILTERS_LABEL,
-  NO_FILTER_MATCH_TITLE,
-} from "@/lib/messages"
+import { CLEAR_FILTERS_LABEL, NO_FILTER_MATCH_TITLE } from "@/lib/messages"
 
 /**
  * Filter-no-match state (PRD-2 §60, COLL-10).

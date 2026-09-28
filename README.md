@@ -1,23 +1,27 @@
 # Twitter Bookmarker
 
 A single-user Chrome (Manifest V3) extension plus a small local Go server that
-turns X bookmarks into per-category CSV files.
+turns X bookmarks into one durable local SQLite archive.
 
 Open `https://x.com/i/history`, click a category on a tweet, and the extension
-extracts the tweet metadata and appends it to
-`~/.twitter-bookmarker/<category>.csv`. Optionally, the tweet is removed from X
-Bookmarks **after** the CSV write is confirmed.
+extracts the tweet metadata and writes it into
+`~/.twitter-bookmarker/tw-bookmarker.db`. Optionally, the tweet is removed from X
+Bookmarks **after** the database write is confirmed.
+
+The storage design — schema, pragmas, the `slug`/`name` rules, the read path and
+the CSV→SQLite migration boundary — is specified in
+**[`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md)**.
 
 ---
 
 ## What this is — and what it is not
 
-**It is** a categorizer: X Bookmarks → one category click → durable CSV row →
-optional unbookmark. CSV is the durable source of truth; the JSON index and the
-backend's in-memory state are derived and rebuildable.
+**It is** a categorizer: X Bookmarks → one category click → durable database row →
+optional unbookmark. The SQLite database is the durable source of truth; nothing
+else is a copy of it, and the backend keeps no cache that could disagree with it.
 
-**It is not** a bookmark manager, dashboard, viewer, sync service, or database.
-There is no search, filtering, move/undo, import/export, cloud sync,
+**It is not** a bookmark manager, dashboard, sync service, or general-purpose
+database. There is no search, filtering, move/undo, import/export, cloud sync,
 authentication, or X API usage. The extension works off the rendered DOM only.
 See `.planning/PROJECT.md` for the full out-of-scope list.
 
@@ -34,8 +38,8 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 │  chrome.storage.local = categories + settings (only)        │         │
 └─────────────────────────────────────────────────────────────┘         │
                                                                         ▼
-                                          <storage dir>/<slug>.csv   ← source of truth
-                                          <storage dir>/index.json   ← derived, rebuildable
+                                          <storage dir>/tw-bookmarker.db
+                                          the only file the server owns ← source of truth
 ```
 
 - The backend binds **loopback only** (`127.0.0.1:43121`) and never stores
@@ -45,7 +49,7 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 - One `MutationObserver` per page entry, one index fetch per page entry, O(1)
   saved-tweet lookups via an in-memory `Set<TweetID>`.
 
-### Where the CSVs live
+### Where the database lives
 
 `<storage dir>` is `~/.twitter-bookmarker` by default and can be relocated with
 the `TWITTER_BOOKMARKER_DIR` environment variable, which the server reads at
@@ -72,9 +76,10 @@ variable yourself in that case.
 
 The data-cleaning scripts in the private data repository read the same variable,
 and `make clean-storage` uses the resolved value too. The directory may live
-inside a git working tree: the backend only ever touches `*.csv` files matching
-`^[a-z0-9][a-z0-9-]*\.csv$` plus `index.json`, so `.git/` and any subdirectory
-(such as `Scripts/`) are left alone.
+inside a git working tree: the server opens exactly one file,
+`<storage dir>/tw-bookmarker.db` (`config.DBName`), and never reads or writes
+anything else there. A `backup/` folder left by a completed CSV→SQLite migration,
+a stray CSV, or a stray `index.json` are all inert to the server.
 
 ---
 
@@ -85,7 +90,8 @@ inside a git working tree: the backend only ever touches `*.csv` files matching
 | Go | ≥ 1.22 |
 | Node.js + npm | ≥ 20 |
 | Browser | Chrome / Chromium (MV3, Dev mode for unpacked loading) |
-| `python3` (optional) | for CSV/JSON inspection and the manual checklist |
+| `sqlite3` (optional) | for database inspection and the manual checklist |
+| `python3` (optional) | for JSON inspection and the manual checklist |
 
 ---
 
@@ -98,16 +104,22 @@ inside a git working tree: the backend only ever touches `*.csv` files matching
 make build
 ```
 
-This builds `backend/bin/twitter-bookmarker-server` and installs the extension
-dependencies (`npm ci`) before producing `extension/dist/`.
+This builds `backend/bin/twitter-bookmarker-server`, installs the extension
+dependencies (`npm ci`) into `extension/dist/`, and builds the web app into
+`web/dist/`.
+
+`make build` and `make backend` compile the server with `CGO_ENABLED=0`: the
+SQLite driver (`modernc.org/sqlite`) is pure Go, so the binary needs no cgo and
+links no C SQLite.
 
 <details>
 <summary>Equivalent commands without <code>make</code></summary>
 
 ```bash
 mkdir -p backend/bin
-cd backend && go build -o bin/twitter-bookmarker-server ./cmd/server
+cd backend && CGO_ENABLED=0 go build -o bin/twitter-bookmarker-server ./cmd/server
 cd ../extension && npm ci && npm run build
+cd ../web && pnpm install --frozen-lockfile && pnpm build
 ```
 </details>
 
@@ -119,24 +131,25 @@ make run
 ./backend/bin/twitter-bookmarker-server
 ```
 
-To keep the CSVs somewhere else (for example the private data repository that
+To keep the database somewhere else (for example the private data repository that
 also holds `Scripts/`), add `TWITTER_BOOKMARKER_DIR` to a gitignored `.env.local`
-and just use `make run` — see [Where the CSVs live](#where-the-csvs-live).
+and just use `make run` — see [Where the database lives](#where-the-database-lives).
 
 ```make
 # .env.local
 TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 ```
 
-Expected startup output (structured `slog` text on stderr):
+Expected startup output (structured `slog` text):
 
 ```text
-time=2026-09-27T09:04:54.777+07:00 level=INFO msg="index rebuilt from csv files" dir=/home/<you>/.twitter-bookmarker reason="missing index.json" indexed_tweets=0
-time=2026-09-27T09:04:54.777+07:00 level=INFO msg="Twitter Bookmarker server started" server=twitter-bookmarker-server listening=127.0.0.1:43121 storage=/home/<you>/.twitter-bookmarker indexed_tweets=0
+time=2026-09-28T09:04:54.777+07:00 level=INFO msg="serving built web app" web_dist="/repo/web/dist"
+time=2026-09-28T09:04:54.777+07:00 level=INFO msg="Twitter Bookmarker server started" server=twitter-bookmarker-server listening=127.0.0.1:43121 storage=/home/<you>/.twitter-bookmarker collections=3 bookmarks=13
 ```
 
-The storage directory is created automatically (mode `0700`). Stop it with
-`Ctrl+C`; shutdown is clean because CSV writes are synchronous per request.
+The storage directory is created automatically (mode `0700`), and the database is
+created on first start. Stop it with `Ctrl+C`; shutdown is clean because writes
+are synchronous per request and the commit is fsynced.
 
 > The server honours `$HOME`, so `HOME=$(mktemp -d) ./backend/bin/twitter-bookmarker-server`
 > gives you a throwaway storage directory.
@@ -166,22 +179,57 @@ reload.
 4. Inspect the result:
 
 ```bash
-cat ~/.twitter-bookmarker/linux.csv
+sqlite3 -header -column ~/.twitter-bookmarker/tw-bookmarker.db \
+  "SELECT tweet_id, author, saved_at FROM bookmarks ORDER BY saved_at DESC LIMIT 5;"
 curl -s http://127.0.0.1:43121/v1/index | python3 -m json.tool
 ```
 
 ---
 
-## CSV schema
+## Database schema
 
-One file per category filename, seven columns, header written exactly once:
+One SQLite database per storage directory:
 
-```csv
-url,media,author,username,tweet_date,saved_at,text
+```text
+<storage dir>/tw-bookmarker.db      (config.DBName)
+```
+
+Schema version `1` in `PRAGMA user_version`. `journal_mode=DELETE` (deliberately
+**not** WAL, so the directory holds one complete, git-safe file at every quiescent
+moment), `synchronous=FULL`, `foreign_keys=ON` and `busy_timeout=5000`, all
+applied through the DSN so they hold on every pooled connection. The full
+contract, the durability rationale and the alternatives considered are in
+[`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md) §2–§4.
+
+```sql
+CREATE TABLE collections (
+  id         INTEGER PRIMARY KEY,
+  slug       TEXT NOT NULL UNIQUE,   -- public key: ^[a-z0-9][a-z0-9-]*$
+  name       TEXT NOT NULL,          -- display name the user typed
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE bookmarks (
+  tweet_id      TEXT PRIMARY KEY,    -- Tweet Status ID, globally unique
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  url           TEXT NOT NULL,
+  author        TEXT NOT NULL,
+  username      TEXT NOT NULL,
+  tweet_date    TEXT NOT NULL,
+  saved_at      TEXT NOT NULL,
+  text          TEXT NOT NULL DEFAULT '',
+  media         TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX bookmarks_by_collection_saved ON bookmarks(collection_id, saved_at, tweet_id);
+CREATE INDEX bookmarks_by_collection_tweet ON bookmarks(collection_id, tweet_date, tweet_id);
 ```
 
 | Column | Meaning |
 |---|---|
+| `collections.slug` | Public collection key: lower-case, no extension, no dots (`linux`, formerly `linux.csv`) |
+| `collections.name` | Display name (`Linux`); the extension sends it, and a save without one derives a name from the slug |
+| `bookmarks.tweet_id` | Tweet Status ID — the global duplicate key |
 | `url` | Canonical `https://x.com/<handle>/status/<id>` (tracking query removed) |
 | `media` | JSON array of canonical media URLs; `[]` when the tweet has none |
 | `author` | Display name as rendered |
@@ -190,49 +238,52 @@ url,media,author,username,tweet_date,saved_at,text
 | `saved_at` | Backend-generated UTC save time (`...Z`) |
 | `text` | Parent tweet text only; empty for media-only tweets; quoted text excluded |
 
+Timestamps are RFC 3339 UTC strings, not integers: they sort lexicographically in
+exactly chronological order, and the wire format is unchanged from v1.0.
+
 `media` is normalized identically by the extension and the backend (PRD §14):
 only `https://pbs.twimg.com/...` survives, the `?format=…&name=…` sizing query is
 dropped (an extension-less path gets `.` + `format`), card/avatar/banner paths
 are rejected, duplicates are removed, order is preserved, and the list is capped
 at eight entries. A video or animated GIF stores its **poster frame** — X only
 exposes a `blob:` playback URL in the DOM, so mp4 URLs are deliberately not
-recorded.
+recorded. The array is stored as JSON text in the `media` column, not as a join
+table; the gallery parses it per row and degrades a malformed cell to a text card
+rather than failing the request.
 
-Example (`~/.twitter-bookmarker/linux.csv`, PRD §63):
-
-```csv
-url,media,author,username,tweet_date,saved_at,text
-https://x.com/foo/status/123,"[""https://pbs.twimg.com/media/AAA.jpg"",""https://pbs.twimg.com/media/BBB.jpg""]",Foo Bar,@foo,2026-09-27T01:00:00Z,2026-09-27T03:00:00Z,"Testing Linux today"
-https://x.com/bar/status/456,[],"Foo, Bar 🐧",@bar,2026-09-26T14:21:00Z,2026-09-27T03:02:00Z,"Line one
-
-Line two"
-```
-
-Commas, quotes, emoji, arbitrary unicode, and multiline text are handled
-automatically by Go's `encoding/csv` writer. Verify a file with a strict
-external parser:
+Read the newest rows by hand — this works against any install and against the
+fixture created by
+[`scripts/seed-gallery-fixture.sh`](scripts/seed-gallery-fixture.sh):
 
 ```bash
-python3 -c "import csv; rows=list(csv.reader(open('$HOME/.twitter-bookmarker/linux.csv', newline=''), strict=True)); print(len(rows))"
+sqlite3 -header -column ~/.twitter-bookmarker/tw-bookmarker.db \
+  "SELECT c.slug, b.tweet_id, b.author, b.saved_at
+     FROM bookmarks b JOIN collections c ON c.id = b.collection_id
+    ORDER BY b.saved_at DESC LIMIT 5;"
 ```
 
-### Files written before the media column
+`GET /v1/index` is built from these same two tables in Go — a `JOIN`, not a JSON
+file — so it can never disagree with what the gallery serves.
 
-`media` was added after the first real bookmarks had already been saved. A CSV
-whose header is still the six-column `url,author,username,tweet_date,saved_at,text`
-is **never appended to**: the backend answers 500 with an actionable log line
-instead of corrupting the file. Migrating such a directory — plus repairing the
-one row that a manual edit had merged, and backfilling real media URLs for the
-existing tweets — is handled by the `Scripts/` folder of the data repository
-(`hehenugas/twitter-bookmarker-csv`, private). The index rebuild is
-header-aware, so a not-yet-migrated file still indexes correctly (`saved_at`
-lives at index 4 there, index 5 after the migration).
+> The `sqlite3` CLI defaults `PRAGMA foreign_keys` to **off**. That is fine for
+> reads; before any manual `DELETE` from `collections`, run
+> `PRAGMA foreign_keys=ON` in the same session (or pass
+> `-cmd 'PRAGMA foreign_keys=ON'`) so the `ON DELETE CASCADE` actually fires.
 
-Regenerate `index.json` from the CSVs at any time:
+### Migrating a CSV-era directory
 
-```bash
-./backend/bin/twitter-bookmarker-server --rebuild-index
-```
+v1.0 stored one CSV per category (`linux.csv`) plus a derived `index.json`. The
+one-time migration lives with the data it migrates: the data repository's
+`Scripts/migrate_to_sqlite.py` (`hehenugas/twitter-bookmarker-csv`, private). It
+validates every CSV row, builds `tw-bookmarker.db` atomically, sets
+`user_version=1`, asserts per-collection row and media counts, moves the CSVs and
+`index.json` into `backup/`, writes `backup/MIGRATION.json` with per-file SHA-256
+digests, and refuses to run twice.
+
+The backend has **no CSV awareness**: there is no migration flag, no CSV
+scanning, no `backup/` handling, and no startup refusal guard. It opens
+`tw-bookmarker.db` and nothing else. See
+[`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md) §9.
 
 ---
 
@@ -250,7 +301,8 @@ Base URL: `http://127.0.0.1:43121`. CORS is granted only to extension origins
 
 ### `GET /v1/index`
 
-The derived saved-tweet index (one `GET` per Bookmarks page entry).
+Every saved tweet, keyed by Status ID (one `GET` per Bookmarks page entry). It
+reads the same tables the gallery does, so it cannot disagree with them.
 
 ```http
 200 OK
@@ -258,7 +310,7 @@ The derived saved-tweet index (one `GET` per Bookmarks page entry).
   "items": {
     "123456789": {
       "url": "https://x.com/foo/status/123456789",
-      "filename": "linux.csv",
+      "slug": "linux",
       "saved_at": "2026-09-27T01:15:32Z"
     }
   }
@@ -269,7 +321,8 @@ The derived saved-tweet index (one `GET` per Bookmarks page entry).
 
 ```json
 {
-  "filename": "linux.csv",
+  "slug": "linux",
+  "name": "Linux",
   "tweet": {
     "url": "https://x.com/foobar/status/123456789?s=20",
     "author": "Foo Bar",
@@ -280,36 +333,39 @@ The derived saved-tweet index (one `GET` per Bookmarks page entry).
 }
 ```
 
-The backend derives `saved_at`, the tweet id, and the canonical URL.
+The backend derives `saved_at`, the tweet id, and the canonical URL. `name` is
+the collection's display name; when a save omits it the backend derives one from
+the slug (`linux` → `Linux`, and the tokens `ai`/`llm` → `AI`/`LLM`), so an older
+extension that sends only a slug still produces a readable collection.
 
 | Status | When | Body |
 |---|---|---|
-| `201 Created` | New tweet appended to the CSV | `{"status":"saved","tweet_id":"…","url":"…","filename":"…","saved_at":"…"}` |
-| `409 Conflict` | Tweet id already exists in **any** CSV (global duplicate) | `{"status":"duplicate","tweet_id":"…"}` — no second row, no unbookmark |
-| `400 Bad Request` | Invalid filename, invalid URL, missing author/username, invalid date, malformed payload | `{"status":"error","reason":"…"}` |
-| `500 Internal Server Error` | Filesystem/internal failure | `{"status":"error","reason":"internal error"}` — the extension never unbookmarks on this |
+| `201 Created` | New bookmark inserted | `{"status":"saved","tweet_id":"…","url":"…","slug":"…","saved_at":"…"}` |
+| `409 Conflict` | Tweet id already exists **anywhere** in the database (global duplicate) | `{"status":"duplicate","tweet_id":"…"}` — no second row, no unbookmark |
+| `400 Bad Request` | Invalid slug, invalid URL, missing author/username, invalid date, malformed payload | `{"status":"error","reason":"…"}` |
+| `500 Internal Server Error` | Database/internal failure | `{"status":"error","reason":"internal error"}` — the extension never unbookmarks on this |
 
 A duplicate is keyed by **Tweet Status ID**, not URL, so it is detected across
-all CSV files.
+all collections.
 
 ---
 
 ## Invariants (PRD §71)
 
 ```text
-CSV is the durable source of truth.
+The SQLite database is the durable source of truth.
 
 One Tweet Status ID may only exist once globally.
 
 Backend never owns extension category configuration.
 
-Rename never renames old CSV files.
+Rename never rewrites old bookmark rows.
 
-Delete never deletes CSV files.
+Deleting a category in the extension never deletes stored bookmarks.
 
-Never unbookmark before CSV persistence succeeds.
+Never unbookmark before database persistence succeeds.
 
-A failed X unbookmark never rolls back saved CSV data.
+A failed X unbookmark never rolls back saved database rows.
 
 Previously saved tweets must be identifiable before user clicks them.
 ```
@@ -317,10 +373,12 @@ Previously saved tweets must be identifiable before user clicks them.
 Supporting guarantees:
 
 - The backend binds `127.0.0.1` only — never `0.0.0.0`.
-- Filenames must match `^[a-z0-9][a-z0-9-]*\.csv$`; the server joins them with
-  the configured storage directory itself and rejects `/`, `\`, `..`, `~`.
-- `index.json` is derived: deleting or corrupting it rebuilds it from the CSVs.
-- Index-persistence failure never fails a save (CSV already succeeded).
+- Slugs must match `^[a-z0-9][a-z0-9-]*$`; the pattern forbids `.`, `/`, `\`, `~`
+  and `_`, and the validator additionally rejects empty, over-long, NUL-containing,
+  untrimmed and `..`-containing values. There is no filesystem path involved any more.
+- The database is the only file the server owns: `journal_mode=DELETE` keeps the
+  storage directory to one complete file at every quiescent moment, so a
+  `git add` of the directory never misses committed rows in a `-wal` sidecar.
 - `saved_at` is generated by the backend, in UTC.
 
 ---
@@ -333,7 +391,7 @@ make test           # go test ./... -race, then npm test, then pnpm test
 make lint           # gofmt check + go vet + extension tsc + web tsc
 make fmt            # gofmt -w backend
 make clean          # remove backend/bin + extension/dist + web/dist (never user data)
-make clean-storage  # DESTRUCTIVE: delete ~/.twitter-bookmarker (all CSVs)
+make clean-storage  # DESTRUCTIVE: delete ~/.twitter-bookmarker (database + backup/)
 ```
 
 Extension-only scripts (`cd extension`):
@@ -342,14 +400,14 @@ Extension-only scripts (`cd extension`):
 npm run build       # one-shot esbuild bundle into dist/
 npm run watch       # rebuild on change
 npm run typecheck   # tsc --noEmit
-npm test            # node --test test/*.test.mjs (147 tests)
+npm test            # node --test test/*.test.mjs (158 tests)
 npm run verify      # post-build dist/ verification
 ```
 
 ### Phase 2 workflow (backend + web gallery)
 
 The SPA in `web/` is a second, optional surface: the extension still writes the
-CSVs and the Go backend still serves them. Develop the SPA with Vite HMR in two
+database and the Go backend still serves it. Develop the SPA with Vite HMR in two
 terminals — the dev server proxies `/api` to the backend, so no CORS setup and no
 rebuild between edits:
 
@@ -368,7 +426,7 @@ make run     # http://127.0.0.1:43121/ serves the built SPA and the API
 ```
 
 - Gallery home: `http://127.0.0.1:43121/`
-- One collection: `http://127.0.0.1:43121/collections/linux.csv`
+- One collection: `http://127.0.0.1:43121/collections/linux`
 - Health: `http://127.0.0.1:43121/health`
 
 Web-only scripts (`cd web`):
@@ -383,11 +441,11 @@ Acceptance gates (`make build` first, so `web/dist` exists):
 
 ```bash
 make verify          # every gate below, in order
-make verify-http     # scripts/check-gallery-acceptance.sh — PRD §80 + §82 over HTTP
-make verify-trace    # scripts/check-requirement-traceability.sh
-make verify-web      # scripts/check-web-acceptance.sh — real browser (agent-browser):
+make verify-http     # scripts/check-gallery-acceptance.sh — PRD §80 + §82 over HTTP (76 checks)
+make verify-trace    # scripts/check-requirement-traceability.sh (82/82 requirements)
+make verify-web      # scripts/check-web-acceptance.sh — real browser (agent-browser), 98 checks:
                      # responsive 390/768/1440, axe-core a11y, keyboard/focus,
-                     # lightbox, and the live-CSV window-focus refetch
+                     # lightbox, and the live-database window-focus refetch
 ```
 
 The full manual test procedure — every PRD §68 scenario with exact steps,
@@ -403,7 +461,7 @@ lives in **[`docs/MANUAL-TEST-CHECKLIST.md`](docs/MANUAL-TEST-CHECKLIST.md)**.
 - Is the server running? `curl -s http://127.0.0.1:43121/health`
 - The extension probes `/health` with a ~1.5 s timeout, so a stopped backend
   shows Disconnected without hanging.
-- Nothing is lost: the tweet stays bookmarked and no CSV row is written.
+- Nothing is lost: the tweet stays bookmarked and no bookmark row is written.
 
 ### Port already in use
 
@@ -411,22 +469,23 @@ The server exits non-zero with `port 43121 is already in use`. Find the holder
 with `lsof -i :43121` (or `ss -ltnp | grep 43121`) and stop it — only one
 backend may run, because the port is fixed in `backend/internal/config/config.go`.
 
-### `index.json` missing, corrupt, or out of date
+### `tw-bookmarker.db` is missing, or startup refuses to open it
 
-The backend rebuilds the index from the CSVs at startup. To force a rebuild,
-stop the server and either delete `~/.twitter-bookmarker/index.json` or corrupt
-it, then `make run`. CSVs are never modified by a rebuild.
-
-```bash
-rm ~/.twitter-bookmarker/index.json && make run
-```
+A missing database is normal: the server creates the schema (and stamps
+`user_version=1`) on first start, and a fresh install legitimately has no data.
+It **refuses** to open a file it does not recognise — a version other than 1, or
+a version-0 file that already contains unrelated tables — rather than guessing at
+an upgrade. There is no index to rebuild and no `--rebuild-index` flag: the
+database is the only artifact. See
+[`docs/design/sqlite-migration.md`](docs/design/sqlite-migration.md) §3.
 
 ### Saved tweets no longer show `✓ Saved`
 
 The saved state comes from `GET /v1/index` at page entry. Confirm the backend is
-running and `index.json` is valid, then reload the Bookmarks page. If the entry
-fetch failed while the backend was down, the extension re-fetches once when a
-save next confirms the backend is reachable.
+running and `/v1/index` answers (it reads the same database as the gallery, so it
+cannot disagree with it), then reload the Bookmarks page. If the entry fetch
+failed while the backend was down, the extension re-fetches once when a save next
+confirms the backend is reachable.
 
 ### Organizer controls stop appearing (X changed its route)
 

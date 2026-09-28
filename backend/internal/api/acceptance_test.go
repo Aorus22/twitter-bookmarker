@@ -2,9 +2,9 @@
 //
 // TestPRD65Acceptance locks every criterion that is observable through the HTTP
 // API to a named subtest. Criteria whose authoritative proof lives in another
-// package (process lifecycle, config, CSV storage, derived index) are mapped
-// below to the test that proves them, so this file alone is an auditable index
-// of §65 coverage.
+// package (process lifecycle, config, database storage, derived index) are
+// mapped below to the test that proves them, so this file alone is an auditable
+// index of §65 coverage.
 //
 //	#   §65 acceptance criterion                        Authoritative test(s)
 //	1   executable Go runs manually                     cmd/server: TestProcessLiveServer
@@ -14,24 +14,26 @@
 //	                                                    cmd/server: TestProcessLiveServer
 //	4   GET /health works                               TestPRD65Acceptance/item04_health
 //	5   GET /v1/index works                             TestPRD65Acceptance/item05_index_endpoint
-//	6   POST /v1/bookmarks creates the CSV              TestPRD65Acceptance/item06_csv_created_when_missing
-//	7   CSV header written exactly once                 TestPRD65Acceptance/item07_header_written_once
+//	6   POST /v1/bookmarks creates the collection       TestPRD65Acceptance/item06_first_save_creates_collection
+//	7   the collection row is created exactly once      TestPRD65Acceptance/item07_collection_created_once
 //	8   subsequent saves append rows                    TestPRD65Acceptance/item08_subsequent_saves_append
 //	9   URL normalized                                  TestPRD65Acceptance/item09_url_normalized
 //	10  Tweet ID extracted                              TestPRD65Acceptance/item10_tweet_id_extracted
 //	11  saved_at uses UTC                               TestPRD65Acceptance/item11_saved_at_is_utc
-//	12  duplicate rejected with 409 (same file)         TestPRD65Acceptance/item12_duplicate_same_file_409
-//	13  duplicate detection spans all CSVs              TestPRD65Acceptance/item13_duplicate_cross_file_409
-//	14  index rebuildable from CSV                      index: TestRebuildFromTwoCSVsYieldsAllIDs
-//	15  malformed index never damages CSV data          index: TestRebuildCorruptIndexYieldsAllIDsAndCSVsByteIdentical
-//	16  unicode/newline/comma valid in CSV              storage: TestCSVEdgeCasesRoundTripAndExternalParse
-//	17  filename traversal rejected                     TestPRD65Acceptance/item17_filename_traversal_rejected
+//	12  duplicate rejected with 409 (same collection)   TestPRD65Acceptance/item12_duplicate_same_collection_409
+//	13  duplicate detection spans all collections       TestPRD65Acceptance/item13_duplicate_across_collections_409
+//	14  index is derived from the database              TestPRD65Acceptance/item14_and_15_index_reflects_database
+//	15  reading never damages the data                  TestPRD65Acceptance/item14_and_15_index_reflects_database
+//	16  unicode/newline/comma valid in text             storage: TestSaveIsDurableAcrossReopen;
+//	                                                    db: TestOpenROSeesWhatOpenRWCommitted
+//	17  slug traversal rejected                         TestPRD65Acceptance/item17_slug_traversal_rejected
 //	18  concurrent duplicates make exactly one row      storage: TestConcurrentSameTweetExactlyOneRow
-//	19  index-persist failure never rolls back CSV      TestPRD65Acceptance/item19_index_persist_failure_still_201
+//	19  no derived-index sidecar is required            TestPRD65Acceptance/item19_no_derived_index_sidecar
 //	20  no settings/categories storage or endpoints     TestPRD65Acceptance/item20_no_categories_or_settings_surface
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +45,7 @@ import (
 	"time"
 
 	"twitter-bookmarker/internal/api"
-	"twitter-bookmarker/internal/index"
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/logging"
 	"twitter-bookmarker/internal/model"
 	"twitter-bookmarker/internal/storage"
@@ -84,19 +86,18 @@ func TestPRD65Acceptance(t *testing.T) {
 		if !ok {
 			t.Fatalf("index missing tweet 123: %+v", items)
 		}
-		if entry.URL != "https://x.com/foo/status/123" || entry.Filename != "linux.csv" {
-			t.Fatalf("index entry = %+v, want canonical url + linux.csv", entry)
+		if entry.URL != "https://x.com/foo/status/123" || entry.Slug != "linux" {
+			t.Fatalf("index entry = %+v, want canonical url + linux", entry)
 		}
 		if _, err := time.Parse(time.RFC3339, entry.SavedAt); err != nil {
 			t.Fatalf("index saved_at %q is not RFC3339: %v", entry.SavedAt, err)
 		}
 	})
 
-	t.Run("item06_csv_created_when_missing", func(t *testing.T) {
+	t.Run("item06_first_save_creates_collection", func(t *testing.T) {
 		h, dir := newTestServer(t)
-		path := filepath.Join(dir, "linux.csv")
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("linux.csv should not exist before the first save (stat err = %v)", err)
+		if got := collectionCount(t, dir); got != 0 {
+			t.Fatalf("collections before the first save = %d, want 0", got)
 		}
 
 		rec := do(h, http.MethodPost, "/v1/bookmarks", validBody)
@@ -104,46 +105,36 @@ func TestPRD65Acceptance(t *testing.T) {
 			t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
 		}
 		resp := decode[model.SaveResponse](t, rec)
-		if resp.Filename != "linux.csv" {
-			t.Fatalf("filename = %q, want linux.csv", resp.Filename)
+		if resp.Slug != "linux" {
+			t.Fatalf("slug = %q, want linux", resp.Slug)
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("linux.csv was not created: %v", err)
+
+		conn := openRO(t, dir)
+		if got := dbtest.Text(t, conn, `SELECT slug FROM collections`); got != "linux" {
+			t.Fatalf("stored collection slug = %q, want linux", got)
 		}
-		first := strings.SplitN(strings.TrimRight(string(raw), "\r\n"), "\n", 2)[0]
-		if first != storage.Header {
-			t.Fatalf("csv header = %q, want %q", first, storage.Header)
+		if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 1 {
+			t.Fatalf("stored bookmarks = %d, want 1", got)
 		}
 	})
 
-	t.Run("item07_header_written_once", func(t *testing.T) {
+	t.Run("item07_collection_created_once", func(t *testing.T) {
 		h, dir := newTestServer(t)
 		for _, body := range []string{
 			validBody,
-			`{"filename":"linux.csv","tweet":{"url":"https://x.com/bar/status/456","author":"Bar","username":"@bar","tweet_date":"2026-09-27T02:00:00Z","text":"second"}}`,
+			`{"slug":"linux","tweet":{"url":"https://x.com/bar/status/456","author":"Bar","username":"@bar","tweet_date":"2026-09-27T02:00:00Z","text":"second"}}`,
 		} {
 			if rec := do(h, http.MethodPost, "/v1/bookmarks", body); rec.Code != http.StatusCreated {
 				t.Fatalf("save status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
 			}
 		}
 
-		raw, err := os.ReadFile(filepath.Join(dir, "linux.csv"))
-		if err != nil {
-			t.Fatalf("read linux.csv: %v", err)
+		conn := openRO(t, dir)
+		if got := dbtest.Count(t, conn, `SELECT count(*) FROM collections WHERE slug = 'linux'`); got != 1 {
+			t.Fatalf("linux collections = %d, want exactly 1", got)
 		}
-		lines := strings.Split(strings.TrimRight(string(raw), "\r\n"), "\n")
-		if lines[0] != storage.Header {
-			t.Fatalf("line 1 = %q, want header %q", lines[0], storage.Header)
-		}
-		headerCount := 0
-		for _, line := range lines {
-			if line == storage.Header {
-				headerCount++
-			}
-		}
-		if headerCount != 1 {
-			t.Fatalf("header appeared %d times across %d lines, want exactly 1:\n%s", headerCount, len(lines), raw)
+		if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 2 {
+			t.Fatalf("bookmarks = %d, want 2", got)
 		}
 	})
 
@@ -151,8 +142,8 @@ func TestPRD65Acceptance(t *testing.T) {
 		h, dir := newTestServer(t)
 		bodies := []string{
 			validBody,
-			`{"filename":"linux.csv","tweet":{"url":"https://x.com/bar/status/456","author":"Bar","username":"@bar","tweet_date":"2026-09-27T02:00:00Z","text":"second"}}`,
-			`{"filename":"linux.csv","tweet":{"url":"https://x.com/baz/status/789","author":"Baz","username":"@baz","tweet_date":"2026-09-27T03:00:00Z","text":"third"}}`,
+			`{"slug":"linux","tweet":{"url":"https://x.com/bar/status/456","author":"Bar","username":"@bar","tweet_date":"2026-09-27T02:00:00Z","text":"second"}}`,
+			`{"slug":"linux","tweet":{"url":"https://x.com/baz/status/789","author":"Baz","username":"@baz","tweet_date":"2026-09-27T03:00:00Z","text":"third"}}`,
 		}
 		for _, body := range bodies {
 			if rec := do(h, http.MethodPost, "/v1/bookmarks", body); rec.Code != http.StatusCreated {
@@ -160,26 +151,25 @@ func TestPRD65Acceptance(t *testing.T) {
 			}
 		}
 
-		rows := csvDataRows(t, dir, "linux.csv")
-		if len(rows) != len(bodies) {
-			t.Fatalf("data rows = %d, want %d", len(rows), len(bodies))
-		}
-		gotIDs := []string{rows[0][0], rows[1][0], rows[2][0]}
-		wantIDs := []string{
+		gotURLs := bookmarkURLs(t, dir)
+		wantURLs := []string{
 			"https://x.com/foo/status/123",
 			"https://x.com/bar/status/456",
 			"https://x.com/baz/status/789",
 		}
-		for i := range wantIDs {
-			if gotIDs[i] != wantIDs[i] {
-				t.Errorf("row %d url = %q, want %q", i, gotIDs[i], wantIDs[i])
+		if len(gotURLs) != len(wantURLs) {
+			t.Fatalf("stored urls = %v, want %d rows", gotURLs, len(wantURLs))
+		}
+		for i := range wantURLs {
+			if gotURLs[i] != wantURLs[i] {
+				t.Errorf("row %d url = %q, want %q", i, gotURLs[i], wantURLs[i])
 			}
 		}
 	})
 
 	t.Run("item09_url_normalized", func(t *testing.T) {
 		h, dir := newTestServer(t)
-		body := `{"filename":"linux.csv","tweet":{"url":"https://twitter.com/foo/status/321?s=20#frag","author":"Foo","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"hi"}}`
+		body := `{"slug":"linux","tweet":{"url":"https://twitter.com/foo/status/321?s=20#frag","author":"Foo","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"hi"}}`
 		rec := do(h, http.MethodPost, "/v1/bookmarks", body)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
@@ -188,14 +178,14 @@ func TestPRD65Acceptance(t *testing.T) {
 		if resp.URL != "https://x.com/foo/status/321" {
 			t.Fatalf("response url = %q, want canonical https://x.com/foo/status/321", resp.URL)
 		}
-		if row := csvDataRows(t, dir, "linux.csv")[0]; row[0] != resp.URL {
-			t.Fatalf("csv url = %q, want canonical %q", row[0], resp.URL)
+		if got := dbtest.Text(t, openRO(t, dir), `SELECT url FROM bookmarks WHERE tweet_id = '321'`); got != resp.URL {
+			t.Fatalf("stored url = %q, want canonical %q", got, resp.URL)
 		}
 	})
 
 	t.Run("item10_tweet_id_extracted", func(t *testing.T) {
 		h, dir := newTestServer(t)
-		body := `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/987654321?s=20","author":"Foo","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"hi"}}`
+		body := `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/987654321?s=20","author":"Foo","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"hi"}}`
 		rec := do(h, http.MethodPost, "/v1/bookmarks", body)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
@@ -207,8 +197,8 @@ func TestPRD65Acceptance(t *testing.T) {
 		if items := decode[model.IndexResponse](t, do(h, http.MethodGet, "/v1/index", "")).Items; items["987654321"].URL != resp.URL {
 			t.Fatalf("index is not keyed by the extracted id: %+v", items)
 		}
-		if row := csvDataRows(t, dir, "linux.csv")[0]; !strings.HasSuffix(row[0], "/status/987654321") {
-			t.Fatalf("csv url = %q, want /status/987654321 suffix", row[0])
+		if got := dbtest.Text(t, openRO(t, dir), `SELECT url FROM bookmarks WHERE tweet_id = '987654321'`); !strings.HasSuffix(got, "/status/987654321") {
+			t.Fatalf("stored url = %q, want /status/987654321 suffix", got)
 		}
 	})
 
@@ -232,12 +222,12 @@ func TestPRD65Acceptance(t *testing.T) {
 		if parsed.Before(before) || parsed.After(after) {
 			t.Fatalf("saved_at %v outside [%v, %v]", parsed, before, after)
 		}
-		if row := csvDataRows(t, dir, "linux.csv")[0]; row[5] != resp.SavedAt {
-			t.Fatalf("csv saved_at = %q, response saved_at = %q", row[5], resp.SavedAt)
+		if got := dbtest.Text(t, openRO(t, dir), `SELECT saved_at FROM bookmarks WHERE tweet_id = '123'`); got != resp.SavedAt {
+			t.Fatalf("stored saved_at = %q, response saved_at = %q", got, resp.SavedAt)
 		}
 	})
 
-	t.Run("item12_duplicate_same_file_409", func(t *testing.T) {
+	t.Run("item12_duplicate_same_collection_409", func(t *testing.T) {
 		h, dir := newTestServer(t)
 		if rec := do(h, http.MethodPost, "/v1/bookmarks", validBody); rec.Code != http.StatusCreated {
 			t.Fatalf("first save status = %d, want 201", rec.Code)
@@ -250,60 +240,87 @@ func TestPRD65Acceptance(t *testing.T) {
 		if dup.Status != "duplicate" || dup.TweetID != "123" {
 			t.Fatalf("duplicate body = %+v, want status=duplicate tweet_id=123", dup)
 		}
-		if rows := csvDataRows(t, dir, "linux.csv"); len(rows) != 1 {
-			t.Fatalf("data rows = %d, want 1 after duplicate", len(rows))
+		if got := totalBookmarks(t, dir); got != 1 {
+			t.Fatalf("bookmarks = %d, want 1 after duplicate", got)
 		}
 	})
 
-	t.Run("item13_duplicate_cross_file_409", func(t *testing.T) {
+	t.Run("item13_duplicate_across_collections_409", func(t *testing.T) {
 		h, dir := newTestServer(t)
 		if rec := do(h, http.MethodPost, "/v1/bookmarks", validBody); rec.Code != http.StatusCreated {
 			t.Fatalf("first save status = %d, want 201", rec.Code)
 		}
-		crossBody := `{"filename":"ai.csv","tweet":{"url":"https://x.com/renamed/status/123?s=20","author":"Other","username":"@other","tweet_date":"2026-09-27T05:00:00Z","text":"dupe"}}`
+		crossBody := `{"slug":"ai","tweet":{"url":"https://x.com/renamed/status/123?s=20","author":"Other","username":"@other","tweet_date":"2026-09-27T05:00:00Z","text":"dupe"}}`
 		rec := do(h, http.MethodPost, "/v1/bookmarks", crossBody)
 		if rec.Code != http.StatusConflict {
-			t.Fatalf("cross-file duplicate status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+			t.Fatalf("cross-collection duplicate status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
 		}
-		if _, err := os.Stat(filepath.Join(dir, "ai.csv")); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("ai.csv must not be created for a cross-file duplicate (stat err = %v)", err)
+		if got := collectionCount(t, dir); got != 1 {
+			t.Fatalf("collections = %d, want 1: the duplicate must not create 'ai'", got)
 		}
-		if rows := csvDataRows(t, dir, "linux.csv"); len(rows) != 1 {
-			t.Fatalf("linux.csv data rows = %d, want 1", len(rows))
+		if got := bookmarkCount(t, dir, "linux"); got != 1 {
+			t.Fatalf("linux bookmarks = %d, want 1", got)
 		}
 	})
 
-	t.Run("item14_and_15_via_index_rebuild", func(t *testing.T) {
-		// Authoritative coverage lives in index/rebuild_test.go; this subtest
-		// keeps the §65 mapping explicit in the acceptance file.
-		ix, err := index.LoadOrRebuild(t.TempDir(), logging.Discard())
+	t.Run("item14_and_15_index_reflects_database", func(t *testing.T) {
+		dir := t.TempDir()
+		conn := dbtest.Open(t, dir)
+		dbtest.Seed(t, conn, "linux", "Linux", dbtest.Row{TweetID: "1"}, dbtest.Row{TweetID: "2"})
+		dbtest.Seed(t, conn, "ai", "AI And LLM", dbtest.Row{TweetID: "3"})
+
+		store, err := storage.NewStore(dir, logging.Discard())
 		if err != nil {
-			t.Fatalf("LoadOrRebuild(empty dir) error = %v", err)
+			t.Fatalf("storage.NewStore() error = %v", err)
 		}
-		if ix.Count() != 0 || ix.All() == nil {
-			t.Fatalf("empty dir index = %+v, want empty non-nil", ix.All())
+		defer func() { _ = store.Close() }()
+
+		items, err := store.Index()
+		if err != nil {
+			t.Fatalf("Store.Index() error = %v", err)
+		}
+		if items == nil {
+			t.Fatalf("index items is nil, want a non-nil map")
+		}
+		for _, id := range []string{"1", "2", "3"} {
+			if _, ok := items[id]; !ok {
+				t.Errorf("index missing tweet %s: %+v", id, items)
+			}
+		}
+		if len(items) != 3 {
+			t.Errorf("index entries = %d, want 3", len(items))
+		}
+
+		// Reading the index is side-effect free: the database file is
+		// byte-identical afterwards.
+		before := dbHash(t, dir)
+		if _, err := store.Index(); err != nil {
+			t.Fatalf("second Store.Index() error = %v", err)
+		}
+		if after := dbHash(t, dir); !bytes.Equal(before, after) {
+			t.Errorf("reading the index mutated the database")
 		}
 	})
 
-	t.Run("item17_filename_traversal_rejected", func(t *testing.T) {
+	t.Run("item17_slug_traversal_rejected", func(t *testing.T) {
 		cases := []string{
-			"../evil.csv",
-			"../../etc/evil.csv",
+			"../evil",
+			"../../etc/evil",
 			"/etc/passwd",
-			"sub/evil.csv",
-			`..\evil.csv`,
-			"~/.ssh/evil.csv",
-			"linux.csv\x00",
+			"sub/evil",
+			`..\evil`,
+			"~/.ssh/evil",
+			"linux\x00",
 			"..",
 			".",
 			"linux.txt",
-			"Linux.csv",
+			"Linux",
 		}
 		h, dir := newTestServer(t)
-		for _, name := range cases {
-			t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
+		for _, slug := range cases {
+			t.Run(fmt.Sprintf("%q", slug), func(t *testing.T) {
 				req := model.SaveRequest{
-					Filename: name,
+					Slug: slug,
 					Tweet: model.TweetInput{
 						URL:       "https://x.com/foo/status/123",
 						Author:    "Foo",
@@ -318,7 +335,7 @@ func TestPRD65Acceptance(t *testing.T) {
 				}
 				rec := do(h, http.MethodPost, "/v1/bookmarks", string(payload))
 				if rec.Code != http.StatusBadRequest {
-					t.Fatalf("filename %q status = %d, want 400 (body %s)", name, rec.Code, rec.Body.String())
+					t.Fatalf("slug %q status = %d, want 400 (body %s)", slug, rec.Code, rec.Body.String())
 				}
 				if body := decode[model.ErrorResponse](t, rec); body.Status != "error" {
 					t.Fatalf("error body = %+v, want status=error", body)
@@ -326,40 +343,40 @@ func TestPRD65Acceptance(t *testing.T) {
 			})
 		}
 
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Fatalf("ReadDir: %v", err)
+		if got := collectionCount(t, dir); got != 0 {
+			t.Errorf("rejected traversal requests created %d collection(s)", got)
 		}
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".csv") {
-				t.Errorf("rejected traversal request created %s", e.Name())
-			}
+		if got := totalBookmarks(t, dir); got != 0 {
+			t.Errorf("rejected traversal requests wrote %d bookmark(s)", got)
 		}
 	})
 
-	t.Run("item19_index_persist_failure_still_201", func(t *testing.T) {
+	t.Run("item19_no_derived_index_sidecar", func(t *testing.T) {
 		dir := t.TempDir()
-		idx := index.New()
-		// Make index.Persist fail deterministically: its rename target is a
-		// non-empty directory.
+		// A leftover derived-index artifact from the CSV era is inert: even a
+		// non-empty directory named index.json cannot affect the database path.
 		if err := os.Mkdir(filepath.Join(dir, "index.json"), 0o700); err != nil {
 			t.Fatalf("mkdir index.json: %v", err)
 		}
-		store := storage.NewStore(dir, idx, logging.Discard())
-		h := api.NewServer(store, idx, logging.Discard())
+		store, err := storage.NewStore(dir, logging.Discard())
+		if err != nil {
+			t.Fatalf("storage.NewStore() error = %v", err)
+		}
+		defer func() { _ = store.Close() }()
+		h := api.NewServer(store, logging.Discard())
 
 		rec := do(h, http.MethodPost, "/v1/bookmarks", validBody)
 		if rec.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201 despite index persistence failure (body %s)", rec.Code, rec.Body.String())
+			t.Fatalf("status = %d, want 201 despite the stray index.json (body %s)", rec.Code, rec.Body.String())
 		}
-		if resp := decode[model.SaveResponse](t, rec); resp.Status != "saved" {
-			t.Fatalf("response = %+v, want status=saved", resp)
+		if resp := decode[model.SaveResponse](t, rec); resp.Status != "saved" || resp.Slug != "linux" {
+			t.Fatalf("response = %+v, want status=saved slug=linux", resp)
 		}
-		if rows := csvDataRows(t, dir, "linux.csv"); len(rows) != 1 {
-			t.Fatalf("linux.csv data rows = %d, want 1", len(rows))
+		if got := bookmarkCount(t, dir, "linux"); got != 1 {
+			t.Fatalf("linux bookmarks = %d, want 1", got)
 		}
-		if idx.Count() != 1 {
-			t.Fatalf("in-memory index count = %d, want 1", idx.Count())
+		if items := decode[model.IndexResponse](t, do(h, http.MethodGet, "/v1/index", "")).Items; len(items) != 1 {
+			t.Fatalf("index entries = %d, want 1", len(items))
 		}
 	})
 
@@ -388,9 +405,9 @@ func TestPRD65Acceptance(t *testing.T) {
 		// Settings/category fields are not part of the save payload and are
 		// rejected, so the backend persists no settings or category state.
 		withUnknown := []string{
-			`{"filename":"linux.csv","settings":{"unbookmarkAfterSave":true},"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`,
-			`{"filename":"linux.csv","categories":[{"name":"Linux"}],"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`,
-			`{"filename":"linux.csv","category":{"name":"Linux"},"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`,
+			`{"slug":"linux","settings":{"unbookmarkAfterSave":true},"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`,
+			`{"slug":"linux","categories":[{"name":"Linux"}],"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`,
+			`{"slug":"linux","category":{"name":"Linux"},"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`,
 		}
 		for _, body := range withUnknown {
 			if rec := do(h, http.MethodPost, "/v1/bookmarks", body); rec.Code != http.StatusBadRequest {
@@ -424,12 +441,12 @@ func TestPRD65ValidationAndErrorMapping(t *testing.T) {
 			item string
 			body string
 		}{
-			{"invalid_filename", `{"filename":"../x.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-			{"invalid_x_url_host", `{"filename":"linux.csv","tweet":{"url":"https://example.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-			{"invalid_x_url_scheme", `{"filename":"linux.csv","tweet":{"url":"ftp://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-			{"missing_author", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-			{"missing_username", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"","tweet_date":"2026-09-27T01:00:00Z"}}`},
-			{"invalid_tweet_date", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"27-09-2026"}}`},
+			{"invalid_slug", `{"slug":"../x","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+			{"invalid_x_url_host", `{"slug":"linux","tweet":{"url":"https://example.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+			{"invalid_x_url_scheme", `{"slug":"linux","tweet":{"url":"ftp://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+			{"missing_author", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+			{"missing_username", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"","tweet_date":"2026-09-27T01:00:00Z"}}`},
+			{"invalid_tweet_date", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"27-09-2026"}}`},
 			{"invalid_payload_malformed_json", `{`},
 			{"invalid_payload_wrong_type", `[]`},
 			{"invalid_payload_empty_body", ``},
@@ -447,21 +464,19 @@ func TestPRD65ValidationAndErrorMapping(t *testing.T) {
 				if body := decode[model.ErrorResponse](t, rec); body.Status != "error" {
 					t.Errorf("error body = %+v, want status=error", body)
 				}
-				entries, err := os.ReadDir(dir)
-				if err != nil {
-					t.Fatalf("ReadDir: %v", err)
+				conn := openRO(t, dir)
+				if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 0 {
+					t.Errorf("rejected request wrote %d bookmark(s)", got)
 				}
-				for _, e := range entries {
-					if strings.HasSuffix(e.Name(), ".csv") {
-						t.Errorf("rejected request created %s", e.Name())
-					}
+				if got := dbtest.Count(t, conn, `SELECT count(*) FROM collections`); got != 0 {
+					t.Errorf("rejected request wrote %d collection(s)", got)
 				}
 			})
 		}
 	})
 
 	t.Run("500_internal_error_mapping", func(t *testing.T) {
-		h := api.NewServer(stubStore{err: errors.New("disk on fire")}, stubIndex{}, logging.Discard())
+		h := api.NewServer(stubStore{err: errors.New("disk on fire")}, logging.Discard())
 		rec := do(h, http.MethodPost, "/v1/bookmarks", validBody)
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", rec.Code)

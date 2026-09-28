@@ -21,10 +21,10 @@ import type { GalleryCollection } from "@/types"
 const SAVED_AT = new Date(2026, 8, 27, 12, 0, 0).toISOString()
 
 function collection(
-  overrides: Partial<GalleryCollection> & { filename: string }
+  overrides: Partial<GalleryCollection> & { slug: string }
 ): GalleryCollection {
   return {
-    name: overrides.filename.replace(/\.csv$/, ""),
+    name: overrides.slug,
     post_count: 0,
     media_count: 0,
     last_saved_at: null,
@@ -34,7 +34,7 @@ function collection(
 }
 
 const LINUX = collection({
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux",
   post_count: 83,
   media_count: 126,
@@ -48,7 +48,7 @@ const LINUX = collection({
 })
 
 const DESIGN = collection({
-  filename: "design.csv",
+  slug: "design",
   name: "Design",
   post_count: 12,
   media_count: 3,
@@ -56,7 +56,7 @@ const DESIGN = collection({
   cover_media: ["https://example.test/only.jpg"],
 })
 
-const QUIET = collection({ filename: "quiet.csv", name: "Quiet" })
+const QUIET = collection({ slug: "quiet", name: "Quiet" })
 
 /** Minimal stand-in for the parts of `Response` the API client reads. */
 function jsonResponse(body: unknown, status = 200): Response {
@@ -106,7 +106,7 @@ describe("GalleryPage — populated", () => {
     ).toEqual(["Linux", "Design", "Quiet"])
 
     expect(within(cards[0]).getByRole("link").getAttribute("href")).toBe(
-      "/collections/linux.csv"
+      "/collections/linux"
     )
     expect(
       within(cards[0]).getByText("83 posts · 126 media · Last saved Sep 27")
@@ -117,7 +117,7 @@ describe("GalleryPage — populated", () => {
 
     expect(
       screen.getByText(
-        "Local-only · Powered by your CSV archive · No cloud, no algorithmic feed"
+        "Local-only · Powered by your local archive · No cloud, no algorithmic feed"
       )
     ).toBeInTheDocument()
 
@@ -209,7 +209,7 @@ describe("GalleryPage — states", () => {
     ).toBeGreaterThan(0)
   })
 
-  it("renders the empty state copy when there are no CSVs (PRD-2 §59)", async () => {
+  it("renders the empty state copy when there are no collections (PRD-2 §59)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(jsonResponse({ collections: [] }))
@@ -293,7 +293,7 @@ describe("GalleryPage — states", () => {
     expect(screen.getByTestId("collection-card")).toBeInTheDocument()
     expect(within(card).getByRole("link")).toHaveAttribute(
       "href",
-      "/collections/design.csv"
+      "/collections/design"
     )
   })
 

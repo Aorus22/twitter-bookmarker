@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils"
 
 export interface CollectionCoverProps {
   media: readonly string[]
-  /** Stable key for the placeholder gradient (usually the collection filename). */
+  /** Stable key for the placeholder gradient (usually the collection slug). */
   seed: string
   className?: string
 }

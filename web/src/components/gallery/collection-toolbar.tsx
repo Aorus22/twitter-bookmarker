@@ -2,10 +2,7 @@ import { ListFilter } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { SORT_OPTIONS } from "@/lib/collection-sort"
-import {
-  COLLECTION_SEARCH_PLACEHOLDER,
-  FILTER_LABEL,
-} from "@/lib/messages"
+import { COLLECTION_SEARCH_PLACEHOLDER, FILTER_LABEL } from "@/lib/messages"
 import { cn } from "@/lib/utils"
 import type { GallerySort } from "@/types"
 
@@ -67,10 +64,7 @@ export function CollectionToolbar({
   return (
     <div
       data-testid="collection-toolbar"
-      className={cn(
-        "flex flex-wrap items-center gap-3",
-        className
-      )}
+      className={cn("flex flex-wrap items-center gap-3", className)}
     >
       <input
         type="search"
@@ -90,7 +84,7 @@ export function CollectionToolbar({
           data-testid="collection-filter"
           data-filter-active={filterActive}
           onClick={onFilterClick}
-          className="flex h-10 w-[86px] shrink-0 items-center justify-center gap-1.5 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink outline-none transition-colors hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex h-10 w-[86px] shrink-0 items-center justify-center gap-1.5 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <ListFilter className="size-3.5" aria-hidden="true" />
           {FILTER_LABEL}

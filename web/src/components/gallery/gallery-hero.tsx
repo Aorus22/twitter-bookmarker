@@ -91,8 +91,8 @@ export function GalleryHero({ collections }: GalleryHeroProps) {
             Relive inspiration.
           </h1>
           <p className="mt-4 max-w-[510px] text-sm leading-[1.45] text-muted">
-            Every collection in your local CSV archive, rendered as a gallery.
-            No cloud, no algorithmic feed — just your saved things.
+            Every collection in your local archive, rendered as a gallery. No
+            cloud, no algorithmic feed — just your saved things.
           </p>
           <a
             href="#collections-grid"

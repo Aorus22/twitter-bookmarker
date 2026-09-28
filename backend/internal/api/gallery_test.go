@@ -1,17 +1,17 @@
 // Acceptance tests for the read-only gallery HTTP API (PRD-2 §36-§41, §54, §70,
 // §80.4-§80.23).
 //
-// The suite seeds its own storage directory inside t.TempDir() and points the
-// server at it through TWITTER_BOOKMARKER_DIR, so it never depends on an
-// external fixture. Every response body is also asserted against the raw bytes,
-// not just the decoded fields, because "media is [] not null" and "the storage
-// path is never leaked" are wire-level contracts.
+// The suite seeds its own storage directory inside t.TempDir() with dbtest and
+// points the server at it through TWITTER_BOOKMARKER_DIR, so it never depends on
+// an external fixture. Every response body is also asserted against the raw
+// bytes, not just the decoded fields, because "media is [] not null" and "the
+// storage path is never leaked" are wire-level contracts.
 package api_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,7 +22,8 @@ import (
 	"time"
 
 	"twitter-bookmarker/internal/api"
-	"twitter-bookmarker/internal/index"
+	"twitter-bookmarker/internal/config"
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/logging"
 	"twitter-bookmarker/internal/model"
 	"twitter-bookmarker/internal/storage"
@@ -32,7 +33,7 @@ import (
 // explicit local struct (rather than the api package's unexported DTO) pins the
 // exact JSON field names and types across the package boundary.
 type galleryCollectionDTO struct {
-	Filename    string   `json:"filename"`
+	Slug        string   `json:"slug"`
 	Name        string   `json:"name"`
 	PostCount   int      `json:"post_count"`
 	MediaCount  int      `json:"media_count"`
@@ -64,7 +65,7 @@ type galleryPostsDTO struct {
 
 const (
 	galleryCollectionsPath = "/api/gallery/collections"
-	galleryPostsPath       = "/api/gallery/collections/linux.csv/posts"
+	galleryPostsPath       = "/api/gallery/collections/linux/posts"
 )
 
 // newGalleryServer builds the full API over a fresh temp storage dir and points
@@ -72,16 +73,16 @@ const (
 func newGalleryServer(t *testing.T, log *logging.Logger) (http.Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("TWITTER_BOOKMARKER_DIR", dir)
+	t.Setenv(config.EnvDir, dir)
 	if log == nil {
 		log = logging.Discard()
 	}
-	idx, err := index.LoadOrRebuild(dir, log)
+	store, err := storage.NewStore(dir, log)
 	if err != nil {
-		t.Fatalf("LoadOrRebuild() error = %v", err)
+		t.Fatalf("storage.NewStore() error = %v", err)
 	}
-	store := storage.NewStore(dir, idx, log)
-	return api.NewServer(store, idx, log), dir
+	t.Cleanup(func() { _ = store.Close() })
+	return api.NewServer(store, log), dir
 }
 
 func writeFile(t *testing.T, path, body string) {
@@ -91,29 +92,17 @@ func writeFile(t *testing.T, path, body string) {
 	}
 }
 
-// writeGalleryCSV writes a header plus rows with encoding/csv, so a JSON `media`
-// cell keeps its inner quotes correctly doubled rather than corrupting the row.
-func writeGalleryCSV(t *testing.T, dir, name string, rows [][]string) {
+// dbHash is the SHA-256 of the whole database file. Comparing it before and
+// after a request is how "the gallery never mutates the data" is asserted
+// without depending on row order or SQLite internals.
+func dbHash(t *testing.T, dir string) []byte {
 	t.Helper()
-	file, err := os.Create(filepath.Join(dir, name))
+	raw, err := os.ReadFile(config.DBPath(dir))
 	if err != nil {
-		t.Fatalf("create %s: %v", name, err)
+		t.Fatalf("read database %s: %v", config.DBPath(dir), err)
 	}
-	defer file.Close()
-
-	w := csv.NewWriter(file)
-	if err := w.Write(strings.Split(storage.Header, ",")); err != nil {
-		t.Fatalf("write header for %s: %v", name, err)
-	}
-	for _, row := range rows {
-		if err := w.Write(row); err != nil {
-			t.Fatalf("write row for %s: %v", name, err)
-		}
-	}
-	w.Flush()
-	if err := w.Error(); err != nil {
-		t.Fatalf("flush %s: %v", name, err)
-	}
+	sum := sha256.Sum256(raw)
+	return sum[:]
 }
 
 func mediaURLs(names ...string) string {
@@ -131,7 +120,7 @@ func mediaURLs(names ...string) string {
 	return string(encoded)
 }
 
-// linuxRows builds 8 valid rows. tweet_date and saved_at both run newest (row
+// seedLinux writes 8 valid rows. tweet_date and saved_at both run newest (row
 // 1) to oldest (row 8) so every sort mode has an unambiguous first row:
 //
 //	saved_desc / tweet_desc -> ...001
@@ -139,8 +128,11 @@ func mediaURLs(names ...string) string {
 //
 // Media counts are 4,3,2,1,0,0,2,1 (13 total) and "wayland"/"@linuxguy" appear
 // in a known number of rows for the search assertions.
-func linuxRows() [][]string {
-	rows := make([][]string, 0, 8)
+func seedLinux(t *testing.T, dir string) {
+	t.Helper()
+	conn := dbtest.Open(t, dir)
+	linux := dbtest.Collection(t, conn, "linux", "Linux")
+
 	for i := 1; i <= 8; i++ {
 		tweet := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -(i - 1))
 		saved := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -(i - 1))
@@ -181,37 +173,46 @@ func linuxRows() [][]string {
 			text = "wayland benchmarks, again"
 		}
 
-		rows = append(rows, []string{
-			fmt.Sprintf("https://x.com/user/status/100000000000000000%d", i),
-			media, author, username,
-			tweet.Format(time.RFC3339), saved.Format(time.RFC3339), text,
+		dbtest.Insert(t, conn, linux, dbtest.Row{
+			TweetID:   fmt.Sprintf("100000000000000000%d", i),
+			URL:       fmt.Sprintf("https://x.com/user/status/100000000000000000%d", i),
+			Media:     media,
+			Author:    author,
+			Username:  username,
+			TweetDate: tweet.Format(time.RFC3339),
+			SavedAt:   saved.Format(time.RFC3339),
+			Text:      text,
 		})
 	}
-	return rows
-}
-
-func seedLinux(t *testing.T, dir string) {
-	t.Helper()
-	writeGalleryCSV(t, dir, "linux.csv", linuxRows())
 }
 
 // seedAllCollections adds a one-post second collection, an empty third one and
-// the decoys that must never appear as collections.
+// the stray files that must never appear as collections: the gallery reads only
+// the database, so a file or subdirectory in the storage dir is inert.
 func seedAllCollections(t *testing.T, dir string) {
 	t.Helper()
 	seedLinux(t, dir)
-	writeGalleryCSV(t, dir, "ai-and-llm.csv", [][]string{{
-		"https://x.com/aiperson/status/2000000000000000001",
-		mediaURLs("d1"),
-		"AI Person", "@aiperson",
-		"2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z",
-		"Older than every linux row",
-	}})
-	writeGalleryCSV(t, dir, "design.csv", nil)
+
+	conn := dbtest.Open(t, dir)
+	ai := dbtest.Collection(t, conn, "ai-and-llm", "AI And LLM")
+	dbtest.Insert(t, conn, ai, dbtest.Row{
+		TweetID:   "2000000000000000001",
+		URL:       "https://x.com/aiperson/status/2000000000000000001",
+		Media:     mediaURLs("d1"),
+		Author:    "AI Person",
+		Username:  "@aiperson",
+		TweetDate: "2026-07-01T00:00:00Z",
+		SavedAt:   "2026-08-01T00:00:00Z",
+		Text:      "Older than every linux row",
+	})
+	dbtest.Collection(t, conn, "design", "Design")
+
 	writeFile(t, filepath.Join(dir, "index.json"), `{"version":1,"tweets":{}}`)
-	writeFile(t, filepath.Join(dir, "notes.txt"), "not a csv\n")
-	writeFile(t, filepath.Join(dir, ".hidden.csv"), storage.Header+"\n")
-	writeFile(t, filepath.Join(dir, "linux.csv.bak"), storage.Header+"\n")
+	writeFile(t, filepath.Join(dir, "notes.txt"), "not a collection\n")
+	writeFile(t, filepath.Join(dir, "linux.bak"), "stray backup\n")
+	if err := os.Mkdir(filepath.Join(dir, "archive"), 0o700); err != nil {
+		t.Fatalf("mkdir archive: %v", err)
+	}
 }
 
 func fetchCollections(t *testing.T, h http.Handler) galleryCollectionsDTO {
@@ -288,8 +289,8 @@ func TestGalleryCollectionsEndpoint(t *testing.T) {
 	}
 
 	linux := body.Collections[0]
-	if linux.Filename != "linux.csv" {
-		t.Errorf("collections[0].filename = %q, want linux.csv", linux.Filename)
+	if linux.Slug != "linux" {
+		t.Errorf("collections[0].slug = %q, want linux", linux.Slug)
 	}
 	if linux.PostCount != 8 {
 		t.Errorf("linux post_count = %d, want 8", linux.PostCount)
@@ -314,7 +315,7 @@ func TestGalleryCollectionsEndpoint(t *testing.T) {
 		t.Errorf("design = %+v, want an empty collection", design)
 	}
 	if design.LastSavedAt != nil {
-		t.Errorf("design last_saved_at = %q, want null for an empty CSV", *design.LastSavedAt)
+		t.Errorf("design last_saved_at = %q, want null for a collection with no bookmarks", *design.LastSavedAt)
 	}
 	if design.CoverMedia == nil || len(design.CoverMedia) != 0 {
 		t.Errorf("design cover_media = %v, want an empty array", design.CoverMedia)
@@ -323,9 +324,11 @@ func TestGalleryCollectionsEndpoint(t *testing.T) {
 		t.Errorf("empty collection must serialise last_saved_at as null: %s", raw)
 	}
 
-	for _, decoy := range []string{"index.json", "notes.txt", ".hidden.csv", "linux.csv.bak"} {
+	// A file or subdirectory in the storage dir is not a collection: only the
+	// database rows are listed.
+	for _, decoy := range []string{"index.json", "notes.txt", "linux.bak", "archive"} {
 		if strings.Contains(raw, decoy) {
-			t.Errorf("decoy %q leaked into the collections response: %s", decoy, raw)
+			t.Errorf("stray file %q leaked into the collections response: %s", decoy, raw)
 		}
 	}
 
@@ -354,7 +357,7 @@ func TestGalleryCollectionsEmptyStorageDir(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// API-03 / API-06 — GET .../{filename}/posts shapes, filters and sorting
+// API-03 / API-06 — GET .../{slug}/posts shapes, filters and sorting
 // ---------------------------------------------------------------------------
 
 func TestGalleryPostsHappyPath(t *testing.T) {
@@ -624,10 +627,11 @@ func TestGalleryPostsUnknownCollectionIs404(t *testing.T) {
 	h, dir := newGalleryServer(t, nil)
 	seedLinux(t, dir)
 
-	for _, name := range []string{"nope.csv", "missing.csv"} {
-		rec := do(h, http.MethodGet, "/api/gallery/collections/"+name+"/posts", "")
+	// Both are syntactically valid slugs that simply do not resolve.
+	for _, slug := range []string{"nope", "missing"} {
+		rec := do(h, http.MethodGet, "/api/gallery/collections/"+slug+"/posts", "")
 		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s status = %d, want 404 (body %s)", name, rec.Code, rec.Body.String())
+			t.Fatalf("%s status = %d, want 404 (body %s)", slug, rec.Code, rec.Body.String())
 		}
 		var body model.ErrorResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -646,37 +650,33 @@ func TestGalleryRejectsWrites(t *testing.T) {
 	h, dir := newGalleryServer(t, nil)
 	seedLinux(t, dir)
 
-	before, err := os.ReadFile(filepath.Join(dir, "linux.csv"))
-	if err != nil {
-		t.Fatalf("read seeded csv: %v", err)
-	}
+	before := dbHash(t, dir)
 
 	for _, path := range []string{galleryCollectionsPath, galleryPostsPath} {
 		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-			rec := do(h, method, path, `{"filename":"evil.csv"}`)
+			rec := do(h, method, path, `{"slug":"evil"}`)
 			if rec.Code != http.StatusMethodNotAllowed {
 				t.Errorf("%s %s status = %d, want 405", method, path, rec.Code)
 			}
 		}
 	}
 
-	after, err := os.ReadFile(filepath.Join(dir, "linux.csv"))
-	if err != nil {
-		t.Fatalf("read csv after write attempts: %v", err)
+	// None of the rejected requests touched the database: the file is
+	// byte-identical to the seeded state.
+	if after := dbHash(t, dir); !bytes.Equal(before, after) {
+		t.Errorf("a non-GET gallery request mutated the database")
 	}
-	if !bytes.Equal(before, after) {
-		t.Errorf("a non-GET gallery request mutated linux.csv")
-	}
+
+	// Nor did one create a stray file: everything in the directory is the
+	// database (or a transient SQLite sidecar for it).
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "linux.csv" {
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
-			names = append(names, e.Name())
+	for _, e := range entries {
+		if e.Name() != config.DBName && !strings.HasPrefix(e.Name(), config.DBName+"-") {
+			t.Errorf("gallery write attempts created %s", e.Name())
 		}
-		t.Errorf("gallery write attempts created files: %v", names)
 	}
 }
 
@@ -684,7 +684,7 @@ func TestGalleryRejectsWrites(t *testing.T) {
 // API-07 — traversal, path leakage, internal errors
 // ---------------------------------------------------------------------------
 
-func TestGalleryRejectsTraversalAndBadFilenames(t *testing.T) {
+func TestGalleryRejectsTraversalAndBadSlugs(t *testing.T) {
 	h, dir := newGalleryServer(t, nil)
 	seedAllCollections(t, dir)
 
@@ -693,18 +693,19 @@ func TestGalleryRejectsTraversalAndBadFilenames(t *testing.T) {
 		path string
 		// want is the set of acceptable status codes. The raw `../` form is
 		// cleaned and redirected by Go's ServeMux before any handler runs (a
-		// 307 to the equivalent cleaned path, which then 404s), so the test
+		// redirect to the equivalent cleaned path, which then 404s), so the test
 		// accepts that as "never read a file" alongside the handler's 400.
 		want []int
 	}{
-		{"encoded_dotdot", "/api/gallery/collections/..%2Fsecret.csv/posts", []int{http.StatusBadRequest}},
-		{"encoded_dotdot_hex", "/api/gallery/collections/%2e%2e%2fsecret.csv/posts", []int{http.StatusBadRequest}},
-		{"encoded_slash", "/api/gallery/collections/a%2Fb.csv/posts", []int{http.StatusBadRequest}},
-		{"non_csv_extension", "/api/gallery/collections/x.txt/posts", []int{http.StatusBadRequest}},
-		{"uppercase_filename", "/api/gallery/collections/Linux.csv/posts", []int{http.StatusBadRequest}},
-		{"existing_non_csv", "/api/gallery/collections/notes.txt/posts", []int{http.StatusBadRequest}},
-		{"backslash", "/api/gallery/collections/..%5Csecret.csv/posts", []int{http.StatusBadRequest}},
-		{"raw_dotdot", "/api/gallery/collections/../secret.csv/posts", []int{http.StatusTemporaryRedirect, http.StatusBadRequest, http.StatusNotFound}},
+		{"encoded_dotdot", "/api/gallery/collections/..%2Fsecret/posts", []int{http.StatusBadRequest}},
+		{"encoded_dotdot_hex", "/api/gallery/collections/%2e%2e%2fsecret/posts", []int{http.StatusBadRequest}},
+		{"encoded_slash", "/api/gallery/collections/a%2Fb/posts", []int{http.StatusBadRequest}},
+		{"non_slug_extension", "/api/gallery/collections/x.txt/posts", []int{http.StatusBadRequest}},
+		{"uppercase_slug", "/api/gallery/collections/Linux/posts", []int{http.StatusBadRequest}},
+		{"existing_stray_file", "/api/gallery/collections/notes.txt/posts", []int{http.StatusBadRequest}},
+		{"existing_stray_index", "/api/gallery/collections/index.json/posts", []int{http.StatusBadRequest}},
+		{"backslash", "/api/gallery/collections/..%5Csecret/posts", []int{http.StatusBadRequest}},
+		{"raw_dotdot", "/api/gallery/collections/../secret/posts", []int{http.StatusMovedPermanently, http.StatusTemporaryRedirect, http.StatusPermanentRedirect, http.StatusBadRequest, http.StatusNotFound}},
 	}
 
 	for _, tc := range cases {
@@ -729,7 +730,7 @@ func TestGalleryRejectsTraversalAndBadFilenames(t *testing.T) {
 	}
 
 	// A raw `../` must not read anything even when the redirect is followed.
-	rec := do(h, http.MethodGet, "/api/gallery/collections/../secret.csv/posts", "")
+	rec := do(h, http.MethodGet, "/api/gallery/collections/../secret/posts", "")
 	if loc := rec.Header().Get("Location"); loc != "" {
 		next := do(h, http.MethodGet, loc, "")
 		if next.Code != http.StatusNotFound {
@@ -742,10 +743,10 @@ func TestGalleryInternalErrorIsSanitisedAndLogged(t *testing.T) {
 	base := t.TempDir()
 	storagePath := filepath.Join(base, "storage-is-a-file")
 	writeFile(t, storagePath, "not a directory\n")
-	t.Setenv("TWITTER_BOOKMARKER_DIR", storagePath)
+	t.Setenv(config.EnvDir, storagePath)
 
 	var logs bytes.Buffer
-	h := api.NewServer(nil, nil, logging.New(&logs))
+	h := api.NewServer(nil, logging.New(&logs))
 
 	for _, path := range []string{
 		galleryCollectionsPath,

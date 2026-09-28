@@ -159,7 +159,7 @@ export function FilterPanel({
           type="button"
           data-testid="filter-reset"
           onClick={onReset}
-          className="h-10 w-[78px] shrink-0 rounded-sm border border-border bg-surface-warm text-[11px] leading-[1.4] font-medium text-ink outline-none transition-colors hover:bg-surface focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="h-10 w-[78px] shrink-0 rounded-sm border border-border bg-surface-warm text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {FILTER_RESET_LABEL}
         </button>
@@ -167,7 +167,7 @@ export function FilterPanel({
           type="button"
           data-testid="filter-apply"
           onClick={onApply}
-          className="h-10 w-[92px] shrink-0 rounded-sm bg-grad-brand text-[11px] leading-[1.4] font-semibold text-white outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="h-10 w-[92px] shrink-0 rounded-sm bg-grad-brand text-[11px] leading-[1.4] font-semibold text-white transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {FILTER_APPLY_LABEL}
         </button>

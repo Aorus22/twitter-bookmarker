@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { afterEach, describe, expect, it } from "vitest"
@@ -23,7 +30,7 @@ import {
  */
 
 const LINUX = makeCollection({
-  filename: "linux.csv",
+  slug: "linux",
   name: "Linux",
   post_count: 6,
   media_count: 12,
@@ -78,11 +85,11 @@ const POSTS = [
   }),
 ]
 
-function renderPage(filename = "linux.csv") {
+function renderPage(slug = "linux") {
   return render(
-    <MemoryRouter initialEntries={[`/collections/${encodeURIComponent(filename)}`]}>
+    <MemoryRouter initialEntries={[`/collections/${encodeURIComponent(slug)}`]}>
       <Routes>
-        <Route path="/collections/:filename" element={<CollectionPage />} />
+        <Route path="/collections/:slug" element={<CollectionPage />} />
       </Routes>
     </MemoryRouter>
   )
@@ -156,7 +163,7 @@ describe("CollectionPage — header (COLL-01)", () => {
     )
   })
 
-  it("falls back to the filename when the header summary is unavailable", async () => {
+  it("falls back to the slug when the header summary is unavailable", async () => {
     stubGalleryFetch({
       posts: postsRoute(),
       collections: () => jsonResponse({ status: "error", reason: "boom" }, 500),
@@ -165,7 +172,7 @@ describe("CollectionPage — header (COLL-01)", () => {
     renderPage()
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "linux.csv" })
+      await screen.findByRole("heading", { level: 1, name: "linux" })
     ).toBeInTheDocument()
     expect(screen.queryByTestId("collection-counts")).not.toBeInTheDocument()
   })
@@ -204,9 +211,9 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
           Number(a.closest("li")?.getAttribute("data-index")) -
           Number(b.closest("li")?.getAttribute("data-index"))
       )
-    expect(logical.map((card) => within(card).getByText(/@/).textContent)).toEqual(
-      ["@four", "@two", "@one", "@three", "@texty", "@verbose"]
-    )
+    expect(
+      logical.map((card) => within(card).getByText(/@/).textContent)
+    ).toEqual(["@four", "@two", "@one", "@three", "@texty", "@verbose"])
     for (const column of masonry.children) {
       const indexes = Array.from(column.querySelectorAll("li")).map((row) =>
         Number(row.getAttribute("data-index"))
@@ -279,7 +286,9 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
     expect(screen.getByTestId("gallery-masonry").style.maxWidth).toBe("1264px")
     // The page column is measured from the *uncapped* probe, so it regrows with
     // the viewport instead of being stuck at the width its own cap implied.
-    expect(screen.getByTestId("collection-column").style.maxWidth).toBe("1264px")
+    expect(screen.getByTestId("collection-column").style.maxWidth).toBe(
+      "1264px"
+    )
   })
 
   it("renders all four images of a four-media tweet in one card (COLL-04)", async () => {
@@ -295,9 +304,10 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
 
     expect(fourMedia).toHaveAttribute("data-media-count", "4")
     expect(within(fourMedia).getAllByTestId("media-image")).toHaveLength(4)
-    expect(
-      within(fourMedia).getByTestId("post-media-grid")
-    ).toHaveAttribute("data-media-layout", "grid")
+    expect(within(fourMedia).getByTestId("post-media-grid")).toHaveAttribute(
+      "data-media-layout",
+      "grid"
+    )
   })
 })
 
@@ -316,8 +326,12 @@ describe("CollectionPage — post content (COLL-04…COLL-09, COLL-11)", () => {
     )
 
     expect(textCard).toBeDefined()
-    expect(within(textCard as HTMLElement).getByTestId("text-post-card")).toBeInTheDocument()
-    expect(within(textCard as HTMLElement).queryByTestId("media-image")).not.toBeInTheDocument()
+    expect(
+      within(textCard as HTMLElement).getByTestId("text-post-card")
+    ).toBeInTheDocument()
+    expect(
+      within(textCard as HTMLElement).queryByTestId("media-image")
+    ).not.toBeInTheDocument()
     expect((textCard as HTMLElement).querySelector("img")).toBeNull()
   })
 
@@ -335,8 +349,12 @@ describe("CollectionPage — post content (COLL-04…COLL-09, COLL-11)", () => {
 
     expect(toggle).toHaveTextContent("Show more")
     await user.click(toggle)
-    expect(screen.getByTestId("post-text-toggle")).toHaveTextContent("Show less")
-    expect(screen.getByTestId("post-text").className).not.toContain("line-clamp")
+    expect(screen.getByTestId("post-text-toggle")).toHaveTextContent(
+      "Show less"
+    )
+    expect(screen.getByTestId("post-text").className).not.toContain(
+      "line-clamp"
+    )
   })
 
   it("loads every image lazily from an unrewritten pbs.twimg.com URL (COLL-09)", async () => {
@@ -418,7 +436,9 @@ describe("CollectionPage — states (COLL-10)", () => {
     stubGalleryFetch({
       posts: postsRoute([]),
       collections: () =>
-        jsonResponse({ collections: [makeCollection({ filename: "linux.csv", name: "Linux" })] }),
+        jsonResponse({
+          collections: [makeCollection({ slug: "linux", name: "Linux" })],
+        }),
     })
 
     renderPage()
@@ -472,12 +492,16 @@ describe("CollectionPage — states (COLL-10)", () => {
         attempt += 1
         return attempt === 1
           ? jsonResponse({ status: "error", reason: "not found" }, 404)
-          : jsonResponse({ items: [POSTS[2]], next_cursor: null, has_more: false })
+          : jsonResponse({
+              items: [POSTS[2]],
+              next_cursor: null,
+              has_more: false,
+            })
       },
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
 
-    renderPage("missing.csv")
+    renderPage("missing")
 
     expect(
       await screen.findByText("Could not load this collection")
@@ -490,7 +514,9 @@ describe("CollectionPage — states (COLL-10)", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }))
 
     expect(await screen.findByTestId("post-card")).toBeInTheDocument()
-    expect(screen.queryByText("Could not load this collection")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Could not load this collection")
+    ).not.toBeInTheDocument()
   })
 
   it("renders the backend connection copy on a transport failure and Retry recovers (PRD-2 §61)", async () => {
@@ -501,7 +527,11 @@ describe("CollectionPage — states (COLL-10)", () => {
         attempt += 1
         return attempt === 1
           ? Promise.reject(new TypeError("Failed to fetch"))
-          : jsonResponse({ items: [POSTS[2]], next_cursor: null, has_more: false })
+          : jsonResponse({
+              items: [POSTS[2]],
+              next_cursor: null,
+              has_more: false,
+            })
       },
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
@@ -586,8 +616,16 @@ describe("CollectionPage — discovery wiring (DISC-01, DISC-06)", () => {
 
     expect(screen.queryByTestId("media-type-pills")).not.toBeInTheDocument()
     expect(screen.queryByTestId("topic-pills")).not.toBeInTheDocument()
-    for (const label of ["Images", "Videos", "Links", "Terminal", "Linux Tips"]) {
-      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument()
+    for (const label of [
+      "Images",
+      "Videos",
+      "Links",
+      "Terminal",
+      "Linux Tips",
+    ]) {
+      expect(
+        screen.queryByRole("button", { name: label })
+      ).not.toBeInTheDocument()
     }
   })
 
@@ -600,7 +638,9 @@ describe("CollectionPage — discovery wiring (DISC-01, DISC-06)", () => {
     renderPage()
     await screen.findByTestId("gallery-masonry")
 
-    expect(screen.queryByTestId("collection-description")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("collection-description")
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByText("Toolbar and masonry arrive in Phase 5.")
     ).not.toBeInTheDocument()

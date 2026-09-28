@@ -27,7 +27,9 @@ export const MASONRY_MIN_COLUMNS = 1
 export const MASONRY_MAX_COLUMNS = 5
 
 function clampColumns(columns: number): number {
-  const value = Number.isFinite(columns) ? Math.trunc(columns) : MASONRY_MIN_COLUMNS
+  const value = Number.isFinite(columns)
+    ? Math.trunc(columns)
+    : MASONRY_MIN_COLUMNS
   return Math.min(MASONRY_MAX_COLUMNS, Math.max(MASONRY_MIN_COLUMNS, value))
 }
 
@@ -65,7 +67,11 @@ export function masonryContainerWidth(columns: number): number {
 export function columnsForWidth(width: number): number {
   const available = Number.isFinite(width) ? Math.max(0, width) : 0
 
-  for (let count = MASONRY_MAX_COLUMNS; count > MASONRY_MIN_COLUMNS; count -= 1) {
+  for (
+    let count = MASONRY_MAX_COLUMNS;
+    count > MASONRY_MIN_COLUMNS;
+    count -= 1
+  ) {
     if (available >= masonryContainerWidth(count)) {
       return count
     }

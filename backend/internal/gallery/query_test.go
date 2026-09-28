@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/gallery"
 	"twitter-bookmarker/internal/storage"
 )
@@ -12,20 +13,31 @@ import (
 func seedQueryCollection(t *testing.T) *gallery.Reader {
 	t.Helper()
 	dir := t.TempDir()
-	writeCSV(t, dir, "query.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/alice/status/101", `[]`, "Alice", "@alice", "2026-01-10T00:00:00Z", "2026-03-01T00:00:00Z", "Linux desktop setup"),
-		currentRow("https://x.com/bob/status/102", `[]`, "Bob", "@linuxguy", "2026-02-20T00:00:00Z", "2026-02-01T00:00:00Z", "Windows tips"),
-		currentRow("https://x.com/carol/status/103", `[]`, "Carol", "@carol", "2026-03-15T00:00:00Z", "2026-04-01T00:00:00Z", "another LINUX post"),
-		currentRow("https://x.com/dave/status/104", `[]`, "Dave", "@dave", "2026-04-01T00:00:00Z", "2026-01-01T00:00:00Z", "no match here"),
-		currentRow("https://x.com/erin/status/105", `[]`, "Erin", "@erin", "2026-05-05T00:00:00Z", "2026-05-05T00:00:00Z", "boundary test"),
-	})
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "query", "Query",
+		dbtest.Row{TweetID: "101", URL: "https://x.com/alice/status/101",
+			Author: "Alice", Username: "@alice",
+			TweetDate: "2026-01-10T00:00:00Z", SavedAt: "2026-03-01T00:00:00Z", Text: "Linux desktop setup"},
+		dbtest.Row{TweetID: "102", URL: "https://x.com/bob/status/102",
+			Author: "Bob", Username: "@linuxguy",
+			TweetDate: "2026-02-20T00:00:00Z", SavedAt: "2026-02-01T00:00:00Z", Text: "Windows tips"},
+		dbtest.Row{TweetID: "103", URL: "https://x.com/carol/status/103",
+			Author: "Carol", Username: "@carol",
+			TweetDate: "2026-03-15T00:00:00Z", SavedAt: "2026-04-01T00:00:00Z", Text: "another LINUX post"},
+		dbtest.Row{TweetID: "104", URL: "https://x.com/dave/status/104",
+			Author: "Dave", Username: "@dave",
+			TweetDate: "2026-04-01T00:00:00Z", SavedAt: "2026-01-01T00:00:00Z", Text: "no match here"},
+		dbtest.Row{TweetID: "105", URL: "https://x.com/erin/status/105",
+			Author: "Erin", Username: "@erin",
+			TweetDate: "2026-05-05T00:00:00Z", SavedAt: "2026-05-05T00:00:00Z", Text: "boundary test"},
+	)
 	reader, _ := newReader(t, dir)
 	return reader
 }
 
-func runQuery(t *testing.T, reader *gallery.Reader, filename string, query gallery.Query) gallery.Page {
+func runQuery(t *testing.T, reader *gallery.Reader, slug string, query gallery.Query) gallery.Page {
 	t.Helper()
-	page, err := reader.Posts(filename, query)
+	page, err := reader.Posts(slug, query)
 	if err != nil {
 		t.Fatalf("Posts() error = %v", err)
 	}
@@ -60,7 +72,7 @@ func TestSearchIsTrimmedCaseInsensitiveSubstring(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			page := runQuery(t, reader, "query.csv", gallery.Query{Q: test.q})
+			page := runQuery(t, reader, "query", gallery.Query{Q: test.q})
 			if got := itemIDs(page); !equalStrings(got, test.want) {
 				t.Errorf("ids = %v, want %v", got, test.want)
 			}
@@ -122,7 +134,7 @@ func TestDateFiltersAreIndependentCombinableAndInclusive(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			page := runQuery(t, reader, "query.csv", test.query)
+			page := runQuery(t, reader, "query", test.query)
 			if got := itemIDs(page); !equalStrings(got, test.want) {
 				t.Errorf("ids = %v, want %v", got, test.want)
 			}
@@ -144,7 +156,7 @@ func TestSortModes(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(string(test.mode), func(t *testing.T) {
-			page := runQuery(t, reader, "query.csv", gallery.Query{Sort: test.mode})
+			page := runQuery(t, reader, "query", gallery.Query{Sort: test.mode})
 			if got := itemIDs(page); !equalStrings(got, test.want) {
 				t.Errorf("ids = %v, want %v", got, test.want)
 			}
@@ -152,7 +164,7 @@ func TestSortModes(t *testing.T) {
 	}
 
 	t.Run("empty sort defaults to saved_desc", func(t *testing.T) {
-		page := runQuery(t, reader, "query.csv", gallery.Query{})
+		page := runQuery(t, reader, "query", gallery.Query{})
 		if got := itemIDs(page); !equalStrings(got, []string{"105", "103", "101", "102", "104"}) {
 			t.Errorf("ids = %v, want saved_desc order", got)
 		}
@@ -161,19 +173,23 @@ func TestSortModes(t *testing.T) {
 
 func TestSortTieBreakIsTweetID(t *testing.T) {
 	dir := t.TempDir()
+	conn := dbtest.Open(t, dir)
 	same := "2026-09-01T00:00:00Z"
-	writeCSV(t, dir, "tie.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/200", `[]`, "A", "@a", same, same, "two"),
-		currentRow("https://x.com/u/status/300", `[]`, "A", "@a", same, same, "three"),
-		currentRow("https://x.com/u/status/100", `[]`, "A", "@a", same, same, "one"),
-	})
+	dbtest.Seed(t, conn, "tie", "Tie",
+		dbtest.Row{TweetID: "200", URL: "https://x.com/u/status/200",
+			Author: "A", Username: "@a", TweetDate: same, SavedAt: same, Text: "two"},
+		dbtest.Row{TweetID: "300", URL: "https://x.com/u/status/300",
+			Author: "A", Username: "@a", TweetDate: same, SavedAt: same, Text: "three"},
+		dbtest.Row{TweetID: "100", URL: "https://x.com/u/status/100",
+			Author: "A", Username: "@a", TweetDate: same, SavedAt: same, Text: "one"},
+	)
 	reader, _ := newReader(t, dir)
 
-	desc := runQuery(t, reader, "tie.csv", gallery.Query{Sort: gallery.SortSavedDesc})
+	desc := runQuery(t, reader, "tie", gallery.Query{Sort: gallery.SortSavedDesc})
 	if got := itemIDs(desc); !equalStrings(got, []string{"300", "200", "100"}) {
 		t.Errorf("saved_desc tie-break ids = %v, want [300 200 100]", got)
 	}
-	asc := runQuery(t, reader, "tie.csv", gallery.Query{Sort: gallery.SortSavedAsc})
+	asc := runQuery(t, reader, "tie", gallery.Query{Sort: gallery.SortSavedAsc})
 	if got := itemIDs(asc); !equalStrings(got, []string{"100", "200", "300"}) {
 		t.Errorf("saved_asc tie-break ids = %v, want [100 200 300]", got)
 	}
@@ -188,7 +204,7 @@ func TestOrderOfOperationsFiltersBeforePagination(t *testing.T) {
 		Sort:  gallery.SortTweetAsc,
 		Limit: 1,
 	}
-	first := runQuery(t, reader, "query.csv", query)
+	first := runQuery(t, reader, "query", query)
 	if got := itemIDs(first); !equalStrings(got, []string{"101"}) {
 		t.Fatalf("page 1 ids = %v, want [101] (smallest tweet_date among matches)", got)
 	}
@@ -197,7 +213,7 @@ func TestOrderOfOperationsFiltersBeforePagination(t *testing.T) {
 	}
 
 	query.Cursor = first.NextCursor
-	second := runQuery(t, reader, "query.csv", query)
+	second := runQuery(t, reader, "query", query)
 	if got := itemIDs(second); !equalStrings(got, []string{"102"}) {
 		t.Fatalf("page 2 ids = %v, want [102]", got)
 	}
@@ -291,7 +307,7 @@ func TestQueryNormalizeAppliesProgrammaticDefaults(t *testing.T) {
 
 func TestPostsLimitLargerThanResultSetEndsPagination(t *testing.T) {
 	reader := seedQueryCollection(t)
-	page := runQuery(t, reader, "query.csv", gallery.Query{Limit: gallery.MaxLimit})
+	page := runQuery(t, reader, "query", gallery.Query{Limit: gallery.MaxLimit})
 	if len(page.Items) != 5 {
 		t.Fatalf("Items = %d, want 5", len(page.Items))
 	}

@@ -176,7 +176,7 @@ export function makeStore(categories, displayMode = "inline") {
 /** Two categories in a deliberately non-array order, for order assertions. */
 export function sampleCategories() {
   return [
-    { id: "cat-linux", name: "Linux", filename: "linux.csv", color: "#10b981", order: 1 },
-    { id: "cat-ai", name: "AI", filename: "ai.csv", color: "#4f46e5", order: 0 },
+    { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 1 },
+    { id: "cat-ai", name: "AI", slug: "ai", color: "#4f46e5", order: 0 },
   ];
 }

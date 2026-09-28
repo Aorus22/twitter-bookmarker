@@ -2,7 +2,8 @@
  * Shared domain types for the Twitter Bookmarker extension.
  *
  * The extension is the sole owner of category configuration and settings; the
- * backend only ever receives a `filename` plus tweet metadata (PRD §4.3, §16).
+ * backend only ever receives a `slug`, the category's display name, and tweet
+ * metadata (PRD §4.3, §16).
  */
 
 /** How category controls are rendered on an X bookmark tweet (PRD §32, §33). */
@@ -12,11 +13,11 @@ export type DisplayMode = "popover" | "inline";
 export interface Category {
   /** Stable internal identifier; never changes across renames. */
   id: string;
-  /** Human-readable name, e.g. "AI & LLM". */
+  /** Human-readable name, e.g. "AI & LLM". Sent to the backend on every save. */
   name: string;
-  /** Derived CSV filename, e.g. "ai-llm.csv". Recomputed only on rename. */
-  filename: string;
-  /** UI-only colour (hex). Never sent to the backend or written to CSV. */
+  /** Derived collection slug, e.g. "ai-llm". Recomputed only on rename. */
+  slug: string;
+  /** UI-only colour (hex). Never sent to the backend. */
   color: string;
   /** Position, always normalized to 0..n-1 in storage order. */
   order: number;
@@ -24,7 +25,7 @@ export interface Category {
 
 /** Persisted extension settings (PRD §50). */
 export interface Settings {
-  /** When true, remove the tweet from X Bookmarks after a confirmed CSV write. */
+  /** When true, remove the tweet from X Bookmarks after a confirmed save. */
   unbookmarkAfterSave: boolean;
   /** How category controls are rendered on the X bookmarks page. */
   displayMode: DisplayMode;
@@ -32,7 +33,7 @@ export interface Settings {
 
 /** The whole `chrome.storage.local` payload, under a single documented key. */
 export interface Store {
-  version: 1;
+  version: 2;
   settings: Settings;
   categories: Category[];
 }
@@ -67,7 +68,13 @@ export interface SaveTweetPayload {
 
 /** Request body for `POST /v1/bookmarks`. */
 export interface SaveRequest {
-  filename: string;
+  slug: string;
+  /**
+   * Human display name for the collection, so the gallery shows what the user
+   * typed rather than a name derived from the slug. Optional on the wire: the
+   * backend derives one when it is missing or empty.
+   */
+  name: string;
   tweet: SaveTweetPayload;
 }
 
@@ -76,7 +83,7 @@ export interface SaveResult {
   status: "saved";
   tweet_id: string;
   url: string;
-  filename: string;
+  slug: string;
   saved_at: string;
 }
 
@@ -89,7 +96,7 @@ export interface DuplicateResult {
 /** One entry of `GET /v1/index` (PRD §18). */
 export interface SavedIndexEntry {
   url: string;
-  filename: string;
+  slug: string;
   saved_at: string;
 }
 

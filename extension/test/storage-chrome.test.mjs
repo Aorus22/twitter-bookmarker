@@ -4,7 +4,7 @@
 // These prove the extension-side invariants the popup depends on:
 //   - first run yields the documented defaults (false / "popover");
 //   - every CRUD operation persists under ONE chrome.storage.local key;
-//   - rename recomputes `filename` without touching storage keys or the backend;
+//   - rename recomputes `slug` without touching storage keys or the backend;
 //   - delete removes the category only and renumbers order;
 //   - reorder rewrites `order` to 0..n-1;
 //   - NO category operation performs a network request (PRD §9, §10, §45–§49).
@@ -55,7 +55,7 @@ globalThis.fetch = (...args) => {
   return Promise.reject(new Error("fetch must never be called by the storage module"));
 };
 
-const { STORAGE_KEY } = await import("../src/shared/constants.ts");
+const { STORAGE_KEY, DEFAULT_CATEGORY_COLOR } = await import("../src/shared/constants.ts");
 const storage = await import("../src/shared/storage.ts");
 
 function resetStorage() {
@@ -72,7 +72,9 @@ test("first run yields PRD defaults under the single storage key", async () => {
   resetStorage();
 
   const store = await storage.getStore();
-  assert.equal(store.version, 1);
+  // A non-numeric version is discarded in favour of the current one; nothing reads
+  // the stored version to decide how to migrate.
+  assert.equal(store.version, 2);
   assert.deepEqual(store.settings, { unbookmarkAfterSave: false, displayMode: "popover" });
   assert.deepEqual(store.categories, []);
   assert.deepEqual(await storage.getSettings(), { unbookmarkAfterSave: false, displayMode: "popover" });
@@ -80,23 +82,23 @@ test("first run yields PRD defaults under the single storage key", async () => {
   assert.equal(stored(), undefined, "reads never write");
 });
 
-test("addCategory generates an id, slug filename, and appended order", async () => {
+test("addCategory generates an id, a derived slug, and an appended order", async () => {
   resetStorage();
 
   const linux = await storage.addCategory({ name: "Linux", color: "#4f46e5" });
   assert.match(linux.id, /^[0-9a-f-]{36}$/);
   assert.equal(linux.name, "Linux");
-  assert.equal(linux.filename, "linux.csv");
+  assert.equal(linux.slug, "linux");
   assert.equal(linux.color, "#4f46e5");
   assert.equal(linux.order, 0);
 
   const ai = await storage.addCategory({ name: "AI & LLM", color: "#0ea5e9" });
   const readLater = await storage.addCategory({ name: "Read Later", color: "not-a-color" });
-  assert.equal(ai.filename, "ai-llm.csv");
+  assert.equal(ai.slug, "ai-llm");
   assert.equal(ai.order, 1);
-  assert.equal(readLater.filename, "read-later.csv");
+  assert.equal(readLater.slug, "read-later");
   assert.equal(readLater.order, 2);
-  assert.equal(readLater.color, "#4f46e5", "invalid colors fall back to the default");
+  assert.equal(readLater.color, DEFAULT_CATEGORY_COLOR, "invalid colors fall back to the default");
 
   const store = await storage.getStore();
   assert.deepEqual(
@@ -118,7 +120,7 @@ test("addCategory rejects empty and duplicate names without writing", async () =
   assert.equal(JSON.stringify(stored()), before, "rejected adds leave storage untouched");
 });
 
-test("rename recomputes filename, keeps the id, and never touches the backend", async () => {
+test("rename recomputes the slug, keeps the id, and never touches the backend", async () => {
   resetStorage();
   fetchCalls.length = 0;
 
@@ -127,14 +129,14 @@ test("rename recomputes filename, keeps the id, and never touches the backend", 
 
   assert.equal(renamed.id, linux.id, "id is stable across renames");
   assert.equal(renamed.name, "Linux Stuff");
-  assert.equal(renamed.filename, "linux-stuff.csv");
+  assert.equal(renamed.slug, "linux-stuff");
 
   const [persisted] = (await storage.getCategories()).filter((c) => c.id === linux.id);
-  assert.equal(persisted.filename, "linux-stuff.csv");
+  assert.equal(persisted.slug, "linux-stuff");
   assert.equal(fetchCalls.length, 0, "no backend request during rename");
 
-  // Still a single key, and the old filename only survives as a derived value that
-  // was replaced — nothing creates or renames a CSV.
+  // Still a single key. The old slug is not renamed anywhere: it simply stops
+  // being used, and the next save creates a new collection under the new slug.
   assert.equal(Object.keys(storageData).length, 1);
 });
 
@@ -153,7 +155,7 @@ test("updateCategoryColor only changes the UI colour", async () => {
 
   const updated = await storage.updateCategoryColor(linux.id, "#ABCDEF");
   assert.equal(updated.color, "#abcdef");
-  assert.equal(updated.filename, "linux.csv", "colour never affects filename");
+  assert.equal(updated.slug, "linux", "colour never affects the slug");
 
   const missing = await storage.updateCategoryColor("nope", "#000000");
   assert.equal(missing, null);
@@ -234,7 +236,9 @@ test("getStore tolerates malformed storage instead of throwing", async () => {
   storageData[STORAGE_KEY] = { version: "one", settings: "nope", categories: [{ name: "orphan" }] };
 
   const store = await storage.getStore();
-  assert.equal(store.version, 1);
+  // A non-numeric version is discarded in favour of the current one; nothing reads
+  // the stored version to decide how to migrate.
+  assert.equal(store.version, 2);
   assert.deepEqual(store.settings, { unbookmarkAfterSave: false, displayMode: "popover" });
   assert.deepEqual(store.categories, [], "entries without an id are dropped, not crashed on");
 });

@@ -7,9 +7,9 @@ import {
 } from "./placeholder"
 
 describe("pickPlaceholderGradient", () => {
-  it("is deterministic: the same filename always picks the same gradient", () => {
-    const first = pickPlaceholderGradient("linux.csv")
-    const second = pickPlaceholderGradient("linux.csv")
+  it("is deterministic: the same slug always picks the same gradient", () => {
+    const first = pickPlaceholderGradient("linux")
+    const second = pickPlaceholderGradient("linux")
 
     expect(first).toEqual(second)
     expect(first.id).toBe("violet-pink")
@@ -31,42 +31,42 @@ describe("pickPlaceholderGradient", () => {
     ])
   })
 
-  it("distributes different filenames across the palette", () => {
-    const filenames = [
-      "linux.csv",
-      "design.csv",
-      "ai.csv",
-      "recipes.csv",
-      "travel.csv",
-      "music.csv",
-      "books.csv",
-      "workout.csv",
-      "finance.csv",
-      "garden.csv",
-      "movies.csv",
-      "quotes.csv",
-      "startups.csv",
-      "photography.csv",
-      "code.csv",
-      "health.csv",
-      "science.csv",
-      "history.csv",
-      "art.csv",
-      "food.csv",
+  it("distributes different slugs across the palette", () => {
+    const slugs = [
+      "linux",
+      "design",
+      "ai",
+      "recipes",
+      "travel",
+      "music",
+      "books",
+      "workout",
+      "finance",
+      "garden",
+      "movies",
+      "quotes",
+      "startups",
+      "photography",
+      "code",
+      "health",
+      "science",
+      "history",
+      "art",
+      "food",
     ]
 
     const picked = new Set(
-      filenames.map((filename) => pickPlaceholderGradient(filename).id)
+      slugs.map((slug) => pickPlaceholderGradient(slug).id)
     )
 
     expect(picked.size).toBeGreaterThan(1)
-    expect(pickPlaceholderGradient("linux.csv").id).not.toBe(
-      pickPlaceholderGradient("design.csv").id
+    expect(pickPlaceholderGradient("linux").id).not.toBe(
+      pickPlaceholderGradient("design").id
     )
   })
 
   it("keeps the index inside the palette range", () => {
-    for (const key of ["", "a", "linux.csv", "some/very/long-name.csv"]) {
+    for (const key of ["", "a", "linux", "some/very/long-name"]) {
       const index = placeholderGradientIndex(key)
       expect(index).toBeGreaterThanOrEqual(0)
       expect(index).toBeLessThan(PLACEHOLDER_GRADIENTS.length)

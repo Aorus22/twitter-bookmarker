@@ -19,12 +19,18 @@ const NOW = new Date(2026, 8, 27, 15, 30, 0)
 
 describe("filter-presets — definitions", () => {
   it("holds exactly the four PRD-2 §31 presets with the spec's short labels", () => {
-    expect(
-      QUICK_RANGE_PRESETS.map((preset) => preset.label)
-    ).toEqual(["Today", "Last 7 Days", "Last 30 Days", "This Year"])
-    expect(
-      QUICK_RANGE_PRESETS.map((preset) => preset.shortLabel)
-    ).toEqual(["Today", "7 days", "30 days", "This year"])
+    expect(QUICK_RANGE_PRESETS.map((preset) => preset.label)).toEqual([
+      "Today",
+      "Last 7 Days",
+      "Last 30 Days",
+      "This Year",
+    ])
+    expect(QUICK_RANGE_PRESETS.map((preset) => preset.shortLabel)).toEqual([
+      "Today",
+      "7 days",
+      "30 days",
+      "This year",
+    ])
   })
 })
 
@@ -92,7 +98,11 @@ describe("filter-presets — applied to the draft (DISC-03)", () => {
   })
 
   it("toggles an already-active preset off without touching the Tweet range", () => {
-    const applied = applyPresetToDates({ tweetFrom: "2026-01-01" }, "today", NOW)
+    const applied = applyPresetToDates(
+      { tweetFrom: "2026-01-01" },
+      "today",
+      NOW
+    )
     expect(applied.savedFrom).toBe("2026-09-27")
 
     const cleared = applyPresetToDates(applied, "today", NOW)

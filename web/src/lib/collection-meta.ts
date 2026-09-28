@@ -8,7 +8,8 @@ import { formatLastSaved, type DateFormatOptions } from "./date"
  *   `83 posts · 126 media · Last saved Sep 27`
  *
  * The mockup omits the date and shows a description instead; the date is
- * required by the PRD and the description has no CSV field, so the date wins.
+ * required by the PRD and the description has no dedicated field, so the date
+ * wins.
  */
 
 /**

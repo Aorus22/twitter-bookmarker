@@ -9,7 +9,7 @@ import { NotFoundPage } from "@/pages/not-found-page"
  * Route table (PRD-2 §15).
  *
  *   /                        → gallery homepage   (Phase 4 fills the body)
- *   /collections/:filename   → collection detail  (Phase 5 fills the body)
+ *   /collections/:slug       → collection detail  (Phase 5 fills the body)
  *   *                        → not found
  *
  * Every route renders inside {@link AppShell}, so the nav and the theme toggle
@@ -21,7 +21,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: <GalleryPage /> },
-      { path: "collections/:filename", element: <CollectionPage /> },
+      { path: "collections/:slug", element: <CollectionPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

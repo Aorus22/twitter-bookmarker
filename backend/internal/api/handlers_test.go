@@ -1,35 +1,38 @@
 package api_test
 
 import (
-	"encoding/csv"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"twitter-bookmarker/internal/api"
-	"twitter-bookmarker/internal/index"
+	"twitter-bookmarker/internal/config"
+	"twitter-bookmarker/internal/db"
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/logging"
 	"twitter-bookmarker/internal/model"
 	"twitter-bookmarker/internal/storage"
 )
 
-const validBody = `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123?s=20","author":"Foo Bar","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"Testing Linux today"}}`
+const validBody = `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123?s=20","author":"Foo Bar","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"Testing Linux today"}}`
 
+// newTestServer builds the real handler over a fresh storage directory. The
+// database is created (empty) by storage.NewStore, so a test sees the same
+// construction path as cmd/server; only the persisted rows are made per test.
 func newTestServer(t *testing.T) (http.Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
-	idx, err := index.LoadOrRebuild(dir, logging.Discard())
+	store, err := storage.NewStore(dir, logging.Discard())
 	if err != nil {
-		t.Fatalf("LoadOrRebuild() error = %v", err)
+		t.Fatalf("storage.NewStore() error = %v", err)
 	}
-	store := storage.NewStore(dir, idx, logging.Discard())
-	return api.NewServer(store, idx, logging.Discard()), dir
+	t.Cleanup(func() { _ = store.Close() })
+	return api.NewServer(store, logging.Discard()), dir
 }
 
 func do(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -52,6 +55,65 @@ func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 	}
 	return v
 }
+
+// --- database assertions ---------------------------------------------------
+
+// openRO opens the database in dir independently of the server's writer, so
+// assertions read what is actually on disk.
+func openRO(t *testing.T, dir string) *sql.DB {
+	t.Helper()
+	conn, err := db.OpenRO(config.DBPath(dir))
+	if err != nil {
+		t.Fatalf("open database read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+// bookmarkCount counts the bookmarks in one collection, read from disk.
+func bookmarkCount(t *testing.T, dir, slug string) int {
+	t.Helper()
+	return dbtest.Count(t, openRO(t, dir),
+		`SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = ?`,
+		slug)
+}
+
+// totalBookmarks counts every bookmark, read from disk.
+func totalBookmarks(t *testing.T, dir string) int {
+	t.Helper()
+	return dbtest.Count(t, openRO(t, dir), `SELECT count(*) FROM bookmarks`)
+}
+
+// collectionCount counts every collection, read from disk.
+func collectionCount(t *testing.T, dir string) int {
+	t.Helper()
+	return dbtest.Count(t, openRO(t, dir), `SELECT count(*) FROM collections`)
+}
+
+// bookmarkURLs lists every stored URL in append order, read from disk.
+func bookmarkURLs(t *testing.T, dir string) []string {
+	t.Helper()
+	rows, err := openRO(t, dir).Query(`SELECT url FROM bookmarks ORDER BY saved_at, tweet_id`)
+	if err != nil {
+		t.Fatalf("query bookmark urls: %v", err)
+	}
+	defer rows.Close()
+
+	var urls []string
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			t.Fatalf("scan bookmark url: %v", err)
+		}
+		urls = append(urls, url)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate bookmark urls: %v", err)
+	}
+	return urls
+}
+
+// --- tests -----------------------------------------------------------------
 
 func TestHealth(t *testing.T) {
 	h, _ := newTestServer(t)
@@ -102,8 +164,8 @@ func TestIndexAfterSave(t *testing.T) {
 	if entry.URL != "https://x.com/foo/status/123" {
 		t.Errorf("entry.URL = %q, want canonical URL", entry.URL)
 	}
-	if entry.Filename != "linux.csv" {
-		t.Errorf("entry.Filename = %q, want linux.csv", entry.Filename)
+	if entry.Slug != "linux" {
+		t.Errorf("entry.Slug = %q, want linux", entry.Slug)
 	}
 	if _, err := time.Parse(time.RFC3339, entry.SavedAt); err != nil {
 		t.Errorf("entry.SavedAt = %q, want RFC3339: %v", entry.SavedAt, err)
@@ -125,7 +187,7 @@ func TestSaveCreatedContract(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &keys); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	wantKeys := []string{"status", "tweet_id", "url", "filename", "saved_at"}
+	wantKeys := []string{"status", "tweet_id", "url", "slug", "saved_at"}
 	if len(keys) != len(wantKeys) {
 		t.Fatalf("response keys = %v, want exactly %v", keys, wantKeys)
 	}
@@ -145,20 +207,20 @@ func TestSaveCreatedContract(t *testing.T) {
 	if resp.URL != "https://x.com/foo/status/123" {
 		t.Errorf("url = %q, want canonical", resp.URL)
 	}
-	if resp.Filename != "linux.csv" {
-		t.Errorf("filename = %q, want linux.csv", resp.Filename)
+	if resp.Slug != "linux" {
+		t.Errorf("slug = %q, want linux", resp.Slug)
 	}
 	if _, err := time.Parse(time.RFC3339, resp.SavedAt); err != nil {
 		t.Errorf("saved_at = %q, want RFC3339: %v", resp.SavedAt, err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(dir, "linux.csv"))
-	if err != nil {
-		t.Fatalf("read linux.csv: %v", err)
+	// The save is committed: one bookmark and its collection are on disk.
+	conn := openRO(t, dir)
+	if got := dbtest.Text(t, conn, `SELECT url FROM bookmarks WHERE tweet_id = '123'`); got != resp.URL {
+		t.Errorf("stored url = %q, want %q", got, resp.URL)
 	}
-	first := strings.SplitN(strings.TrimRight(string(raw), "\n"), "\n", 2)[0]
-	if first != storage.Header {
-		t.Fatalf("csv header = %q, want %q", first, storage.Header)
+	if got := dbtest.Text(t, conn, `SELECT slug FROM collections`); got != "linux" {
+		t.Errorf("stored collection slug = %q, want linux", got)
 	}
 }
 
@@ -169,7 +231,7 @@ func TestSaveDuplicateReturns409(t *testing.T) {
 		t.Fatalf("first save status = %d, want 201", rec.Code)
 	}
 
-	dupBody := `{"filename":"ai.csv","tweet":{"url":"https://x.com/other/status/123","author":"Foo Bar","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"dupe"}}`
+	dupBody := `{"slug":"ai","tweet":{"url":"https://x.com/other/status/123","author":"Foo Bar","username":"@foo","tweet_date":"2026-09-27T01:00:00Z","text":"dupe"}}`
 	rec := do(h, http.MethodPost, "/v1/bookmarks", dupBody)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("duplicate status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
@@ -187,11 +249,12 @@ func TestSaveDuplicateReturns409(t *testing.T) {
 		t.Fatalf("duplicate response = %+v, want status=duplicate tweet_id=123", dup)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "ai.csv")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("ai.csv must not be created for a duplicate (stat err = %v)", err)
+	conn := openRO(t, dir)
+	if got := dbtest.Count(t, conn, `SELECT count(*) FROM collections WHERE slug = 'ai'`); got != 0 {
+		t.Errorf("the duplicate created a collection (count = %d)", got)
 	}
-	if rows := csvDataRows(t, dir, "linux.csv"); len(rows) != 1 {
-		t.Errorf("linux.csv data rows = %d, want 1", len(rows))
+	if got := bookmarkCount(t, dir, "linux"); got != 1 {
+		t.Errorf("linux bookmarks = %d, want 1", got)
 	}
 }
 
@@ -205,22 +268,25 @@ func TestSaveInvalidRequestsReturn400(t *testing.T) {
 		{"empty body", ""},
 		{"malformed json", `{`},
 		{"json array", `[]`},
-		{"unknown top-level field (settings)", `{"filename":"linux.csv","settings":{},"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"unknown top-level field (category)", `{"filename":"linux.csv","category":"Linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"unknown nested field", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z","quoted_text":"nope"}}`},
-		{"wrong field type", `{"filename":123,"tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"empty filename", `{"filename":"","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"traversal filename", `{"filename":"../x.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"absolute filename", `{"filename":"/etc/passwd","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"unslugged filename", `{"filename":"Linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"bad url host", `{"filename":"linux.csv","tweet":{"url":"https://example.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"no status id", `{"filename":"linux.csv","tweet":{"url":"https://x.com/i/bookmarks","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"missing author", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"missing username", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"","tweet_date":"2026-09-27T01:00:00Z"}}`},
-		{"missing tweet_date", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":""}}`},
-		{"bad tweet_date", `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"27-09-2026"}}`},
-		{"missing tweet object", `{"filename":"linux.csv"}`},
-		{"valid tweet, missing filename", `{` + validTweet + `}`},
+		{"unknown top-level field (settings)", `{"slug":"linux","settings":{},` + validTweet + `}`},
+		{"unknown top-level field (category)", `{"slug":"linux","category":"Linux",` + validTweet + `}`},
+		{"unknown nested field", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z","quoted_text":"nope"}}`},
+		// A stale extension still sending the CSV-era "filename" key must be
+		// rejected, not silently ignored: DisallowUnknownFields answers 400.
+		{"legacy filename field", `{"filename":"linux",` + validTweet + `}`},
+		{"wrong field type", `{"slug":123,` + validTweet + `}`},
+		{"empty slug", `{"slug":"",` + validTweet + `}`},
+		{"traversal slug", `{"slug":"../x",` + validTweet + `}`},
+		{"absolute slug", `{"slug":"/etc/passwd",` + validTweet + `}`},
+		{"unslugged slug", `{"slug":"Linux",` + validTweet + `}`},
+		{"bad url host", `{"slug":"linux","tweet":{"url":"https://example.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+		{"no status id", `{"slug":"linux","tweet":{"url":"https://x.com/i/bookmarks","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+		{"missing author", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"","username":"@a","tweet_date":"2026-09-27T01:00:00Z"}}`},
+		{"missing username", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"","tweet_date":"2026-09-27T01:00:00Z"}}`},
+		{"missing tweet_date", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":""}}`},
+		{"bad tweet_date", `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"27-09-2026"}}`},
+		{"missing tweet object", `{"slug":"linux"}`},
+		{"valid tweet, missing slug", `{` + validTweet + `}`},
 	}
 
 	for _, tc := range tests {
@@ -240,15 +306,13 @@ func TestSaveInvalidRequestsReturn400(t *testing.T) {
 			if body.Status != "error" {
 				t.Errorf("error body status = %q, want error", body.Status)
 			}
-			// A rejected request must never leave a CSV behind.
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				t.Fatalf("ReadDir: %v", err)
+			// A rejected request must never leave a bookmark or a collection behind.
+			conn := openRO(t, dir)
+			if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 0 {
+				t.Errorf("rejected request wrote %d bookmark(s)", got)
 			}
-			for _, e := range entries {
-				if strings.HasSuffix(e.Name(), ".csv") {
-					t.Errorf("rejected request created %s", e.Name())
-				}
+			if got := dbtest.Count(t, conn, `SELECT count(*) FROM collections`); got != 0 {
+				t.Errorf("rejected request wrote %d collection(s)", got)
 			}
 		})
 	}
@@ -257,7 +321,7 @@ func TestSaveInvalidRequestsReturn400(t *testing.T) {
 func TestSaveOversizedBodyReturns400(t *testing.T) {
 	h, _ := newTestServer(t)
 
-	body := `{"filename":"linux.csv","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z","text":"` +
+	body := `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123","author":"A","username":"@a","tweet_date":"2026-09-27T01:00:00Z","text":"` +
 		strings.Repeat("x", 2<<20) + `"}}`
 	rec := do(h, http.MethodPost, "/v1/bookmarks", body)
 	if rec.Code != http.StatusBadRequest {
@@ -288,7 +352,7 @@ func TestMethodNotAllowedAndNotFound(t *testing.T) {
 }
 
 func TestInternalErrorReturns500(t *testing.T) {
-	h := api.NewServer(stubStore{err: errors.New("disk on fire")}, stubIndex{}, logging.Discard())
+	h := api.NewServer(stubStore{err: errors.New("disk on fire")}, logging.Discard())
 	rec := do(h, http.MethodPost, "/v1/bookmarks", validBody)
 
 	if rec.Code != http.StatusInternalServerError {
@@ -348,15 +412,17 @@ func TestCORSOnlyForExtensionOrigins(t *testing.T) {
 }
 
 func TestServerHandlesNilDependenciesSafely(t *testing.T) {
-	h := api.NewServer(nil, nil, nil)
+	h := api.NewServer(nil, nil)
 	if rec := do(h, http.MethodGet, "/health", ""); rec.Code != http.StatusOK {
 		t.Errorf("health status = %d, want 200", rec.Code)
 	}
-	if rec := do(h, http.MethodGet, "/v1/index", ""); rec.Code != http.StatusOK {
-		t.Errorf("index status = %d, want 200", rec.Code)
+	// An absent store cannot serve an index; handlers.go answers 500 rather
+	// than an empty {"items":{}} that would invite duplicate saves.
+	if rec := do(h, http.MethodGet, "/v1/index", ""); rec.Code != http.StatusInternalServerError {
+		t.Errorf("index status = %d, want 500 when the store is absent", rec.Code)
 	}
 	if rec := do(h, http.MethodPost, "/v1/bookmarks", validBody); rec.Code != http.StatusInternalServerError {
-		t.Errorf("save status = %d, want 500 when store is absent", rec.Code)
+		t.Errorf("save status = %d, want 500 when the store is absent", rec.Code)
 	}
 }
 
@@ -368,23 +434,6 @@ func (s stubStore) Save(model.SaveRequest) (model.SaveResponse, error) {
 	return model.SaveResponse{}, s.err
 }
 
-type stubIndex struct{ items map[string]model.IndexEntry }
-
-func (s stubIndex) All() map[string]model.IndexEntry { return s.items }
-
-func csvDataRows(t *testing.T, dir, name string) [][]string {
-	t.Helper()
-	f, err := os.Open(filepath.Join(dir, name))
-	if err != nil {
-		t.Fatalf("open %s: %v", name, err)
-	}
-	defer f.Close()
-	recs, err := csv.NewReader(f).ReadAll()
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
-	if len(recs) > 0 && storage.IsHeaderRecord(recs[0]) {
-		return recs[1:]
-	}
-	return recs
+func (s stubStore) Index() (map[string]model.IndexEntry, error) {
+	return map[string]model.IndexEntry{}, nil
 }

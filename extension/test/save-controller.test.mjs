@@ -16,7 +16,7 @@ import {
 import { EXTRACTION_ERROR } from "../src/content/tweet-extractor.ts";
 import { createTweetDocument } from "./helpers/tweet-fixtures.mjs";
 
-const CATEGORY = { id: "cat-linux", name: "Linux", filename: "linux.csv", color: "#10b981", order: 0 };
+const CATEGORY = { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 };
 const TWEET_ID = "123456";
 
 const SAVED_RESPONSE = {
@@ -25,7 +25,7 @@ const SAVED_RESPONSE = {
     status: "saved",
     tweet_id: TWEET_ID,
     url: "https://x.com/foo/status/123456",
-    filename: "linux.csv",
+    slug: "linux",
     saved_at: "2026-09-27T01:05:00Z",
   },
 };
@@ -134,7 +134,8 @@ test("201 marks saved, toasts the category name, and fires onSaved with snake_ca
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0].type, "SAVE_TWEET");
   assert.deepEqual(h.calls[0].payload, {
-    filename: "linux.csv",
+    slug: "linux",
+    name: "Linux",
     tweet: {
       url: "https://x.com/foo/status/123456",
       media: ["https://pbs.twimg.com/media/AAA.jpg"],

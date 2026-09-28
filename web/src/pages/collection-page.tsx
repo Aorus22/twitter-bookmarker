@@ -15,26 +15,28 @@ import {
   MediaLightbox,
   PostCard,
 } from "@/components/gallery"
-import { useGalleryQuery, useMasonryColumns, useMediaLightbox, usePosts } from "@/hooks"
+import {
+  useGalleryQuery,
+  useMasonryColumns,
+  useMediaLightbox,
+  usePosts,
+} from "@/hooks"
 import { formatCollectionCounts } from "@/lib/collection-meta"
 import { masonryContainerWidth } from "@/lib/masonry"
-import {
-  BACK_TO_COLLECTIONS_LABEL,
-  LOADING_POSTS_LABEL,
-} from "@/lib/messages"
+import { BACK_TO_COLLECTIONS_LABEL, LOADING_POSTS_LABEL } from "@/lib/messages"
 import { pickPlaceholderGradient } from "@/lib/placeholder"
 import { selectPostsViewState } from "@/lib/posts-state"
 import { scrollNearTop } from "@/lib/scroll"
 
 /**
- * Collection route `/collections/:filename` (design spec §3.3, frame `6:121`).
+ * Collection route `/collections/:slug` (design spec §3.3, frame `6:121`).
  *
  * Header: `← Collections` back link, a `96×96` `r24` gradient icon seeded
- * deterministically from the filename, the title Playfair Bold 38 and the meta
+ * deterministically from the slug, the title Playfair Bold 38 and the meta
  * `186 posts · 220 media` at x=184, set at `text-xl` because the size of the
  * folder is what the page is opened to find out. The mockup's description line
  * (y=198) is
- * omitted (spec §7 — the CSV has no description field) and so are the
+ * omitted (spec §7 — there is no description field) and so are the
  * media-type (y=350) and topic (y=394) pills.
  *
  * Column: the hero, the toolbar and the masonry share one content column that
@@ -70,7 +72,7 @@ import { scrollNearTop } from "@/lib/scroll"
  * lightbox). One `MediaLightbox` renders the active post beside its media.
  */
 export function CollectionPage() {
-  const { filename } = useParams<{ filename: string }>()
+  const { slug } = useParams<{ slug: string }>()
   const {
     query,
     search,
@@ -93,7 +95,7 @@ export function CollectionPage() {
     isLoadingMore,
     loadMore,
     refetch,
-  } = usePosts(filename, requestParams)
+  } = usePosts(slug, requestParams)
 
   // The lightbox is driven entirely by the accumulated loaded list: its
   // flattened media sequence is derived from `posts`, so it can never request a
@@ -138,8 +140,8 @@ export function CollectionPage() {
   const displayName =
     collection !== undefined && collection.name.trim() !== ""
       ? collection.name
-      : (filename ?? "Collection")
-  const icon = pickPlaceholderGradient(filename ?? "collection")
+      : (slug ?? "Collection")
+  const icon = pickPlaceholderGradient(slug ?? "collection")
 
   return (
     <div ref={columnProbeRef} className="w-full">
@@ -150,7 +152,7 @@ export function CollectionPage() {
       >
         <Link
           to="/"
-          className="w-fit text-[11px] leading-[1.4] font-medium text-muted outline-none transition-colors hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="w-fit text-[11px] leading-[1.4] font-medium text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {BACK_TO_COLLECTIONS_LABEL}
         </Link>

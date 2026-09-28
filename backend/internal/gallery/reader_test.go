@@ -2,105 +2,51 @@ package gallery_test
 
 import (
 	"bytes"
-	"encoding/csv"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/gallery"
 	"twitter-bookmarker/internal/logging"
-	"twitter-bookmarker/internal/storage"
 )
 
 // --- seeding helpers -------------------------------------------------------
 
+// newReader builds a reader over dir and captures its structured log output, so
+// a test can assert on the warnings the read layer emits.
 func newReader(t *testing.T, dir string) (*gallery.Reader, *bytes.Buffer) {
 	t.Helper()
 	var logs bytes.Buffer
 	return gallery.New(dir, logging.New(&logs)), &logs
 }
 
-func currentHeader() []string { return strings.Split(storage.Header, ",") }
-func legacyHeader() []string  { return strings.Split(storage.LegacyHeader, ",") }
-
-// writeCSV writes a header plus rows using encoding/csv, so commas, quotes,
-// newlines and emoji inside cells are escaped exactly like the writer does.
-func writeCSV(t *testing.T, dir, name string, header []string, rows [][]string) {
+// insertRaw writes one bookmark exactly as given, bypassing dbtest.Insert's
+// defaults. It is how a test stores a hand-edited value — an empty author, a
+// non-RFC3339 timestamp, a malformed media cell — without pretending it came
+// from the writer under test.
+func insertRaw(t *testing.T, conn *sql.DB, collectionID int64, row dbtest.Row) {
 	t.Helper()
-	file, err := os.Create(filepath.Join(dir, name))
-	if err != nil {
-		t.Fatalf("create %s: %v", name, err)
-	}
-	defer file.Close()
-
-	writer := csv.NewWriter(file)
-	if err := writer.Write(header); err != nil {
-		t.Fatalf("write header %s: %v", name, err)
-	}
-	for _, row := range rows {
-		if err := writer.Write(row); err != nil {
-			t.Fatalf("write row %s: %v", name, err)
-		}
-	}
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		t.Fatalf("flush %s: %v", name, err)
-	}
-}
-
-// appendCSV appends one row to an existing collection, proving freshness.
-func appendCSV(t *testing.T, dir, name string, header, row []string) {
-	t.Helper()
-	existing, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
-	}
-	if len(existing) == 0 {
-		writeCSV(t, dir, name, header, [][]string{row})
-		return
-	}
-	file, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		t.Fatalf("open %s: %v", name, err)
-	}
-	defer file.Close()
-	writer := csv.NewWriter(file)
-	if err := writer.Write(row); err != nil {
-		t.Fatalf("append %s: %v", name, err)
-	}
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		t.Fatalf("flush %s: %v", name, err)
-	}
-}
-
-func writeRaw(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-		t.Fatalf("write %s: %v", name, err)
-	}
-}
-
-func currentRow(url, media, author, username, tweetDate, savedAt, text string) []string {
-	return []string{url, media, author, username, tweetDate, savedAt, text}
-}
-
-func legacyRow(url, author, username, tweetDate, savedAt, text string) []string {
-	return []string{url, author, username, tweetDate, savedAt, text}
+	dbtest.MustExec(t, conn,
+		`INSERT INTO bookmarks(tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.TweetID, collectionID, row.URL, row.Author, row.Username,
+		row.TweetDate, row.SavedAt, row.Text, row.Media)
 }
 
 // mustPosts parses a raw query and runs it.
-func mustPosts(t *testing.T, r *gallery.Reader, filename string, raw gallery.RawQuery) gallery.Page {
+func mustPosts(t *testing.T, r *gallery.Reader, slug string, raw gallery.RawQuery) gallery.Page {
 	t.Helper()
 	query, err := raw.Parse()
 	if err != nil {
 		t.Fatalf("RawQuery.Parse() error = %v", err)
 	}
-	page, err := r.Posts(filename, query)
+	page, err := r.Posts(slug, query)
 	if err != nil {
-		t.Fatalf("Posts(%q) error = %v", filename, err)
+		t.Fatalf("Posts(%q) error = %v", slug, err)
 	}
 	return page
 }
@@ -133,41 +79,47 @@ func itemIDs(page gallery.Page) []string {
 func seedGallery(t *testing.T) (*gallery.Reader, *bytes.Buffer, string) {
 	t.Helper()
 	dir := t.TempDir()
+	conn := dbtest.Open(t, dir)
 
-	writeCSV(t, dir, "ai.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/alice/status/111",
-			`["https://pbs.twimg.com/media/a1.jpg","https://pbs.twimg.com/media/a2.jpg"]`,
-			"Alice", "@alice", "2026-09-20T08:00:00Z", "2026-09-27T10:00:00Z", "AI news"),
-		currentRow("https://x.com/alice/status/112", `[]`,
-			"Alice", "@alice", "2026-09-21T08:00:00Z", "2026-09-27T11:00:00Z", "text only"),
-		currentRow("https://x.com/bob/status/113",
-			`["https://pbs.twimg.com/media/a3.jpg"]`,
-			"Bob", "@bob", "2026-09-22T08:00:00Z", "2026-09-26T09:00:00Z", "older"),
-	})
-	writeCSV(t, dir, "linux.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/carol/status/211",
-			`["https://pbs.twimg.com/media/l1.jpg"]`,
-			"Carol", "@carol", "2026-09-10T08:00:00Z", "2026-09-25T10:00:00Z", "Linux desktop tips"),
-		currentRow("https://x.com/dave/status/212",
-			`["https://pbs.twimg.com/media/l2.jpg"]`,
-			"Dave", "@dave", "2026-09-11T08:00:00Z", "2026-09-24T10:00:00Z", "kernel stuff"),
-	})
-	writeCSV(t, dir, "design.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/erin/status/311", `[]`,
-			"Erin", "@erin", "2026-09-15T08:00:00Z", "2026-09-20T10:00:00Z", "design notes"),
-	})
+	dbtest.Seed(t, conn, "ai", "AI",
+		dbtest.Row{TweetID: "111", URL: "https://x.com/alice/status/111",
+			Media:  `["https://pbs.twimg.com/media/a1.jpg","https://pbs.twimg.com/media/a2.jpg"]`,
+			Author: "Alice", Username: "@alice",
+			TweetDate: "2026-09-20T08:00:00Z", SavedAt: "2026-09-27T10:00:00Z", Text: "AI news"},
+		dbtest.Row{TweetID: "112", URL: "https://x.com/alice/status/112", Media: `[]`,
+			Author: "Alice", Username: "@alice",
+			TweetDate: "2026-09-21T08:00:00Z", SavedAt: "2026-09-27T11:00:00Z", Text: "text only"},
+		dbtest.Row{TweetID: "113", URL: "https://x.com/bob/status/113",
+			Media:  `["https://pbs.twimg.com/media/a3.jpg"]`,
+			Author: "Bob", Username: "@bob",
+			TweetDate: "2026-09-22T08:00:00Z", SavedAt: "2026-09-26T09:00:00Z", Text: "older"},
+	)
+	dbtest.Seed(t, conn, "linux", "Linux",
+		dbtest.Row{TweetID: "211", URL: "https://x.com/carol/status/211",
+			Media:  `["https://pbs.twimg.com/media/l1.jpg"]`,
+			Author: "Carol", Username: "@carol",
+			TweetDate: "2026-09-10T08:00:00Z", SavedAt: "2026-09-25T10:00:00Z", Text: "Linux desktop tips"},
+		dbtest.Row{TweetID: "212", URL: "https://x.com/dave/status/212",
+			Media:  `["https://pbs.twimg.com/media/l2.jpg"]`,
+			Author: "Dave", Username: "@dave",
+			TweetDate: "2026-09-11T08:00:00Z", SavedAt: "2026-09-24T10:00:00Z", Text: "kernel stuff"},
+	)
+	dbtest.Seed(t, conn, "design", "Design",
+		dbtest.Row{TweetID: "311", URL: "https://x.com/erin/status/311", Media: `[]`,
+			Author: "Erin", Username: "@erin",
+			TweetDate: "2026-09-15T08:00:00Z", SavedAt: "2026-09-20T10:00:00Z", Text: "design notes"},
+	)
 
-	// Everything below must never be exposed as a collection.
-	writeRaw(t, dir, "index.json", `{"version":1,"tweets":{}}`)
-	writeRaw(t, dir, "linux.csv.bak", "url,author,username,tweet_date,saved_at,text\n")
-	writeRaw(t, dir, ".hidden.csv", "url,media,author,username,tweet_date,saved_at,text\n")
-	writeRaw(t, dir, "linux.csv.tmp", "junk")
-	writeRaw(t, dir, "notes.txt", "junk")
-	if err := os.Mkdir(filepath.Join(dir, "folder.csv"), 0o700); err != nil {
-		t.Fatalf("mkdir folder.csv: %v", err)
+	// Files and directories beside the database are not collections: the gallery
+	// reads the collections table, not the directory listing.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("junk"), 0o600); err != nil {
+		t.Fatalf("write notes.txt: %v", err)
 	}
-	if err := os.Symlink(filepath.Join(dir, "linux.csv"), filepath.Join(dir, "link.csv")); err != nil {
-		t.Fatalf("symlink: %v", err)
+	if err := os.Mkdir(filepath.Join(dir, "nested"), 0o700); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "archive.bak"), []byte("junk"), 0o600); err != nil {
+		t.Fatalf("write archive.bak: %v", err)
 	}
 
 	reader, logs := newReader(t, dir)
@@ -231,8 +183,8 @@ func TestCollectionsDiscoverySummariesAndOrdering(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := collectionByName(t, collections, test.name)
-			if got.Filename != strings.ToLower(test.name)+".csv" {
-				t.Errorf("Filename = %q, want %q", got.Filename, strings.ToLower(test.name)+".csv")
+			if got.Slug != strings.ToLower(test.name) {
+				t.Errorf("Slug = %q, want %q", got.Slug, strings.ToLower(test.name))
 			}
 			if got.PostCount != test.postCount {
 				t.Errorf("PostCount = %d, want %d", got.PostCount, test.postCount)
@@ -255,17 +207,21 @@ func TestCollectionsDiscoverySummariesAndOrdering(t *testing.T) {
 
 func TestCollectionsCoverMediaNewestFirstCappedAtFour(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "cap.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1",
-			`["https://pbs.twimg.com/media/m1.jpg","https://pbs.twimg.com/media/m2.jpg"]`,
-			"A", "@a", "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "newest"),
-		currentRow("https://x.com/u/status/2",
-			`["https://pbs.twimg.com/media/m3.jpg","https://pbs.twimg.com/media/m4.jpg"]`,
-			"A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "middle"),
-		currentRow("https://x.com/u/status/3",
-			`["https://pbs.twimg.com/media/m5.jpg","https://pbs.twimg.com/media/m6.jpg"]`,
-			"A", "@a", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "oldest"),
-	})
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "cap", "Cap",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Media:  `["https://pbs.twimg.com/media/m1.jpg","https://pbs.twimg.com/media/m2.jpg"]`,
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-03T00:00:00Z", Text: "newest"},
+		dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+			Media:  `["https://pbs.twimg.com/media/m3.jpg","https://pbs.twimg.com/media/m4.jpg"]`,
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "middle"},
+		dbtest.Row{TweetID: "3", URL: "https://x.com/u/status/3",
+			Media:  `["https://pbs.twimg.com/media/m5.jpg","https://pbs.twimg.com/media/m6.jpg"]`,
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-01T00:00:00Z", Text: "oldest"},
+	)
 	reader, _ := newReader(t, dir)
 
 	collections, err := reader.Collections()
@@ -286,15 +242,24 @@ func TestCollectionsCoverMediaNewestFirstCappedAtFour(t *testing.T) {
 
 func TestCollectionsEmptyAndTimestampLessSortLast(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "full.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-05T00:00:00Z", "has a timestamp"),
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "full", "Full",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-05T00:00:00Z", Text: "has a timestamp"},
+	)
+	dbtest.Collection(t, conn, "no-rows", "No Rows")
+	emptyID := dbtest.Collection(t, conn, "empty-rows", "Empty Rows")
+	// A row whose saved_at was hand-edited to nothing: it is dropped, so the
+	// collection has no valid rows and behaves like an empty one.
+	insertRaw(t, conn, emptyID, dbtest.Row{
+		TweetID: "2", URL: "https://x.com/u/status/2",
+		Author: "A", Username: "@a",
+		TweetDate: "2026-09-01T00:00:00Z", SavedAt: "", Text: "no saved_at so it is dropped",
+		Media: "[]",
 	})
-	writeCSV(t, dir, "header-only.csv", currentHeader(), nil)
-	writeCSV(t, dir, "empty-rows.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/2", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "", "no saved_at so it is dropped"),
-	})
-	reader, _ := newReader(t, dir)
 
+	reader, _ := newReader(t, dir)
 	collections, err := reader.Collections()
 	if err != nil {
 		t.Fatalf("Collections() error = %v", err)
@@ -318,8 +283,10 @@ func TestCollectionsEmptyAndTimestampLessSortLast(t *testing.T) {
 	}
 }
 
-func TestCollectionsMissingDirectoryIsEmpty(t *testing.T) {
-	reader, _ := newReader(t, filepath.Join(t.TempDir(), "does-not-exist"))
+func TestCollectionsMissingDatabaseIsEmpty(t *testing.T) {
+	// The directory exists but holds no database: the fresh-install state must
+	// read as an empty gallery rather than an error.
+	reader, _ := newReader(t, t.TempDir())
 	collections, err := reader.Collections()
 	if err != nil {
 		t.Fatalf("Collections() error = %v", err)
@@ -333,13 +300,19 @@ func TestCollectionsMissingDirectoryIsEmpty(t *testing.T) {
 
 func TestPostsMalformedMediaJSONBecomesEmptyAndWarns(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "media.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", "not-json", "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "bad media"),
-		currentRow("https://x.com/u/status/2", `["https://pbs.twimg.com/media/ok.jpg"]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-03T00:00:00Z", "good media"),
-	})
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "media", "Media",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1", Media: "not-json",
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "bad media"},
+		dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+			Media:  `["https://pbs.twimg.com/media/ok.jpg"]`,
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-03T00:00:00Z", Text: "good media"},
+	)
 	reader, logs := newReader(t, dir)
 
-	page := mustPosts(t, reader, "media.csv", gallery.RawQuery{Sort: "saved_desc"})
+	page := mustPosts(t, reader, "media", gallery.RawQuery{Sort: "saved_desc"})
 	if len(page.Items) != 2 {
 		t.Fatalf("Items = %d, want 2 (the malformed-media post is still returned)", len(page.Items))
 	}
@@ -353,80 +326,117 @@ func TestPostsMalformedMediaJSONBecomesEmptyAndWarns(t *testing.T) {
 	if !strings.Contains(logs.String(), "malformed media json") {
 		t.Errorf("expected a malformed-media warning, logs = %q", logs.String())
 	}
-	if !strings.Contains(logs.String(), "filename=media.csv") {
-		t.Errorf("warning should name the file, logs = %q", logs.String())
+	if !strings.Contains(logs.String(), "slug=media") {
+		t.Errorf("warning should name the collection, logs = %q", logs.String())
 	}
 }
 
 func TestPostsMalformedRowsAreSkippedWithWarnings(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "rows.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "good one"),
-		currentRow("https://x.com/u/status/2", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "", "missing saved_at"),
-		currentRow("https://x.com/u/status/3", `[]`, "", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "missing author"),
-		currentRow("", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "missing url"),
-		currentRow("https://x.com/u/status/5", `[]`, "A", "@a", "not-a-date", "2026-09-02T00:00:00Z", "bad tweet_date"),
-		{"https://x.com/u/status/6", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "wrong", "field", "count"},
-		currentRow("https://example.com/not-a-tweet", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "unparseable url"),
-		currentRow("https://x.com/u/status/8", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "good two"),
-	})
+	conn := dbtest.Open(t, dir)
+	id := dbtest.Collection(t, conn, "rows", "Rows")
+
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "1",
+		SavedAt: "2026-09-02T00:00:00Z", Text: "good one"})
+	insertRaw(t, conn, id, dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+		Author: "A", Username: "@a",
+		TweetDate: "2026-09-01T00:00:00Z", SavedAt: "", Text: "missing saved_at", Media: "[]"})
+	insertRaw(t, conn, id, dbtest.Row{TweetID: "3", URL: "https://x.com/u/status/3",
+		Author: "", Username: "@a",
+		TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "missing author", Media: "[]"})
+	insertRaw(t, conn, id, dbtest.Row{TweetID: "4", URL: "",
+		Author: "A", Username: "@a",
+		TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "missing url", Media: "[]"})
+	insertRaw(t, conn, id, dbtest.Row{TweetID: "5", URL: "https://x.com/u/status/5",
+		Author: "A", Username: "@a",
+		TweetDate: "not-a-date", SavedAt: "2026-09-02T00:00:00Z", Text: "bad tweet_date", Media: "[]"})
+	insertRaw(t, conn, id, dbtest.Row{TweetID: "6", URL: "https://x.com/u/status/6",
+		Author: "A", Username: "@a",
+		TweetDate: "2026-09-01T00:00:00Z", SavedAt: "not-a-timestamp", Text: "bad saved_at", Media: "[]"})
+	insertRaw(t, conn, id, dbtest.Row{TweetID: "7", URL: "https://example.com/not-a-tweet",
+		Author: "A", Username: "@a",
+		TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "unparseable url", Media: "[]"})
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "8",
+		SavedAt: "2026-09-02T00:00:00Z", Text: "good two"})
+
 	reader, logs := newReader(t, dir)
 
-	page := mustPosts(t, reader, "rows.csv", gallery.RawQuery{})
+	page := mustPosts(t, reader, "rows", gallery.RawQuery{})
 	if got := itemIDs(page); !equalStrings(got, []string{"8", "1"}) {
 		t.Fatalf("surviving ids = %v, want [8 1] (default saved_desc)", got)
 	}
-	if !strings.Contains(logs.String(), "skipping malformed row") {
+	if !strings.Contains(logs.String(), "skipping malformed bookmark") {
 		t.Errorf("expected malformed-row warnings, logs = %q", logs.String())
 	}
-	for _, reason := range []string{"missing saved_at", "missing author", "missing url", "tweet_date is not RFC3339", "expected 7 fields, got 9"} {
+	for _, reason := range []string{
+		"missing saved_at",
+		"missing author",
+		"tweet_date is not RFC3339",
+		"saved_at is not RFC3339",
+		"url is not a canonical tweet URL",
+	} {
 		if !strings.Contains(logs.String(), reason) {
 			t.Errorf("logs missing reason %q: %q", reason, logs.String())
 		}
 	}
 }
 
-func TestPostsLegacyHeaderYieldsEmptyMedia(t *testing.T) {
+func TestPostsRowWithoutMediaYieldsEmptyMedia(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "legacy.csv", legacyHeader(), [][]string{
-		legacyRow("https://x.com/u/status/77", "Old Author", "@old", "2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z", "pre-media file, with a comma"),
+	conn := dbtest.Open(t, dir)
+	// A hand-edited row whose media cell is empty (not the "[]" the writer
+	// emits) must still render as a media-less text card.
+	noMediaID := dbtest.Collection(t, conn, "no-media", "No Media")
+	insertRaw(t, conn, noMediaID, dbtest.Row{
+		TweetID: "77", URL: "https://x.com/u/status/77",
+		Author: "Old Author", Username: "@old",
+		TweetDate: "2026-08-01T00:00:00Z", SavedAt: "2026-08-02T00:00:00Z",
+		Text: "a row stored without a media value, with a comma", Media: "",
 	})
-	// The current layout next to it must still resolve.
-	writeCSV(t, dir, "current.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/88", `["https://pbs.twimg.com/media/n.jpg"]`, "New Author", "@new", "2026-08-03T00:00:00Z", "2026-08-04T00:00:00Z", "with media"),
-	})
+	// A media-bearing row next to it must still resolve.
+	dbtest.Seed(t, conn, "current", "Current",
+		dbtest.Row{TweetID: "88", URL: "https://x.com/u/status/88",
+			Media:  `["https://pbs.twimg.com/media/n.jpg"]`,
+			Author: "New Author", Username: "@new",
+			TweetDate: "2026-08-03T00:00:00Z", SavedAt: "2026-08-04T00:00:00Z", Text: "with media"},
+	)
 	reader, _ := newReader(t, dir)
 
-	legacy := mustPosts(t, reader, "legacy.csv", gallery.RawQuery{})
-	if len(legacy.Items) != 1 {
-		t.Fatalf("legacy Items = %d, want 1", len(legacy.Items))
+	noMedia := mustPosts(t, reader, "no-media", gallery.RawQuery{})
+	if len(noMedia.Items) != 1 {
+		t.Fatalf("no-media Items = %d, want 1", len(noMedia.Items))
 	}
-	got := legacy.Items[0]
-	if got.TweetID != "77" || got.Author != "Old Author" || got.Username != "@old" || got.Text != "pre-media file, with a comma" {
-		t.Fatalf("legacy post misparsed: %+v", got)
+	got := noMedia.Items[0]
+	if got.TweetID != "77" || got.Author != "Old Author" || got.Username != "@old" ||
+		got.Text != "a row stored without a media value, with a comma" {
+		t.Fatalf("no-media post misparsed: %+v", got)
 	}
 	if got.Media == nil || len(got.Media) != 0 {
-		t.Errorf("legacy Media = %v, want []", got.Media)
+		t.Errorf("no-media Media = %v, want []", got.Media)
 	}
 	if got.SavedAt != "2026-08-02T00:00:00Z" {
-		t.Errorf("legacy SavedAt = %q", got.SavedAt)
+		t.Errorf("no-media SavedAt = %q", got.SavedAt)
 	}
 
-	current := mustPosts(t, reader, "current.csv", gallery.RawQuery{})
+	current := mustPosts(t, reader, "current", gallery.RawQuery{})
 	if len(current.Items) != 1 || len(current.Items[0].Media) != 1 {
-		t.Fatalf("current layout misparsed: %+v", current.Items)
+		t.Fatalf("current collection misparsed: %+v", current.Items)
 	}
 }
 
-func TestPostsCSVEdgeCharactersRoundTrip(t *testing.T) {
+func TestPostsEdgeCharactersRoundTrip(t *testing.T) {
 	dir := t.TempDir()
+	conn := dbtest.Open(t, dir)
 	text := "line one\nline two, with \"quotes\" and a comma; emoji 🎉 and unicode—dash"
-	writeCSV(t, dir, "edge.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `["https://pbs.twimg.com/media/é.jpg"]`, "Ünïcode Áuthor", "@ünï", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", text),
-	})
+	dbtest.Seed(t, conn, "edge", "Edge",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Media:  `["https://pbs.twimg.com/media/é.jpg"]`,
+			Author: "Ünïcode Áuthor", Username: "@ünï",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: text},
+	)
 	reader, _ := newReader(t, dir)
 
-	page := mustPosts(t, reader, "edge.csv", gallery.RawQuery{})
+	page := mustPosts(t, reader, "edge", gallery.RawQuery{})
 	if len(page.Items) != 1 {
 		t.Fatalf("Items = %d, want 1", len(page.Items))
 	}
@@ -438,46 +448,44 @@ func TestPostsCSVEdgeCharactersRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPostsUnknownHeaderReadsAsEmptyCollection(t *testing.T) {
+func TestPostsUnknownSlugIsNotFound(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "weird.csv", []string{"a", "b"}, [][]string{{"1", "2"}})
-	reader, logs := newReader(t, dir)
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "present", "Present",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1"},
+	)
+	reader, _ := newReader(t, dir)
 
-	page := mustPosts(t, reader, "weird.csv", gallery.RawQuery{})
-	if len(page.Items) != 0 || page.HasMore {
-		t.Fatalf("page = %+v, want an empty exhausted page", page)
-	}
-	collections, err := reader.Collections()
-	if err != nil {
-		t.Fatalf("Collections() error = %v", err)
-	}
-	if len(collections) != 1 || collections[0].PostCount != 0 {
-		t.Fatalf("collections = %+v, want one empty collection", collections)
-	}
-	if !strings.Contains(logs.String(), "no gallery columns") {
-		t.Errorf("expected an unrecognised-header warning, logs = %q", logs.String())
+	// A syntactically valid slug that resolves to no collection row is a clean
+	// 404 signal, not an empty page.
+	if _, err := reader.Posts("absent", gallery.Query{}); !errors.Is(err, gallery.ErrCollectionNotFound) {
+		t.Fatalf("Posts(\"absent\") error = %v, want ErrCollectionNotFound", err)
 	}
 }
 
 // --- freshness (Specific Idea 8) -------------------------------------------
 
-func TestEveryCallRereadsTheCSVWithoutCache(t *testing.T) {
+func TestEveryCallRereadsTheDatabaseWithoutCache(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "fresh.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "first"),
-	})
+	conn := dbtest.Open(t, dir)
+	id := dbtest.Seed(t, conn, "fresh", "Fresh",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "first"},
+	)
 	reader, _ := newReader(t, dir)
 
-	first := mustPosts(t, reader, "fresh.csv", gallery.RawQuery{})
+	first := mustPosts(t, reader, "fresh", gallery.RawQuery{})
 	if len(first.Items) != 1 {
 		t.Fatalf("first read Items = %d, want 1", len(first.Items))
 	}
 
-	// A bookmark appended while the server runs must be visible immediately.
-	appendCSV(t, dir, "fresh.csv", currentHeader(),
-		currentRow("https://x.com/u/status/2", `[]`, "A", "@a", "2026-09-03T00:00:00Z", "2026-09-04T00:00:00Z", "second"))
+	// A bookmark saved while the server runs must be visible immediately.
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+		Author: "A", Username: "@a",
+		TweetDate: "2026-09-03T00:00:00Z", SavedAt: "2026-09-04T00:00:00Z", Text: "second"})
 
-	second := mustPosts(t, reader, "fresh.csv", gallery.RawQuery{Sort: "saved_asc"})
+	second := mustPosts(t, reader, "fresh", gallery.RawQuery{Sort: "saved_asc"})
 	if got := itemIDs(second); !equalStrings(got, []string{"1", "2"}) {
 		t.Fatalf("second read ids = %v, want [1 2] with the fresh row visible", got)
 	}
@@ -486,41 +494,47 @@ func TestEveryCallRereadsTheCSVWithoutCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collections() error = %v", err)
 	}
-	if got := collectionByName(t, collections, "Fresh"); got.PostCount != 2 || *got.LastSavedAt != "2026-09-04T00:00:00Z" {
+	got := collectionByName(t, collections, "Fresh")
+	if got.PostCount != 2 || got.LastSavedAt == nil || *got.LastSavedAt != "2026-09-04T00:00:00Z" {
 		t.Fatalf("summary = %+v, want 2 posts and the new last_saved_at", got)
 	}
 }
 
-// --- filename safety (Specific Idea 9) -------------------------------------
+// --- slug safety (Specific Idea 9) -----------------------------------------
 
-func TestPostsRejectsTraversalAndNonCSVNames(t *testing.T) {
+func TestPostsRejectsTraversalAndInvalidSlugs(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "linux.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", "ok"),
-	})
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "linux", "Linux",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Author: "A", Username: "@a",
+			TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "ok"},
+	)
 	reader, _ := newReader(t, dir)
 
-	for _, name := range []string{
+	for _, slug := range []string{
 		"../etc/passwd",
 		"/etc/passwd",
-		"a/b.csv",
-		`a\b.csv`,
-		"~/linux.csv",
-		"linux.csv.bak",
-		"x.txt",
+		"a/b",
+		`a\b`,
+		"~/linux",
 		"..",
-		"linux.csv/../linux.csv",
+		"linux/../linux",
+		".hidden",
+		"linux ",
+		"Linux",
+		"",
 	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := reader.Posts(name, gallery.Query{})
+		t.Run(slug, func(t *testing.T) {
+			_, err := reader.Posts(slug, gallery.Query{})
 			if err == nil {
-				t.Fatalf("Posts(%q) succeeded, want an error", name)
+				t.Fatalf("Posts(%q) succeeded, want an error", slug)
 			}
 		})
 	}
 
-	if _, err := reader.Posts("absent.csv", gallery.Query{}); !errors.Is(err, gallery.ErrCollectionNotFound) {
-		t.Fatalf("Posts(\"absent.csv\") error = %v, want ErrCollectionNotFound", err)
+	if _, err := reader.Posts("absent", gallery.Query{}); !errors.Is(err, gallery.ErrCollectionNotFound) {
+		t.Fatalf("Posts(\"absent\") error = %v, want ErrCollectionNotFound", err)
 	}
 }
 

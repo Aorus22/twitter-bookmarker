@@ -10,8 +10,8 @@ import (
 
 // sortKey is the ordering position of one row: the sort timestamp selected by
 // the active SortMode plus the tweet_id tie-breaker. It is exactly the pair a
-// cursor carries, which is what makes pagination stable while the CSV grows
-// (GAL-12, PRD-2 §43/§44).
+// cursor carries, which is what makes pagination stable while the collection
+// grows (GAL-12, PRD-2 §43/§44).
 type sortKey struct {
 	at      time.Time
 	tweetID string

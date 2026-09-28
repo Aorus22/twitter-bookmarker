@@ -9,7 +9,7 @@ import {
 /**
  * Empty-collection state (PRD-2 §60, design spec §3.6).
  *
- * A CSV that exists and is valid but has no posts: title
+ * A collection that exists and is valid but has no posts: title
  * `This collection is empty`, supporting line from spec §3.6. This is **not**
  * the filter-no-match state — see `CollectionFilterEmptyState`.
  */

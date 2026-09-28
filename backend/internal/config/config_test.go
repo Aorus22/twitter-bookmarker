@@ -40,7 +40,7 @@ func TestStorageDirHonoursEnvOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	override := filepath.Join(t.TempDir(), "csv")
+	override := filepath.Join(t.TempDir(), "vault")
 	t.Setenv(config.EnvDir, override)
 
 	got, err := config.StorageDir()
@@ -102,7 +102,7 @@ func TestStorageDirEnvCases(t *testing.T) {
 
 func TestEnsureStorageDirCreatesOverride(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	override := filepath.Join(t.TempDir(), "nested", "csv")
+	override := filepath.Join(t.TempDir(), "nested", "vault")
 	t.Setenv(config.EnvDir, override)
 
 	dir, err := config.EnsureStorageDir()

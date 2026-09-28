@@ -218,9 +218,9 @@ describe("PostMediaGrid — lightbox triggers (LIGHT-01)", () => {
 
     const trigger = screen.getAllByTestId("post-media-trigger")[0]
     expect(within(trigger).getByTestId("media-placeholder")).toBeInTheDocument()
-    expect(within(trigger).getByTestId("media-placeholder").className).toContain(
-      "size-full"
-    )
+    expect(
+      within(trigger).getByTestId("media-placeholder").className
+    ).toContain("size-full")
     expect(screen.getByTestId("post-media-grid")).toHaveAttribute(
       "data-media-layout",
       "duo"

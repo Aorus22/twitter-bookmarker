@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils"
 export function AppShell() {
   return (
     <div className="min-h-svh">
-      <header className="mx-auto w-full max-w-[1440px] px-4 sm:px-8 lg:px-16 min-[1440px]:px-0">
+      <header className="mx-auto w-full max-w-[1440px] px-4 min-[1440px]:px-0 sm:px-8 lg:px-16">
         <nav
           aria-label="Primary"
           className="mt-6 flex h-[58px] w-full items-center gap-6 rounded-lg border border-border bg-surface px-3 shadow-nav"
@@ -57,7 +57,7 @@ export function AppShell() {
               end
               className={({ isActive }) =>
                 cn(
-                  "rounded-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "rounded-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
                   isActive
                     ? "font-semibold text-accent"
                     : "font-medium text-muted hover:text-ink"
@@ -70,7 +70,7 @@ export function AppShell() {
                 (there is no separate collections index route in PRD-2 §15). */}
             <Link
               to="/"
-              className="rounded-sm font-medium text-muted outline-none transition-colors hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="rounded-sm font-medium text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               Collections
             </Link>
@@ -86,7 +86,7 @@ export function AppShell() {
         </nav>
       </header>
 
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-8 sm:px-8 lg:px-16 min-[1440px]:px-0">
+      <main className="mx-auto w-full max-w-[1440px] px-4 py-8 min-[1440px]:px-0 sm:px-8 lg:px-16">
         <div className="mx-auto w-full max-w-[1312px]">
           <Outlet />
         </div>

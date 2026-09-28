@@ -96,17 +96,20 @@ export function toUtcTo(value: string | undefined): string | undefined {
   if (parts === null) {
     return undefined
   }
-  return new Date(parts.year, parts.month - 1, parts.day, 23, 59, 59, 999).toISOString()
+  return new Date(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    23,
+    59,
+    59,
+    999
+  ).toISOString()
 }
 
 /** True when both bounds are present and `from` falls after `to`. */
-export function isInvertedRange(
-  from?: string,
-  to?: string
-): boolean {
-  return (
-    isLocalDate(from) && isLocalDate(to) && from > to
-  )
+export function isInvertedRange(from?: string, to?: string): boolean {
+  return isLocalDate(from) && isLocalDate(to) && from > to
 }
 
 /**

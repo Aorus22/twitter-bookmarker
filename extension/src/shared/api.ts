@@ -123,7 +123,7 @@ function isSaveResult(value: unknown): value is SaveResult {
     value.status === "saved" &&
     typeof value.tweet_id === "string" &&
     typeof value.url === "string" &&
-    typeof value.filename === "string" &&
+    typeof value.slug === "string" &&
     typeof value.saved_at === "string"
   );
 }

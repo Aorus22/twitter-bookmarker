@@ -19,7 +19,9 @@ describe("resolveNextPage — the cursor contract (SCROLL-04, PRD-2 §43)", () =
   it("returns the opaque cursor verbatim when the backend advertises more", () => {
     const opaque = "saved_desc|2026-09-27T10:20:30Z|42"
 
-    expect(resolveNextPage({ items: [], next_cursor: opaque, has_more: true })).toEqual({
+    expect(
+      resolveNextPage({ items: [], next_cursor: opaque, has_more: true })
+    ).toEqual({
       nextCursor: opaque,
       hasMore: true,
     })
@@ -29,7 +31,8 @@ describe("resolveNextPage — the cursor contract (SCROLL-04, PRD-2 §43)", () =
     const opaque = "a+b/c=d&e?f#g h"
 
     expect(
-      resolveNextPage({ items: [], next_cursor: opaque, has_more: true }).nextCursor
+      resolveNextPage({ items: [], next_cursor: opaque, has_more: true })
+        .nextCursor
     ).toBe(opaque)
   })
 

@@ -1,4 +1,9 @@
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react"
 import { useEffect, useMemo, useRef, type KeyboardEvent } from "react"
 
 import { LightboxInfoPanel } from "@/components/gallery/lightbox-info-panel"
@@ -155,8 +160,7 @@ const POST_CONTROL_CLASS = cn(
  * only the 768–1399 case and a safe fallback, and base utilities are always
  * emitted before variant ones.
  */
-const POST_PREV_POSITION =
-  "left-[42px] min-[1400px]:-left-14"
+const POST_PREV_POSITION = "left-[42px] min-[1400px]:-left-14"
 
 const POST_NEXT_POSITION =
   "right-[402px] max-md:right-[42px] min-[1400px]:-right-14"

@@ -7,18 +7,19 @@ import (
 	"testing"
 	"time"
 
+	"twitter-bookmarker/internal/dbtest"
 	"twitter-bookmarker/internal/gallery"
 )
 
 // walkPages pages through a collection with limit until exhaustion, returning
 // the ids in visit order and the number of pages.
-func walkPages(t *testing.T, reader *gallery.Reader, filename string, query gallery.Query, limit int) ([]string, int) {
+func walkPages(t *testing.T, reader *gallery.Reader, slug string, query gallery.Query, limit int) ([]string, int) {
 	t.Helper()
 	query.Limit = limit
 	ids := make([]string, 0, 8)
 	pages := 0
 	for {
-		page, err := reader.Posts(filename, query)
+		page, err := reader.Posts(slug, query)
 		if err != nil {
 			t.Fatalf("Posts() error = %v", err)
 		}
@@ -43,7 +44,7 @@ func walkPages(t *testing.T, reader *gallery.Reader, filename string, query gall
 func TestCursorWalkCoversEveryPostExactlyOnce(t *testing.T) {
 	reader := seedQueryCollection(t)
 
-	ids, pages := walkPages(t, reader, "query.csv", gallery.Query{Sort: gallery.SortSavedDesc}, 2)
+	ids, pages := walkPages(t, reader, "query", gallery.Query{Sort: gallery.SortSavedDesc}, 2)
 	want := []string{"105", "103", "101", "102", "104"}
 	if !equalStrings(ids, want) {
 		t.Fatalf("walk ids = %v, want %v", ids, want)
@@ -75,7 +76,7 @@ func TestCursorWalkForEverySortMode(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(string(test.mode), func(t *testing.T) {
-			ids, _ := walkPages(t, reader, "query.csv", gallery.Query{Sort: test.mode}, 2)
+			ids, _ := walkPages(t, reader, "query", gallery.Query{Sort: test.mode}, 2)
 			if !equalStrings(ids, test.want) {
 				t.Errorf("walk ids = %v, want %v", ids, test.want)
 			}
@@ -85,16 +86,21 @@ func TestCursorWalkForEverySortMode(t *testing.T) {
 
 func TestCursorWalkEndsCleanlyOnAnExactMultiple(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "even.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "one"),
-		currentRow("https://x.com/u/status/2", `[]`, "A", "@a", "2026-09-02T00:00:00Z", "2026-09-02T00:00:00Z", "two"),
-		currentRow("https://x.com/u/status/3", `[]`, "A", "@a", "2026-09-03T00:00:00Z", "2026-09-03T00:00:00Z", "three"),
-		currentRow("https://x.com/u/status/4", `[]`, "A", "@a", "2026-09-04T00:00:00Z", "2026-09-04T00:00:00Z", "four"),
-	})
+	conn := dbtest.Open(t, dir)
+	dbtest.Seed(t, conn, "even", "Even",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Author: "A", Username: "@a", TweetDate: "2026-09-01T00:00:00Z", SavedAt: "2026-09-01T00:00:00Z", Text: "one"},
+		dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+			Author: "A", Username: "@a", TweetDate: "2026-09-02T00:00:00Z", SavedAt: "2026-09-02T00:00:00Z", Text: "two"},
+		dbtest.Row{TweetID: "3", URL: "https://x.com/u/status/3",
+			Author: "A", Username: "@a", TweetDate: "2026-09-03T00:00:00Z", SavedAt: "2026-09-03T00:00:00Z", Text: "three"},
+		dbtest.Row{TweetID: "4", URL: "https://x.com/u/status/4",
+			Author: "A", Username: "@a", TweetDate: "2026-09-04T00:00:00Z", SavedAt: "2026-09-04T00:00:00Z", Text: "four"},
+	)
 	reader, _ := newReader(t, dir)
 
 	query := gallery.Query{Limit: 2}
-	first, err := reader.Posts("even.csv", query)
+	first, err := reader.Posts("even", query)
 	if err != nil {
 		t.Fatalf("Posts() error = %v", err)
 	}
@@ -106,7 +112,7 @@ func TestCursorWalkEndsCleanlyOnAnExactMultiple(t *testing.T) {
 	}
 
 	query.Cursor = first.NextCursor
-	second, err := reader.Posts("even.csv", query)
+	second, err := reader.Posts("even", query)
 	if err != nil {
 		t.Fatalf("Posts() error = %v", err)
 	}
@@ -120,15 +126,19 @@ func TestCursorWalkEndsCleanlyOnAnExactMultiple(t *testing.T) {
 
 func TestCursorStaysStableWhenARowIsAppendedMidScroll(t *testing.T) {
 	dir := t.TempDir()
-	writeCSV(t, dir, "drift.csv", currentHeader(), [][]string{
-		currentRow("https://x.com/u/status/1", `[]`, "A", "@a", "2026-03-01T00:00:00Z", "2026-03-01T00:00:00Z", "one"),
-		currentRow("https://x.com/u/status/2", `[]`, "A", "@a", "2026-02-01T00:00:00Z", "2026-02-01T00:00:00Z", "two"),
-		currentRow("https://x.com/u/status/3", `[]`, "A", "@a", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "three"),
-	})
+	conn := dbtest.Open(t, dir)
+	id := dbtest.Seed(t, conn, "drift", "Drift",
+		dbtest.Row{TweetID: "1", URL: "https://x.com/u/status/1",
+			Author: "A", Username: "@a", TweetDate: "2026-03-01T00:00:00Z", SavedAt: "2026-03-01T00:00:00Z", Text: "one"},
+		dbtest.Row{TweetID: "2", URL: "https://x.com/u/status/2",
+			Author: "A", Username: "@a", TweetDate: "2026-02-01T00:00:00Z", SavedAt: "2026-02-01T00:00:00Z", Text: "two"},
+		dbtest.Row{TweetID: "3", URL: "https://x.com/u/status/3",
+			Author: "A", Username: "@a", TweetDate: "2026-01-01T00:00:00Z", SavedAt: "2026-01-01T00:00:00Z", Text: "three"},
+	)
 	reader, _ := newReader(t, dir)
 
 	query := gallery.Query{Limit: 2}
-	first, err := reader.Posts("drift.csv", query)
+	first, err := reader.Posts("drift", query)
 	if err != nil {
 		t.Fatalf("Posts() error = %v", err)
 	}
@@ -138,11 +148,11 @@ func TestCursorStaysStableWhenARowIsAppendedMidScroll(t *testing.T) {
 
 	// A newer bookmark lands while the reader is mid-scroll. It sorts before
 	// the cursor, so page 2 must skip it and continue with the older rows.
-	appendCSV(t, dir, "drift.csv", currentHeader(),
-		currentRow("https://x.com/u/status/4", `[]`, "A", "@a", "2026-04-01T00:00:00Z", "2026-04-01T00:00:00Z", "four"))
+	dbtest.Insert(t, conn, id, dbtest.Row{TweetID: "4", URL: "https://x.com/u/status/4",
+		Author: "A", Username: "@a", TweetDate: "2026-04-01T00:00:00Z", SavedAt: "2026-04-01T00:00:00Z", Text: "four"})
 
 	query.Cursor = first.NextCursor
-	second, err := reader.Posts("drift.csv", query)
+	second, err := reader.Posts("drift", query)
 	if err != nil {
 		t.Fatalf("Posts() error = %v", err)
 	}
@@ -157,7 +167,7 @@ func TestCursorStaysStableWhenARowIsAppendedMidScroll(t *testing.T) {
 func TestCursorIsOpaqueAndCarriesSortKeyPlusTweetID(t *testing.T) {
 	reader := seedQueryCollection(t)
 
-	page := runQuery(t, reader, "query.csv", gallery.Query{Limit: 1, Sort: gallery.SortSavedDesc})
+	page := runQuery(t, reader, "query", gallery.Query{Limit: 1, Sort: gallery.SortSavedDesc})
 	if page.NextCursor == "" {
 		t.Fatal("expected a next_cursor")
 	}
@@ -195,7 +205,7 @@ func TestMalformedCursorsAreRejected(t *testing.T) {
 	}
 	for _, cursor := range invalid {
 		t.Run(cursor, func(t *testing.T) {
-			_, err := reader.Posts("query.csv", gallery.Query{Cursor: cursor})
+			_, err := reader.Posts("query", gallery.Query{Cursor: cursor})
 			assertValidationError(t, err)
 		})
 	}

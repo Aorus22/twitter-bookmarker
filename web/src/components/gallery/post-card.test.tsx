@@ -83,7 +83,9 @@ describe("PostCard — media post", () => {
     // The visible link is a real anchor; the media tiles themselves are not
     // links in Phase 5 (the lightbox is Phase 8).
     expect(screen.getByTestId("open-on-x")).toBeVisible()
-    expect(screen.queryByRole("link", { name: /Media/ })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", { name: /Media/ })
+    ).not.toBeInTheDocument()
   })
 
   it("clamps long text and expands it in place with Show more (COLL-08)", async () => {
@@ -91,7 +93,11 @@ describe("PostCard — media post", () => {
     render(
       <PostCard
         now={POST_NOW}
-        post={makePost({ tweet_id: "104", media: [pbsUrl("a")], text: LONG_TEXT })}
+        post={makePost({
+          tweet_id: "104",
+          media: [pbsUrl("a")],
+          text: LONG_TEXT,
+        })}
       />
     )
 
@@ -104,8 +110,12 @@ describe("PostCard — media post", () => {
 
     await user.click(toggle)
 
-    expect(screen.getByTestId("post-text").className).not.toContain("line-clamp")
-    expect(screen.getByTestId("post-text-toggle")).toHaveTextContent("Show less")
+    expect(screen.getByTestId("post-text").className).not.toContain(
+      "line-clamp"
+    )
+    expect(screen.getByTestId("post-text-toggle")).toHaveTextContent(
+      "Show less"
+    )
     expect(screen.getByTestId("post-text-toggle")).toHaveAttribute(
       "aria-expanded",
       "true"
@@ -117,12 +127,18 @@ describe("PostCard — media post", () => {
     render(
       <PostCard
         now={POST_NOW}
-        post={makePost({ tweet_id: "105", media: [pbsUrl("a")], text: "Short." })}
+        post={makePost({
+          tweet_id: "105",
+          media: [pbsUrl("a")],
+          text: "Short.",
+        })}
       />
     )
 
     expect(screen.queryByTestId("post-text-toggle")).not.toBeInTheDocument()
-    expect(screen.getByTestId("post-text").className).not.toContain("line-clamp")
+    expect(screen.getByTestId("post-text").className).not.toContain(
+      "line-clamp"
+    )
   })
 
   it("keeps the card intact when a remote image is broken (COLL-11, PRD-2 §62)", () => {
@@ -221,24 +237,30 @@ describe("PostCard — text-only post (COLL-05)", () => {
 
     expect(screen.getByTestId("post-text").className).toContain("line-clamp")
     await user.click(screen.getByTestId("post-text-toggle"))
-    expect(screen.getByTestId("post-text").className).not.toContain("line-clamp")
+    expect(screen.getByTestId("post-text").className).not.toContain(
+      "line-clamp"
+    )
   })
 })
 
 describe("PostCard — the stored handle keeps its single sigil", () => {
-  // Regression guard for a bug only visible with real CSV data: the extension
+  // Regression guard for a bug only visible with real stored data: the extension
   // stores the handle as "@linuxguy" (tweet-extractor's getUsername), and the
   // card used to prepend its own "@", rendering "@@linuxguy" on every real
   // bookmark. The fixtures are sigiled now, so this also guards the fixtures.
   it("renders exactly one @ for a stored handle", () => {
-    render(<PostCard post={makePost({ tweet_id: "1", username: "@linuxguy" })} />)
+    render(
+      <PostCard post={makePost({ tweet_id: "1", username: "@linuxguy" })} />
+    )
 
     expect(screen.getByText("@linuxguy")).toBeInTheDocument()
     expect(screen.queryByText("@@linuxguy")).toBeNull()
   })
 
-  it("still accepts a bare handle from a hand-written CSV", () => {
-    render(<PostCard post={makePost({ tweet_id: "2", username: "linuxguy" })} />)
+  it("still accepts a bare handle from a hand-written row", () => {
+    render(
+      <PostCard post={makePost({ tweet_id: "2", username: "linuxguy" })} />
+    )
 
     expect(screen.getByText("@linuxguy")).toBeInTheDocument()
   })

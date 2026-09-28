@@ -33,7 +33,8 @@ export const ThemeProviderContext = React.createContext<
 
 function isTheme(value: unknown): value is Theme {
   return (
-    typeof value === "string" && (THEME_VALUES as readonly string[]).includes(value)
+    typeof value === "string" &&
+    (THEME_VALUES as readonly string[]).includes(value)
   )
 }
 

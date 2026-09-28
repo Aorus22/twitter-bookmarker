@@ -16,7 +16,7 @@ import { EXTRACTION_ERROR } from "../src/content/tweet-extractor.ts";
 import { createFakeObserverFactory } from "./helpers/fake-observer.mjs";
 import { createTweetDocument } from "./helpers/tweet-fixtures.mjs";
 
-const CATEGORY = { id: "cat-linux", name: "Linux", filename: "linux.csv", color: "#10b981", order: 0 };
+const CATEGORY = { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 };
 const TWEET_ID = "123456";
 const EXTRACTED = {
   url: "https://x.com/foo/status/123456",
@@ -33,7 +33,7 @@ const SAVED_RESPONSE = {
     status: "saved",
     tweet_id: TWEET_ID,
     url: EXTRACTED.url,
-    filename: "linux.csv",
+    slug: "linux",
     saved_at: "2026-09-27T01:05:00Z",
   },
 };
@@ -225,7 +225,7 @@ test("an extraction failure never reaches the unbookmark path (XI-12, UNB-01)", 
   assert.deepEqual(toasts, [["error", EXTRACTION_ERROR]]);
 });
 
-test("201 + failed unbookmark keeps '✓ Saved' and the CSV success toast (UNB-03)", async () => {
+test("201 + failed unbookmark keeps '✓ Saved' and the success toast (UNB-03)", async () => {
   const { article } = createTweetDocument({ text: "hi", alreadyBookmarked: true });
   const saved = [];
   const saving = [];

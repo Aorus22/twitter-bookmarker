@@ -62,11 +62,28 @@ func (lg *Logger) WebAssetsMissing(dir string) {
 	)
 }
 
-// SaveSuccess reports a persisted bookmark by id + filename only.
-func (lg *Logger) SaveSuccess(tweetID, filename string) {
+// SaveSuccess reports a persisted bookmark by id + collection slug only.
+func (lg *Logger) SaveSuccess(tweetID, slug string) {
 	lg.Slog().Info("bookmark saved",
 		"tweet_id", tweetID,
-		"filename", filename,
+		"slug", slug,
+	)
+}
+
+// DeleteSuccess reports a bookmark moved into the trash. The move is the whole
+// event: nothing was destroyed, so the log says where it went.
+func (lg *Logger) DeleteSuccess(tweetID string) {
+	lg.Slog().Info("bookmark deleted",
+		"tweet_id", tweetID,
+		"recoverable", true,
+	)
+}
+
+// MoveSuccess reports a bookmark reassigned to another collection.
+func (lg *Logger) MoveSuccess(tweetID, slug string) {
+	lg.Slog().Info("bookmark moved",
+		"tweet_id", tweetID,
+		"slug", slug,
 	)
 }
 

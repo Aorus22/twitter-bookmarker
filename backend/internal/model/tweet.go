@@ -54,6 +54,33 @@ type IndexResponse struct {
 	Items map[string]IndexEntry `json:"items"`
 }
 
+// DeleteResponse is the 200 response body for DELETE /v1/bookmarks/{tweet_id}.
+//
+// The deletion is recoverable, and the body says so rather than leaving the
+// caller to remember: `recoverable` is the contract that the row moved to the
+// trash instead of being destroyed.
+type DeleteResponse struct {
+	Status      string `json:"status"`
+	TweetID     string `json:"tweet_id"`
+	Recoverable bool   `json:"recoverable"`
+}
+
+// ReassignRequest is the PUT /v1/bookmarks/{tweet_id}/collection body.
+//
+// Only the destination is accepted. A caller cannot rename the folder or create
+// one by moving into it: the extension owns folder names, and an unknown slug is
+// answered with 404 rather than turned into a new collection.
+type ReassignRequest struct {
+	Slug string `json:"slug"`
+}
+
+// ReassignResponse is the 200 response body for a successful move.
+type ReassignResponse struct {
+	Status  string `json:"status"`
+	TweetID string `json:"tweet_id"`
+	Slug    string `json:"slug"`
+}
+
 // HealthResponse is the GET /health response body.
 type HealthResponse struct {
 	Status string `json:"status"`

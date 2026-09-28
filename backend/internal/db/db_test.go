@@ -42,7 +42,7 @@ func TestOpenRWCreatesTheSchema(t *testing.T) {
 		t.Errorf("user_version = %d, want %d", version, db.Version)
 	}
 
-	if got, want := dbtest.Tables(t, conn), []string{"bookmarks", "collections"}; !reflect.DeepEqual(got, want) {
+	if got, want := dbtest.Tables(t, conn), []string{"bookmarks", "collections", "deleted_bookmarks"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("tables = %v, want %v", got, want)
 	}
 }
@@ -299,6 +299,170 @@ func TestOpenRWRefusesAFutureVersion(t *testing.T) {
 		t.Fatalf("db.OpenRW() error = %v", err)
 	}
 	dbtest.MustExec(t, conn, `PRAGMA user_version = 99`)
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	_, err = db.OpenRW(path)
+	if !errors.Is(err, db.ErrUnsupportedVersion) {
+		t.Fatalf("db.OpenRW() error = %v, want db.ErrUnsupportedVersion", err)
+	}
+}
+
+// schemaV1 is the version-1 DDL, written out here rather than imported from the
+// package under test. The point of an upgrade test is to open a file that really
+// has the *old* shape, so the fixture must not follow the code as it moves.
+const schemaV1 = `
+CREATE TABLE collections (
+  id         INTEGER PRIMARY KEY,
+  slug       TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE bookmarks (
+  tweet_id      TEXT PRIMARY KEY,
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  url           TEXT NOT NULL,
+  author        TEXT NOT NULL,
+  username      TEXT NOT NULL,
+  tweet_date    TEXT NOT NULL,
+  saved_at      TEXT NOT NULL,
+  text          TEXT NOT NULL DEFAULT '',
+  media         TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX bookmarks_by_collection_saved
+  ON bookmarks(collection_id, saved_at, tweet_id);
+
+CREATE INDEX bookmarks_by_collection_tweet
+  ON bookmarks(collection_id, tweet_date, tweet_id);
+`
+
+// writeV1 creates a version-1 database holding one collection and one bookmark,
+// and returns the path. It deliberately uses raw SQL against schemaV1 so the file
+// it produces is exactly what an older build would have left behind.
+func writeV1(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := config.DBPath(dir)
+
+	conn, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.Exec(schemaV1); err != nil {
+		t.Fatalf("apply version-1 schema: %v", err)
+	}
+	if _, err := conn.Exec(
+		`INSERT INTO collections (id, slug, name, created_at) VALUES (1, 'linux', 'Linux', '2026-01-01T00:00:00Z')`,
+	); err != nil {
+		t.Fatalf("insert collection: %v", err)
+	}
+	if _, err := conn.Exec(
+		`INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+		 VALUES ('123', 1, 'https://x.com/a/status/123', 'Ann', '@ann', '2026-02-02T00:00:00Z', '2026-03-03T00:00:00Z', 'hello', '["https://pbs.twimg.com/media/x.jpg"]')`,
+	); err != nil {
+		t.Fatalf("insert bookmark: %v", err)
+	}
+	if _, err := conn.Exec(`PRAGMA user_version = 1`); err != nil {
+		t.Fatalf("stamp version 1: %v", err)
+	}
+	return path
+}
+
+// TestOpenRWUpgradesAVersionOneDatabase proves a version-1 file becomes usable
+// instead of being refused, and that the upgrade *only adds*: every row survives
+// with its values intact.
+//
+// Refusing older files outright would strand the archive the first time the
+// schema grew, so the upgrade has to be real — and it has to be provably
+// non-destructive on the one database the user cannot regenerate.
+func TestOpenRWUpgradesAVersionOneDatabase(t *testing.T) {
+	path := writeV1(t)
+
+	conn, err := db.OpenRW(path)
+	if err != nil {
+		t.Fatalf("db.OpenRW() on a version-1 file error = %v", err)
+	}
+	defer conn.Close()
+
+	var version int
+	if err := conn.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != db.Version {
+		t.Errorf("user_version after upgrade = %d, want %d", version, db.Version)
+	}
+
+	if got, want := dbtest.Tables(t, conn), []string{"bookmarks", "collections", "deleted_bookmarks"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("tables after upgrade = %v, want %v", got, want)
+	}
+
+	// The bookmark must still be there, byte for byte.
+	var (
+		tweetID, url, author, username, tweetDate, savedAt, text, media string
+		collectionID                                                    int
+	)
+	err = conn.QueryRow(
+		`SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media
+		   FROM bookmarks WHERE tweet_id = '123'`,
+	).Scan(&tweetID, &collectionID, &url, &author, &username, &tweetDate, &savedAt, &text, &media)
+	if err != nil {
+		t.Fatalf("read the bookmark back after upgrade: %v", err)
+	}
+	if url != "https://x.com/a/status/123" || author != "Ann" || text != "hello" || collectionID != 1 {
+		t.Errorf("the upgrade changed the bookmark row: %+v", []any{collectionID, url, author, text})
+	}
+	if media != `["https://pbs.twimg.com/media/x.jpg"]` {
+		t.Errorf("media after upgrade = %q, want the stored JSON untouched", media)
+	}
+
+	// The trash starts empty: upgrading is not the same as deleting.
+	var trashed int
+	if err := conn.QueryRow(`SELECT count(*) FROM deleted_bookmarks`).Scan(&trashed); err != nil {
+		t.Fatalf("count trash: %v", err)
+	}
+	if trashed != 0 {
+		t.Errorf("deleted_bookmarks after upgrade = %d, want 0", trashed)
+	}
+}
+
+// TestOpenRWUpgradeIsIdempotent proves a second open finds a current database and
+// writes nothing more.
+func TestOpenRWUpgradeIsIdempotent(t *testing.T) {
+	path := writeV1(t)
+
+	for i := 0; i < 3; i++ {
+		conn, err := db.OpenRW(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		if err := conn.Close(); err != nil {
+			t.Fatalf("close %d: %v", i, err)
+		}
+	}
+}
+
+// TestOpenRWRefusesAVersionOneFileWithTheWrongShape proves the upgrade is narrow:
+// a file that merely *claims* version 1 is refused rather than altered, because
+// the stamp is not evidence of shape.
+func TestOpenRWRefusesAVersionOneFileWithTheWrongShape(t *testing.T) {
+	dir := t.TempDir()
+	path := config.DBPath(dir)
+
+	conn, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := conn.Exec(`CREATE TABLE collections (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := conn.Exec(`PRAGMA user_version = 1`); err != nil {
+		t.Fatalf("stamp version 1: %v", err)
+	}
 	if err := conn.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}

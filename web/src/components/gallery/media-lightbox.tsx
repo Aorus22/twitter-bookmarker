@@ -4,9 +4,10 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react"
-import { useEffect, useMemo, useRef, type KeyboardEvent } from "react"
+import { useEffect, useMemo, useRef, type KeyboardEvent, type Ref } from "react"
 
 import { LightboxInfoPanel } from "@/components/gallery/lightbox-info-panel"
+import type { PostCardActions } from "@/components/gallery/post-card"
 import { MediaImage } from "@/components/gallery/media-image"
 import {
   Dialog,
@@ -103,6 +104,23 @@ export interface MediaLightboxProps {
   onClose: () => void
   /** Reference "today" for the year-aware date format; defaults to the clock. */
   now?: Date
+  /**
+   * Curation actions, forwarded to the info panel's kebab menu.
+   *
+   * The caller must also pass `contentRef` when these are set: the menu has to be
+   * portalled into the dialog's content element, or it mounts on `document.body`
+   * and escapes the focus trap this dialog guarantees.
+   */
+  actions?: PostCardActions
+  /**
+   * Ref to the dialog's content element.
+   *
+   * Exposed so the page can use it as the portal target for anything the lightbox
+   * opens (the kebab menu, the delete and move dialogs). Without it those mount on
+   * `document.body` and Tab would leave the dialog, which both the accessibility
+   * gate and `collection-page-lightbox.test.tsx` assert never happens.
+   */
+  contentRef?: Ref<HTMLDivElement>
 }
 
 /** Author-derived `alt` for the active media (matches the tile trigger name). */
@@ -175,6 +193,8 @@ export function MediaLightbox({
   onNextPost,
   onClose,
   now,
+  actions,
+  contentRef,
 }: MediaLightboxProps) {
   const slots = useMemo(() => flattenMediaSlots(posts), [posts])
   const slot = index === null ? undefined : slotAt(slots, index)
@@ -270,6 +290,7 @@ export function MediaLightbox({
       }}
     >
       <DialogContent
+        ref={contentRef}
         data-testid="media-lightbox"
         showCloseButton={false}
         overlayClassName="bg-[#120d14]/82 supports-backdrop-filter:backdrop-blur-none"
@@ -397,6 +418,7 @@ export function MediaLightbox({
             collectionName={collectionName}
             onClose={onClose}
             now={now}
+            actions={actions}
           />
         )}
       </DialogContent>

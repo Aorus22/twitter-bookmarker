@@ -1,11 +1,12 @@
 import { Images } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
 import {
   CollectionEmptyState,
   CollectionFilterEmptyState,
   CollectionToolbar,
+  DeletePostDialog,
   FilterControl,
   GalleryBottomLoader,
   GalleryErrorState,
@@ -13,6 +14,7 @@ import {
   InfiniteSentinel,
   MasonrySkeleton,
   MediaLightbox,
+  MovePostDialog,
   PostCard,
 } from "@/components/gallery"
 import {
@@ -21,12 +23,19 @@ import {
   useMediaLightbox,
   usePosts,
 } from "@/hooks"
+import { deleteBookmark, moveBookmark } from "@/lib/api"
 import { formatCollectionCounts } from "@/lib/collection-meta"
 import { masonryContainerWidth } from "@/lib/masonry"
-import { BACK_TO_COLLECTIONS_LABEL, LOADING_POSTS_LABEL } from "@/lib/messages"
+import {
+  BACK_TO_COLLECTIONS_LABEL,
+  DELETE_POST_FAILED_MESSAGE,
+  LOADING_POSTS_LABEL,
+  MOVE_POST_FAILED_MESSAGE,
+} from "@/lib/messages"
 import { pickPlaceholderGradient } from "@/lib/placeholder"
 import { selectPostsViewState } from "@/lib/posts-state"
 import { scrollNearTop } from "@/lib/scroll"
+import type { GalleryPost } from "@/types"
 
 /**
  * Collection route `/collections/:slug` (design spec §3.3, frame `6:121`).
@@ -95,12 +104,146 @@ export function CollectionPage() {
     isLoadingMore,
     loadMore,
     refetch,
+    removePost,
   } = usePosts(slug, requestParams)
 
   // The lightbox is driven entirely by the accumulated loaded list: its
   // flattened media sequence is derived from `posts`, so it can never request a
   // page of its own (LIGHT-03).
   const lightbox = useMediaLightbox(posts)
+
+  // Curation state. The dialogs live here, on the page, rather than on each
+  // card: one set for every post, and one place that owns the request and the
+  // error copy.
+  const [pendingDelete, setPendingDelete] = useState<GalleryPost | null>(null)
+  const [pendingMove, setPendingMove] = useState<GalleryPost | null>(null)
+  const [curationBusy, setCurationBusy] = useState(false)
+  const [curationError, setCurationError] = useState<string | null>(null)
+
+  // Where a menu/dialog opened *from the lightbox* must portal itself. Radix
+  // mounts to `document.body` by default, which would put it outside the
+  // dialog's focus trap; the lightbox's content element keeps Tab inside.
+  //
+  // A callback ref into state, not a plain ref: the page has to *re-render* once
+  // the lightbox content exists, and a ref mutation alone does not re-render.
+  // Without this the menu would be handed a stale `null` and mount outside the
+  // trap. The same element is captured onto the dialog when it opens, so a
+  // portal never moves mid-flight when the lightbox closes underneath it.
+  const [lightboxContainer, setLightboxContainer] =
+    useState<HTMLDivElement | null>(null)
+  const lightboxContentRef = useCallback((node: HTMLDivElement | null) => {
+    setLightboxContainer(node)
+  }, [])
+  const [dialogContainer, setDialogContainer] = useState<HTMLDivElement | null>(
+    null
+  )
+
+  const requestDelete = useCallback(
+    (post: GalleryPost) => {
+      setCurationError(null)
+      setDialogContainer(lightboxContainer)
+      setPendingDelete(post)
+    },
+    [lightboxContainer]
+  )
+
+  const requestMove = useCallback(
+    (post: GalleryPost) => {
+      setCurationError(null)
+      setDialogContainer(lightboxContainer)
+      setPendingMove(post)
+    },
+    [lightboxContainer]
+  )
+
+  // Cards are never inside the lightbox, so their menu keeps Radix's default
+  // portal. A stable object identity keeps the memoised cards from re-rendering.
+  const cardActions = useMemo(
+    () => ({ onRequestDelete: requestDelete, onRequestMove: requestMove }),
+    [requestDelete, requestMove]
+  )
+  const lightboxActions = useMemo(
+    () => ({ ...cardActions, portalContainer: lightboxContainer }),
+    [cardActions, lightboxContainer]
+  )
+
+  /**
+   * Run one curation request and apply it to the screen.
+   *
+   * `removePost` is deliberately not a `refetch()`: a refetch would reset the
+   * cursor and page 1 and throw a scrolled-down user back to the top. The row is
+   * removed from the held pages instead, so the scroll position and the pages
+   * below it survive.
+   */
+  const runCuration = useCallback(
+    async (
+      tweetId: string,
+      action: () => Promise<unknown>,
+      failure: string
+    ) => {
+      setCurationBusy(true)
+      setCurationError(null)
+      try {
+        await action()
+        removePost(tweetId)
+      } catch {
+        // Nothing changed on the server, so nothing changes here either: the
+        // card stays exactly where it was and the user is told.
+        setCurationError(failure)
+      } finally {
+        setCurationBusy(false)
+      }
+    },
+    [removePost]
+  )
+
+  const confirmDelete = useCallback(() => {
+    if (pendingDelete === null) {
+      return
+    }
+    const tweetId = pendingDelete.tweet_id
+    setPendingDelete(null)
+    void runCuration(
+      tweetId,
+      () => deleteBookmark(tweetId),
+      DELETE_POST_FAILED_MESSAGE
+    )
+  }, [pendingDelete, runCuration])
+
+  const confirmMove = useCallback(
+    (targetSlug: string) => {
+      if (pendingMove === null) {
+        return
+      }
+      const tweetId = pendingMove.tweet_id
+      setPendingMove(null)
+      void runCuration(
+        tweetId,
+        () => moveBookmark(tweetId, targetSlug),
+        MOVE_POST_FAILED_MESSAGE
+      )
+    },
+    [pendingMove, runCuration]
+  )
+
+  // Focus recovery after a removal. The kebab that asked for the action lives
+  // inside the card being removed, so the browser drops focus onto `<body>` and
+  // the next Tab would restart from the top of the page. Moving focus to the
+  // heading keeps the keyboard user where they were working. Runs on the commit
+  // that removes the card, so the outcome is already on screen.
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const previousPostCountRef = useRef(posts.length)
+  useEffect(() => {
+    const previous = previousPostCountRef.current
+    previousPostCountRef.current = posts.length
+    if (posts.length >= previous) {
+      return
+    }
+    const active = document.activeElement
+    if (active === null || active === document.body) {
+      headingRef.current?.focus()
+    }
+  }, [posts.length])
 
   // PRD-2 §21 / design spec §3.3: the hero, the toolbar and the masonry share
   // one content column, capped to exactly what the current column count needs
@@ -169,7 +312,12 @@ export function CollectionPage() {
           <div className="flex h-24 min-w-0 flex-col justify-between py-0.5">
             <h1
               id="collection-heading"
-              className="text-[28px] leading-[1.1] font-bold break-words text-ink md:text-[38px]"
+              data-testid="collection-heading"
+              ref={headingRef}
+              // Programmatic-only focus target: `-1` keeps it out of the tab
+              // order while still letting the removal effect move focus here.
+              tabIndex={-1}
+              className="rounded-sm text-[28px] leading-[1.1] font-bold break-words text-ink outline-none focus-visible:ring-3 focus-visible:ring-ring/50 md:text-[38px]"
             >
               {displayName}
             </h1>
@@ -200,6 +348,16 @@ export function CollectionPage() {
           onSortChange={setSort}
         />
 
+        {curationError === null ? null : (
+          <p
+            role="alert"
+            data-testid="curation-error"
+            className="mt-6 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            {curationError}
+          </p>
+        )}
+
         <div
           className="mt-6"
           data-testid="collection-content"
@@ -226,6 +384,7 @@ export function CollectionPage() {
                   <PostCard
                     key={post.tweet_id}
                     post={post}
+                    actions={cardActions}
                     onOpenMedia={(mediaIndex, trigger) => {
                       lightbox.open(postIndex, mediaIndex, trigger)
                     }}
@@ -252,6 +411,39 @@ export function CollectionPage() {
           onPrevPost={lightbox.goPrevPost}
           onNextPost={lightbox.goNextPost}
           onClose={lightbox.close}
+          actions={lightboxActions}
+          contentRef={lightboxContentRef}
+        />
+
+        {/* One set of curation dialogs for the whole page. `dialogContainer` is
+            captured when a dialog opens (not read live), so a dialog opened from
+            the lightbox keeps portalling inside it even as the lightbox closes
+            underneath — and a dialog opened from a card keeps mounting on
+            `document.body` as Radix intends. */}
+        <DeletePostDialog
+          post={pendingDelete}
+          open={pendingDelete !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPendingDelete(null)
+            }
+          }}
+          busy={curationBusy}
+          onConfirm={confirmDelete}
+          portalContainer={dialogContainer}
+        />
+        <MovePostDialog
+          post={pendingMove}
+          currentSlug={slug ?? ""}
+          open={pendingMove !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPendingMove(null)
+            }
+          }}
+          busy={curationBusy}
+          onConfirm={confirmMove}
+          portalContainer={dialogContainer}
         />
       </div>
     </div>

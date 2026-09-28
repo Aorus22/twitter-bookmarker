@@ -1,6 +1,8 @@
 import { ClampedPostText } from "@/components/gallery/clamped-post-text"
+import { PostActionsMenu } from "@/components/gallery/post-actions-menu"
 import { PostMediaGrid } from "@/components/gallery/post-media-grid"
 import { TextPostCard } from "@/components/gallery/text-post-card"
+import type { PortalContainer } from "@/components/ui/dialog"
 import { OPEN_ON_X_LABEL } from "@/lib/messages"
 import { pickPlaceholderGradient } from "@/lib/placeholder"
 import { displayHandle, formatPostMeta } from "@/lib/post-meta"
@@ -32,6 +34,21 @@ import type { GalleryPost } from "@/types"
  * paragraph is omitted rather than duplicated.
  */
 
+/**
+ * The curation actions a card can offer. Optional as a whole, so a card rendered
+ * without them (a read-only context, or a test of the card's own layout) shows no
+ * kebab at all rather than a dead button.
+ */
+export interface PostCardActions {
+  onRequestDelete: (post: GalleryPost) => void
+  onRequestMove: (post: GalleryPost) => void
+  /**
+   * Portal target for the menu. Only the media lightbox needs one: its content
+   * element keeps the menu inside the dialog's focus trap.
+   */
+  portalContainer?: PortalContainer
+}
+
 export interface PostCardProps {
   post: GalleryPost
   /** Reference "today" for the year-aware date format; defaults to the clock. */
@@ -42,9 +59,15 @@ export interface PostCardProps {
    * restored to it when the lightbox closes. Omit for a non-interactive card.
    */
   onOpenMedia?: (mediaIndex: number, trigger: HTMLButtonElement) => void
+  /**
+   * Curation: shows the per-post kebab menu. The card only *reports* the intent;
+   * the page owns the dialogs and the requests, so one set of dialogs serves
+   * every card instead of one per card.
+   */
+  actions?: PostCardActions
 }
 
-export function PostCard({ post, now, onOpenMedia }: PostCardProps) {
+export function PostCard({ post, now, onOpenMedia, actions }: PostCardProps) {
   const isTextOnly = post.media.length === 0
   const meta = formatPostMeta(post, now === undefined ? {} : { now })
   const avatar = pickPlaceholderGradient(post.username)
@@ -59,8 +82,25 @@ export function PostCard({ post, now, onOpenMedia }: PostCardProps) {
     <article
       data-testid="post-card"
       data-media-count={post.media.length}
-      className="flex w-full flex-col rounded-lg border border-border bg-surface p-[10px] shadow-post"
+      className="group relative flex w-full flex-col rounded-lg border border-border bg-surface p-[10px] shadow-post"
     >
+      {actions === undefined ? null : (
+        // Hidden until the card is hovered or something inside it takes focus.
+        // `focus-within` is what keeps it reachable by keyboard: a control that
+        // only appears on hover is unusable without a pointer, and the
+        // accessibility gate fails a Tab stop that paints no ring. The button
+        // stays in the DOM either way, so it is always in the tab order.
+        <div className="absolute top-2 right-2 z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+          <PostActionsMenu
+            post={post}
+            onRequestDelete={actions.onRequestDelete}
+            onRequestMove={actions.onRequestMove}
+            portalContainer={actions.portalContainer}
+            className="shadow-card"
+          />
+        </div>
+      )}
+
       {isTextOnly ? (
         <TextPostCard text={post.text} seed={post.tweet_id} />
       ) : (

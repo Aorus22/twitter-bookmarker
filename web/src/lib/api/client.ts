@@ -9,6 +9,8 @@
  */
 import { COULD_NOT_CONNECT_MESSAGE } from "@/lib/messages"
 import type {
+  BookmarkDeleteResponse,
+  BookmarkMoveResponse,
   GalleryCollection,
   GalleryCollectionListResponse,
   GalleryPostsParams,
@@ -18,6 +20,16 @@ import { ApiError } from "./errors"
 
 /** Relative mount point of the gallery API. */
 export const GALLERY_API_BASE = "/api/gallery"
+
+/**
+ * Relative mount point of the bookmark resource.
+ *
+ * Curation (delete, move) lives here, next to the save that created the
+ * bookmark, and deliberately **not** under `/api/gallery`: that API is GET-only
+ * by contract (API-07), so adding a method to it would turn a read path into a
+ * write path. Keeping the two prefixes separate is what preserves that.
+ */
+export const BOOKMARK_API_BASE = "/v1/bookmarks"
 
 const MALFORMED_RESPONSE_REASON = "Backend returned an unexpected response"
 
@@ -134,4 +146,49 @@ export async function fetchPosts(
     next_cursor: body?.next_cursor ?? null,
     has_more: Boolean(body?.has_more),
   }
+}
+
+/**
+ * `DELETE /v1/bookmarks/{tweet_id}` — remove a bookmark from the archive.
+ *
+ * The deletion is recoverable: the backend moves the row into
+ * `deleted_bookmarks`, so nothing is destroyed and the restore recipe in the
+ * README still works afterwards.
+ *
+ * @param tweetId the numeric Status ID, URL-encoded here (never interpolated raw).
+ * @throws {ApiError} 404 when the tweet is not saved (a stale view), 400 for a
+ * malformed id, 500 for a storage failure.
+ */
+export async function deleteBookmark(
+  tweetId: string
+): Promise<BookmarkDeleteResponse> {
+  return request<BookmarkDeleteResponse>(
+    `${BOOKMARK_API_BASE}/${encodeURIComponent(tweetId)}`,
+    { method: "DELETE" }
+  )
+}
+
+/**
+ * `PUT /v1/bookmarks/{tweet_id}/collection` — move a bookmark into another
+ * collection.
+ *
+ * The destination must already exist. The web app never creates a collection:
+ * the extension owns folder names, so an unknown slug is a stale picker and the
+ * backend answers 404 rather than inventing a name from a slug.
+ *
+ * @throws {ApiError} 404 when the tweet is not saved or the collection does not
+ * exist, 400 for a malformed id or slug.
+ */
+export async function moveBookmark(
+  tweetId: string,
+  slug: string
+): Promise<BookmarkMoveResponse> {
+  return request<BookmarkMoveResponse>(
+    `${BOOKMARK_API_BASE}/${encodeURIComponent(tweetId)}/collection`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug }),
+    }
+  )
 }

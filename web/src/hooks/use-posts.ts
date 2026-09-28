@@ -74,6 +74,15 @@ export interface UsePostsResult {
   loadMore: () => void
   /** Re-run the first-page request and reset paging (focus, Retry). */
   refetch: () => void
+  /**
+   * Drop one post from the loaded pages, after a delete or a move.
+   *
+   * Surgical on purpose: a `refetch()` would reset the cursor and page 1, which
+   * would discard every page the user has scrolled through and throw them back to
+   * the top of the list. Removing the row in place keeps the scroll position and
+   * the remaining pages exactly as they were.
+   */
+  removePost: (tweetId: string) => void
 }
 
 interface PostsState {
@@ -153,6 +162,53 @@ export function usePosts(
   const refetch = useCallback(() => {
     setRequestId((current) => current + 1)
   }, [])
+
+  /**
+   * Remove one post from the held pages and keep the header counts honest.
+   *
+   * The summary is a separate request from the posts, so the two would drift the
+   * moment a row disappeared: the counts are adjusted by exactly what was
+   * removed, read off the post itself (`media_count` needs its media length, not
+   * a guess).
+   *
+   * `last_saved_at` and `cover_media` are deliberately left alone. They describe
+   * the collection rather than the row, recomputing them would need the whole
+   * collection, and they are only rendered on the homepage — which fetches its
+   * own summaries on mount and on window focus.
+   */
+  const removePost = useCallback(
+    (tweetId: string) => {
+      const current = stateRef.current
+      if (current.key !== requestKey) {
+        return
+      }
+      const removed = current.posts.find((post) => post.tweet_id === tweetId)
+      if (removed === undefined) {
+        return
+      }
+
+      setState((prev) => {
+        if (prev.key !== requestKey) {
+          return prev
+        }
+        const posts = prev.posts.filter((post) => post.tweet_id !== tweetId)
+        return posts.length === prev.posts.length ? prev : { ...prev, posts }
+      })
+
+      setCollection((prev) => {
+        if (prev === undefined) {
+          return prev
+        }
+        return {
+          ...prev,
+          // Clamped, so a repeated removal can never print a negative count.
+          post_count: Math.max(0, prev.post_count - 1),
+          media_count: Math.max(0, prev.media_count - removed.media.length),
+        }
+      })
+    },
+    [requestKey]
+  )
 
   useEffect(() => {
     if (!hasSlug) {
@@ -352,6 +408,7 @@ export function usePosts(
       isLoadingMore: false,
       loadMore,
       refetch,
+      removePost,
     }
   }
 
@@ -374,5 +431,6 @@ export function usePosts(
     isLoadingMore: isCurrent ? state.loadingMore : false,
     loadMore,
     refetch,
+    removePost,
   }
 }

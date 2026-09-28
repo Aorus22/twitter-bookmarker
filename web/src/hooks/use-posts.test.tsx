@@ -696,3 +696,306 @@ describe("usePosts — refresh resets paging, nothing polls (SCROLL-05)", () => 
     }
   })
 })
+
+/**
+ * Curation in place: `removePost` drops one row from the pages already held
+ * instead of refetching, so the cursor, the loaded pages and the scroll position
+ * all survive a delete or a move. The header counts are adjusted by exactly what
+ * the removed row was worth. Every fetch is mocked.
+ */
+
+describe("usePosts — removePost keeps paging and counts (CUR-01)", () => {
+  it("removes exactly the named post and leaves the others in order", async () => {
+    stubGalleryFetch({
+      posts: () =>
+        jsonResponse({
+          items: [
+            makePost({ tweet_id: "1" }),
+            makePost({ tweet_id: "2" }),
+            makePost({ tweet_id: "3" }),
+          ],
+          next_cursor: null,
+          has_more: false,
+        }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+    expect(result.current.posts).toHaveLength(3)
+
+    act(() => {
+      result.current.removePost("2")
+    })
+
+    const ids = result.current.posts.map((post) => post.tweet_id)
+    expect(ids).toEqual(["1", "3"])
+    expect(ids).not.toContain("2")
+  })
+
+  it("keeps the cursor so loadMore still continues where the user left off", async () => {
+    const firstPage = Array.from({ length: 30 }, (_, index) =>
+      makePost({ tweet_id: `p${index + 1}` })
+    )
+    const secondPage = Array.from({ length: 5 }, (_, index) =>
+      makePost({ tweet_id: `q${index + 1}` })
+    )
+    const fetchMock = stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? jsonResponse({
+              items: firstPage,
+              next_cursor: "page-2",
+              has_more: true,
+            })
+          : jsonResponse({
+              items: secondPage,
+              next_cursor: null,
+              has_more: false,
+            }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+    expect(result.current.posts).toHaveLength(30)
+
+    act(() => {
+      result.current.removePost("p15")
+    })
+    expect(result.current.posts).toHaveLength(29)
+
+    act(() => {
+      result.current.loadMore()
+    })
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(34)
+    })
+
+    // This is the whole point of removing in place. A `refetch()` would reset
+    // the cursor back to the start of page 1, silently discard the 29 rows the
+    // user has already scrolled past and throw them back to the top of the list.
+    // Paging must instead carry on from the page-1 cursor.
+    const urls = postsUrls(fetchMock)
+    expect(urls).toHaveLength(2)
+    expect(cursorOf(urls[1])).toBe("page-2")
+
+    const remainingFirstPage = firstPage
+      .map((post) => post.tweet_id)
+      .filter((tweetId) => tweetId !== "p15")
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      ...remainingFirstPage,
+      ...secondPage.map((post) => post.tweet_id),
+    ])
+    expect(result.current.posts).toHaveLength(30 - 1 + 5)
+  })
+
+  it("decrements post_count by 1 and media_count by exactly the removed media", async () => {
+    stubGalleryFetch({
+      posts: () =>
+        jsonResponse({
+          items: [
+            makePost({
+              tweet_id: "1",
+              media: [pbsUrl("a"), pbsUrl("b"), pbsUrl("c")],
+            }),
+            makePost({ tweet_id: "2", text: "Text only.", media: [] }),
+          ],
+          next_cursor: null,
+          has_more: false,
+        }),
+      collections: () =>
+        jsonResponse({
+          collections: [
+            makeCollection({ slug: "linux", post_count: 2, media_count: 4 }),
+          ],
+        }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+      expect(result.current.collection).toBeDefined()
+    })
+
+    act(() => {
+      result.current.removePost("1")
+    })
+
+    // The three-media row is worth three media, not one: the header count is
+    // read off the post itself because the summary is a separate response.
+    expect(result.current.collection?.post_count).toBe(1)
+    expect(result.current.collection?.media_count).toBe(1)
+
+    act(() => {
+      result.current.removePost("2")
+    })
+
+    // A text-only row must not move media_count at all.
+    expect(result.current.collection?.post_count).toBe(0)
+    expect(result.current.collection?.media_count).toBe(1)
+  })
+
+  it("never pushes the counts below zero when the same row is removed twice", async () => {
+    stubGalleryFetch({
+      posts: () =>
+        jsonResponse({
+          items: [
+            makePost({
+              tweet_id: "1",
+              media: [pbsUrl("a"), pbsUrl("b"), pbsUrl("c")],
+            }),
+          ],
+          next_cursor: null,
+          has_more: false,
+        }),
+      collections: () =>
+        jsonResponse({
+          collections: [
+            makeCollection({ slug: "linux", post_count: 1, media_count: 2 }),
+          ],
+        }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+      expect(result.current.collection).toBeDefined()
+    })
+
+    act(() => {
+      result.current.removePost("1")
+    })
+    // The media removed (3) already exceeds the summary's media_count (2), so an
+    // unclamped count would print -1 in the header.
+    expect(result.current.collection?.post_count).toBe(0)
+    expect(result.current.collection?.media_count).toBe(0)
+
+    act(() => {
+      result.current.removePost("1")
+    })
+
+    expect(result.current.posts).toEqual([])
+    expect(result.current.collection?.post_count).toBe(0)
+    expect(result.current.collection?.media_count).toBe(0)
+  })
+
+  it("leaves posts and counts untouched for an unknown tweet id", async () => {
+    stubGalleryFetch({
+      posts: () =>
+        jsonResponse({
+          items: [makePost({ tweet_id: "1" }), makePost({ tweet_id: "2" })],
+          next_cursor: null,
+          has_more: false,
+        }),
+      collections: () =>
+        jsonResponse({
+          collections: [
+            makeCollection({ slug: "linux", post_count: 5, media_count: 7 }),
+          ],
+        }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+      expect(result.current.collection).toBeDefined()
+    })
+
+    act(() => {
+      result.current.removePost("999")
+    })
+
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      "1",
+      "2",
+    ])
+    expect(result.current.collection?.post_count).toBe(5)
+    expect(result.current.collection?.media_count).toBe(7)
+  })
+
+  it("ignores a removal issued for the query that is no longer displayed", async () => {
+    stubGalleryFetch({
+      posts: (url) => {
+        const params = new URL(url, "http://gallery.test").searchParams
+        return params.get("q") === "wayland"
+          ? jsonResponse({
+              items: [makePost({ tweet_id: "1" }), makePost({ tweet_id: "3" })],
+              next_cursor: null,
+              has_more: false,
+            })
+          : jsonResponse({
+              items: [makePost({ tweet_id: "1" }), makePost({ tweet_id: "2" })],
+              next_cursor: null,
+              has_more: false,
+            })
+      },
+    })
+
+    const { result, rerender } = renderHook(
+      ({ q }: { q: string | undefined }) => usePosts("linux", { q }),
+      { initialProps: { q: undefined as string | undefined } }
+    )
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    // Capture the callback from before the query change; React hands out a new
+    // one once the request signature changes.
+    const staleRemovePost = result.current.removePost
+
+    rerender({ q: "wayland" })
+    await waitFor(() => {
+      expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+        "1",
+        "3",
+      ])
+    })
+
+    act(() => {
+      staleRemovePost("1")
+    })
+
+    // State is keyed by the request signature, so a stale callback must not be
+    // able to delete a row out of the pages the new query is showing.
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      "1",
+      "3",
+    ])
+  })
+
+  it("issues no network request when a post is removed", async () => {
+    const fetchMock = stubGalleryFetch({
+      posts: () =>
+        jsonResponse({
+          items: [makePost({ tweet_id: "1" })],
+          next_cursor: null,
+          has_more: false,
+        }),
+      collections: () =>
+        jsonResponse({
+          collections: [
+            makeCollection({ slug: "linux", post_count: 1, media_count: 0 }),
+          ],
+        }),
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+      expect(result.current.collection).toBeDefined()
+    })
+    const requestsBefore = fetchMock.mock.calls.length
+
+    act(() => {
+      result.current.removePost("1")
+    })
+
+    // Curation is a local edit. Re-requesting here would reset the cursor and
+    // page 1 — and double the traffic — for a row this client just removed.
+    expect(fetchMock.mock.calls.length).toBe(requestsBefore)
+    expect(result.current.posts).toEqual([])
+  })
+})

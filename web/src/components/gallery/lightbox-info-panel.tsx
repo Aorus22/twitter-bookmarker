@@ -1,4 +1,6 @@
 import { ClampedPostText } from "@/components/gallery/clamped-post-text"
+import { PostActionsMenu } from "@/components/gallery/post-actions-menu"
+import type { PostCardActions } from "@/components/gallery/post-card"
 import { displayHandle, formatLightboxMeta } from "@/lib/post-meta"
 import { LIGHTBOX_CLOSE_LABEL, OPEN_ON_X_LABEL } from "@/lib/messages"
 import type { GalleryPost } from "@/types"
@@ -19,7 +21,8 @@ import type { GalleryPost } from "@/types"
  *   4. `Open on X ↗` as a real 286×42 r12 `surface`+border anchor to the stored
  *      URL with `target="_blank" rel="noopener noreferrer"`, pinned near the
  *      panel's bottom;
- *   5. the `×` close control (Inter Medium 22) at the panel's top-right.
+ *   5. the `×` close control (Inter Medium 22) at the panel's top-right, with
+ *      the per-post kebab menu beside it.
  */
 export interface LightboxInfoPanelProps {
   post: GalleryPost
@@ -29,6 +32,12 @@ export interface LightboxInfoPanelProps {
   onClose: () => void
   /** Reference "today" for the year-aware date format; defaults to the clock. */
   now?: Date
+  /**
+   * Curation actions. When present, a kebab menu sits beside the `×`. Its
+   * `portalContainer` must be the lightbox content element, or the menu would
+   * mount on `document.body` and escape the dialog's focus trap.
+   */
+  actions?: PostCardActions
 }
 
 export function LightboxInfoPanel({
@@ -36,6 +45,7 @@ export function LightboxInfoPanel({
   collectionName,
   onClose,
   now,
+  actions,
 }: LightboxInfoPanelProps) {
   const meta = formatLightboxMeta(
     post,
@@ -58,9 +68,22 @@ export function LightboxInfoPanel({
         ×
       </button>
 
+      {actions === undefined ? null : (
+        // Left of the `×`, inside the panel's own padding so it never overlaps
+        // the close control.
+        <div className="absolute top-4 right-14">
+          <PostActionsMenu
+            post={post}
+            onRequestDelete={actions.onRequestDelete}
+            onRequestMove={actions.onRequestMove}
+            portalContainer={actions.portalContainer}
+          />
+        </div>
+      )}
+
       <p
         data-testid="lightbox-author"
-        className="pr-10 text-[13px] leading-[1.4] font-semibold text-ink"
+        className="pr-24 text-[13px] leading-[1.4] font-semibold text-ink"
       >
         {post.author}
       </p>

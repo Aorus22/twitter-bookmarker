@@ -18,9 +18,17 @@ const maxBodyBytes = 1 << 20 // 1 MiB
 //
 // Index is part of it rather than a separate interface because both read the
 // same database, so there is no second thing to keep in step.
+//
+// Delete and Reassign are the curation surface. They live here, on the bookmark
+// resource, and deliberately *not* under /api/gallery: the gallery API stays
+// strictly GET-only (API-07, PRD-2 §36), so a read path can never be turned into
+// a write path by adding a method to it. Curation is an explicit, user-initiated
+// mutation of a bookmark, which is what /v1/bookmarks already is.
 type BookmarkStore interface {
 	Save(req model.SaveRequest) (model.SaveResponse, error)
 	Index() (map[string]model.IndexEntry, error)
+	Delete(tweetID string) error
+	Reassign(tweetID, slug string) error
 }
 
 type server struct {
@@ -60,8 +68,17 @@ func NewServer(store BookmarkStore, log *logging.Logger) http.Handler {
 	mux.HandleFunc("/health", methodGate(http.MethodGet, s.handleHealth))
 	mux.HandleFunc("/v1/index", methodGate(http.MethodGet, s.handleIndex))
 	mux.HandleFunc("/v1/bookmarks", methodGate(http.MethodPost, s.handleSave))
+	// Curation (PRD-2 §5 amended). Two separate single-method patterns rather
+	// than one path accepting DELETE and PUT: methodGate then stays a one-method
+	// gate, and "set this bookmark's collection" reads as the sub-resource it is.
+	// Registered before the /v1/ catch-all, which only sees paths no pattern
+	// matched.
+	mux.HandleFunc("/v1/bookmarks/{tweet_id}", methodGate(http.MethodDelete, s.handleDeleteBookmark))
+	mux.HandleFunc("/v1/bookmarks/{tweet_id}/collection", methodGate(http.MethodPut, s.handleReassignBookmark))
 	// Read-only gallery API (PRD-2 §36). A non-GET method on either pattern is
-	// answered with 405, so the API can never be written to.
+	// answered with 405, so the gallery API can never be written to. Curation is
+	// on /v1/bookmarks above, which keeps this guarantee intact rather than
+	// carving an exception into it.
 	mux.HandleFunc("/api/gallery/collections", methodGate(http.MethodGet, s.handleGalleryCollections))
 	mux.HandleFunc("/api/gallery/collections/{slug}/posts", methodGate(http.MethodGet, s.handleGalleryPosts))
 

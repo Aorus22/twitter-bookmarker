@@ -15,6 +15,32 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// decodeJSONBody reads exactly one JSON object into v: unknown fields, an
+// oversized body and trailing data are all rejected.
+//
+// It returns "" while the caller may continue, or the reason to send as a 400.
+// logReason is separate because the log may be more specific than the wire — a
+// trailing object is named as such server-side while the client still gets the
+// generic "invalid payload" — and keeping it separate is what let this be
+// extracted from handleSave without changing any observable behaviour.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) (reason, logReason string) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			return "request body too large", "request body too large"
+		}
+		return "invalid payload", "invalid payload"
+	}
+	if dec.More() {
+		return "invalid payload", "unexpected trailing data"
+	}
+	return "", ""
+}
+
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, model.HealthResponse{Status: "ok"})
 }
@@ -58,24 +84,10 @@ func (s *server) handleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-
 	var req model.SaveRequest
-	if err := dec.Decode(&req); err != nil {
-		reason := "invalid payload"
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			reason = "request body too large"
-		}
-		s.log.InvalidRequest(reason)
+	if reason, logReason := decodeJSONBody(w, r, &req); reason != "" {
+		s.log.InvalidRequest(logReason)
 		writeJSON(w, http.StatusBadRequest, model.ErrorResponse{Status: "error", Reason: reason})
-		return
-	}
-	if dec.More() {
-		s.log.InvalidRequest("unexpected trailing data")
-		writeJSON(w, http.StatusBadRequest, model.ErrorResponse{Status: "error", Reason: "invalid payload"})
 		return
 	}
 

@@ -76,6 +76,29 @@ func ExtractTweetID(raw string) (string, error) {
 	return id, err
 }
 
+// maxTweetIDLen bounds a Status ID. Real ids are around 19 digits; the cap means
+// a hostile path segment is rejected before it can reach a query at all.
+const maxTweetIDLen = 32
+
+// ValidateTweetID reports whether id is a well-formed Tweet Status ID.
+//
+// Curation addresses a bookmark by id, and the id arrives as a URL path segment,
+// so this is the boundary check that keeps an arbitrary string out of a query —
+// the same defense-in-depth shape as ValidateSlug. Digits only, because that is
+// what every tweet URL variant (x.com, twitter.com, /i/web/status/) shares and
+// what NormalizeURL already guarantees on the way in.
+func ValidateTweetID(id string) error {
+	switch {
+	case id == "":
+		return &ValidationError{Reason: "tweet id is required"}
+	case !isDigits(id):
+		return &ValidationError{Reason: "tweet id must be numeric"}
+	case len(id) > maxTweetIDLen:
+		return &ValidationError{Reason: "tweet id is too long"}
+	}
+	return nil
+}
+
 func splitPath(p string) []string {
 	p = strings.Trim(p, "/")
 	if p == "" {

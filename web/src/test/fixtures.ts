@@ -77,17 +77,73 @@ export interface GalleryFetchRoutes {
   collections?: () => Response | Promise<Response>
   /** `GET /api/gallery/collections/{slug}/posts`. */
   posts?: (url: string) => Response | Promise<Response>
+  /** `DELETE /v1/bookmarks/{tweet_id}` — curation, not a gallery route. */
+  deleteBookmark?: (tweetId: string) => Response | Promise<Response>
+  /** `PUT /v1/bookmarks/{tweet_id}/collection`. */
+  moveBookmark?: (tweetId: string, slug: string) => Response | Promise<Response>
+}
+
+/** The Tweet Status ID out of a `/v1/bookmarks/<id>[/collection]` URL. */
+export function bookmarkIdFromUrl(url: string): string {
+  const path = url.split("?")[0]
+  const rest = path.split("/v1/bookmarks/")[1]
+  return decodeURIComponent(rest?.split("/")[0] ?? "")
+}
+
+/** The `slug` field out of a JSON request body, or `""`. */
+export function slugFromBody(body: BodyInit | null | undefined): string {
+  if (typeof body !== "string") {
+    return ""
+  }
+  try {
+    const parsed: unknown = JSON.parse(body)
+    const slug = (parsed as { slug?: unknown } | null)?.slug
+    return typeof slug === "string" ? slug : ""
+  } catch {
+    return ""
+  }
 }
 
 /**
- * Install a URL-routing `fetch` mock and return it.
+ * Install a URL- and method-routing `fetch` mock and return it.
  *
- * The collection page issues two requests (posts + collections), so routing on
- * the URL keeps the assertions about which endpoint was asked for meaningful.
+ * The collection page issues posts + collections requests, and curation adds a
+ * `DELETE` and a `PUT` on a **different prefix** (`/v1/bookmarks`, see
+ * `BOOKMARK_API_BASE`), so the mock routes on the URL *and* the method: a
+ * mutation answered with the collections payload would look like a success to
+ * the caller and hide a real regression.
  */
 export function stubGalleryFetch(routes: GalleryFetchRoutes = {}) {
-  const mock = vi.fn((input: RequestInfo | URL) => {
+  const mock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    const method = (init?.method ?? "GET").toUpperCase()
+
+    // Matched before the gallery branches on purpose: these paths share no
+    // substring with them, and the fallback below would otherwise swallow a
+    // mutation.
+    if (url.includes("/v1/bookmarks")) {
+      const tweetId = bookmarkIdFromUrl(url)
+
+      if (method === "DELETE") {
+        const response = routes.deleteBookmark?.(tweetId)
+        return Promise.resolve(
+          response ??
+            jsonResponse({
+              status: "deleted",
+              tweet_id: tweetId,
+              recoverable: true,
+            })
+        )
+      }
+
+      if (method === "PUT") {
+        const slug = slugFromBody(init?.body)
+        const response = routes.moveBookmark?.(tweetId, slug)
+        return Promise.resolve(
+          response ?? jsonResponse({ status: "moved", tweet_id: tweetId, slug })
+        )
+      }
+    }
 
     if (url.includes("/posts")) {
       const response = routes.posts?.(url)

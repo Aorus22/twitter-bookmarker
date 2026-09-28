@@ -584,7 +584,7 @@ for _ in $(seq 1 24); do
   seen="$seen $tid"
   [ "$ring" = "visible" ] || ring_bad="$ring_bad $tid($ring)"
 done
-for want in collection-search collection-filter collection-sort post-media-trigger open-on-x; do
+for want in collection-search collection-filter collection-sort post-actions-trigger post-media-trigger open-on-x; do
   if printf '%s' " $seen " | grep -q " $want "; then
     pass "keyboard reaches $want"
   else
@@ -621,6 +621,199 @@ agent-browser press Escape >/dev/null 2>&1
 agent-browser wait 500 >/dev/null 2>&1
 chk "Escape closes the dialog and restores focus" "true" \
   "$(js "!document.querySelector('[data-testid=\"media-lightbox\"]') && document.activeElement.getAttribute('data-testid') === 'post-media-trigger'")"
+
+# --- curation: the per-post menu, delete and move ---------------------------
+# The four behaviours this section locks down, named so the checks, the unit
+# tests and docs/MANUAL-TEST-CHECKLIST.md can refer to them without restating
+# them. They are labels for this gate, not requirements in an archived
+# milestone (scripts/check-requirement-traceability.sh reads only the archive).
+#
+#   CUR-01  a removal is local: the card and the header counts update in place
+#           and nothing is refetched, so scroll position and loaded pages stay
+#   CUR-02  the kebab is reachable — revealed on hover *and* on keyboard focus —
+#           and opens a menu of exactly two labelled items, including from
+#           inside the lightbox, where it must not escape the dialog's trap
+#   CUR-03  delete is confirmed and cancellable, is locked while in flight, and
+#           is soft: the row moves to deleted_bookmarks with its payload intact
+#   CUR-04  a move targets an *existing* folder only, and any failure changes
+#           nothing on screen and says so
+echo
+echo "Curation — per-post menu, delete and move (CUR-01…CUR-04)"
+goto_collection bulk
+
+KEG='[data-testid="post-actions-trigger"]'
+MENU='[data-testid="post-actions-menu"]'
+CONFIRM='[data-testid="confirm-dialog"]'
+PICKER='[data-testid="move-post-dialog"]'
+
+chk "every card offers the per-post menu" "$(count '[data-testid="post-card"]')" "$(count "$KEG")"
+
+# The reveal has two triggers, and both matter. Pointer hover is what was asked
+# for, but it is wrapped in `@media (hover:hover)` by the Tailwind build, so on a
+# touch or headless device it is deliberately inert — and a hover-only control is
+# unreachable without a pointer anyway. So the pointer half is asserted against
+# the delivered CSS, and the focus half is exercised for real.
+chk "the menu trigger is hidden while its card is idle" "0" \
+  "$(js "getComputedStyle(document.querySelector('$KEG').parentElement).opacity")"
+chk "hovering a card is wired to reveal its menu trigger" "true" \
+  "$(js "(()=>{const all=Array.from(document.styleSheets).map(s=>{try{return Array.from(s.cssRules).map(r=>r.cssText||'').join('')}catch(e){return ''}}).join('');return /group-hover.:opacity-100[^}]*opacity:\s*1/.test(all)})()")"
+agent-browser focus "$KEG" >/dev/null 2>&1
+sleep 0.5
+chk "focusing the trigger reveals it (a pointer-only reveal is unusable)" "1" \
+  "$(js "getComputedStyle(document.querySelector('$KEG').parentElement).opacity")"
+
+agent-browser click "$KEG" >/dev/null 2>&1
+agent-browser wait 500 >/dev/null 2>&1
+chk "the menu offers exactly two actions" "2" "$(count "$MENU [role=\"menuitem\"]")"
+chk "the menu names the move action" "Move to folder" \
+  "$(js "document.querySelector('[data-testid=\"post-action-move\"]').textContent.trim()")"
+chk "the menu names the delete action" "Delete bookmark" \
+  "$(js "document.querySelector('[data-testid=\"post-action-delete\"]').textContent.trim()")"
+shot "curation-menu"
+axe_check "open card overflow menu, light, 1440px"
+agent-browser set media dark >/dev/null 2>&1
+agent-browser wait 300 >/dev/null 2>&1
+axe_check "open card overflow menu, dark, 1440px"
+agent-browser set media light >/dev/null 2>&1
+agent-browser press Escape >/dev/null 2>&1
+agent-browser wait 300 >/dev/null 2>&1
+
+# Delete asks first, and cancelling must not touch the database.
+target="$(js "(document.querySelector('[data-testid=\"open-on-x\"]').getAttribute('href')||'').split('/status/')[1]")"
+[ -n "$target" ] || fail "the first card exposes its tweet id" "no /status/ id in the first card"
+cards_before="$(count '[data-testid="post-card"]')"
+counts_before="$(js "document.querySelector('[data-testid=\"collection-counts\"]').textContent.trim()")"
+trash_before="$(dbq "SELECT COUNT(*) FROM deleted_bookmarks;")"
+live_before="$(dbq "SELECT COUNT(*) FROM bookmarks;")"
+
+agent-browser click "$KEG" >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+agent-browser click '[data-testid="post-action-delete"]' >/dev/null 2>&1
+agent-browser wait 500 >/dev/null 2>&1
+chk "deleting asks for confirmation first" "Delete this bookmark?" \
+  "$(js "document.querySelector('$CONFIRM [data-slot=\"dialog-title\"]').textContent.trim()")"
+chk "the confirmation says the bookmark is recoverable" "true" \
+  "$(js "/kept|restore|recover/i.test(document.querySelector('$CONFIRM [data-slot=\"dialog-description\"]').textContent)")"
+shot "curation-delete-confirm"
+axe_check "open delete confirmation, light, 1440px"
+agent-browser set media dark >/dev/null 2>&1
+agent-browser wait 300 >/dev/null 2>&1
+axe_check "open delete confirmation, dark, 1440px"
+agent-browser set media light >/dev/null 2>&1
+
+agent-browser click '[data-testid="confirm-dialog-cancel"]' >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+chk "cancelling closes the confirmation" "0" "$(count "$CONFIRM")"
+chk "cancelling writes nothing" "$trash_before" "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks;")"
+chk "cancelling keeps the card" "$cards_before" "$(count '[data-testid="post-card"]')"
+
+# Confirm: the row moves to the trash table and leaves the grid.
+agent-browser click "$KEG" >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+agent-browser click '[data-testid="post-action-delete"]' >/dev/null 2>&1
+agent-browser wait 500 >/dev/null 2>&1
+agent-browser click '[data-testid="confirm-dialog-confirm"]' >/dev/null 2>&1
+agent-browser wait 900 >/dev/null 2>&1
+chk "the confirmation closes once the delete lands" "0" "$(count "$CONFIRM")"
+chk "the deleted card leaves the grid" "$((cards_before - 1))" "$(count '[data-testid="post-card"]')"
+ne "the header counts drop with it" "$counts_before" \
+  "$(js "document.querySelector('[data-testid=\"collection-counts\"]').textContent.trim()")"
+chk "the row is soft-deleted, not destroyed" "1" \
+  "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$target';")"
+chk "the row is gone from the live set" "0" \
+  "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE tweet_id='$target';")"
+chk "the trashed row kept its whole payload" "1" \
+  "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$target' AND url<>'' AND author<>'' AND username<>'' AND tweet_date<>'' AND saved_at<>'' AND media<>'' AND deleted_at<>'';")"
+chk "one row moved from live to trash, net" "$((live_before - 1))" "$(dbq "SELECT COUNT(*) FROM bookmarks;")"
+
+# Move: the picker lists the other folders (never the current one) and changes
+# the row's collection.
+# Index 0 on purpose: the loop below clicks the *first* card's kebab, so the id
+# and the menu must come from the same card. (A previous card was deleted above,
+# so "index 0" is not the card that was deleted.)
+mv_target="$(js "(()=>{const c=document.querySelectorAll('[data-testid=\"post-card\"]')[0];const a=c&&c.querySelector('[data-testid=\"open-on-x\"]');return a?a.getAttribute('href').split('/status/')[1]:''})()")"
+from_slug="$(dbq "SELECT c.slug FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE b.tweet_id='$mv_target';")"
+agent-browser hover '[data-testid="post-card"]' >/dev/null 2>&1
+agent-browser click "$KEG" >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+agent-browser click '[data-testid="post-action-move"]' >/dev/null 2>&1
+agent-browser wait 700 >/dev/null 2>&1
+chk "moving opens a folder picker" "1" "$(count "$PICKER")"
+chk "the picker is titled for what it does" "Move to another folder" \
+  "$(js "document.querySelector('$PICKER [data-slot=\"dialog-title\"]').textContent.trim()")"
+chk "the picker excludes the folder the post is already in" "0" \
+  "$(count "$PICKER [data-testid=\"move-post-option\"][data-slug=\"$from_slug\"]")"
+chk "the picker lists at least one destination folder" "true" \
+  "$(js "document.querySelectorAll('[data-testid=\"move-post-option\"]').length > 0")"
+shot "curation-move-picker"
+axe_check "open folder picker, light, 1440px"
+agent-browser set media dark >/dev/null 2>&1
+agent-browser wait 300 >/dev/null 2>&1
+axe_check "open folder picker, dark, 1440px"
+agent-browser set media light >/dev/null 2>&1
+
+dest="$(js "document.querySelector('[data-testid=\"move-post-option\"]').getAttribute('data-slug')")"
+agent-browser click '[data-testid="move-post-option"]' >/dev/null 2>&1
+agent-browser wait 900 >/dev/null 2>&1
+chk "the picker closes once the move lands" "0" "$(count "$PICKER")"
+chk "the moved card leaves the folder it was in" "0" \
+  "$(dbq "SELECT COUNT(*) FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE b.tweet_id='$mv_target' AND c.slug='$from_slug';")"
+chk "the row now belongs to the chosen folder" "$dest" \
+  "$(dbq "SELECT c.slug FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE b.tweet_id='$mv_target';")"
+chk "moving never duplicates the row" "1" \
+  "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE tweet_id='$mv_target';")"
+
+# The load-bearing portal rule: a menu opened from inside the lightbox must mount
+# *inside* it, or it lands on document.body and Tab escapes the dialog.
+agent-browser scrollintoview "$LT_SEL" >/dev/null 2>&1
+agent-browser click "$LT_SEL" >/dev/null 2>&1
+agent-browser wait 800 >/dev/null 2>&1
+chk "the lightbox panel offers the per-post menu" "1" \
+  "$(count '[data-testid="media-lightbox"] [data-testid="post-actions-trigger"]')"
+agent-browser click '[data-testid="media-lightbox"] [data-testid="post-actions-trigger"]' >/dev/null 2>&1
+agent-browser wait 600 >/dev/null 2>&1
+chk "a menu opened from the lightbox mounts inside it" "true" \
+  "$(js "document.querySelector('[data-testid=\"media-lightbox\"]').contains(document.querySelector('$MENU'))")"
+chk "it is not on document.body instead" "false" \
+  "$(js "document.body.contains(document.querySelector('$MENU')) && !document.querySelector('[data-testid=\"media-lightbox\"]').contains(document.querySelector('$MENU'))")"
+menu_trap=true
+for _ in $(seq 1 8); do
+  agent-browser press Tab >/dev/null 2>&1
+  inside=$(js "document.querySelector('[data-testid=\"media-lightbox\"]').contains(document.activeElement)")
+  [ "$inside" = "true" ] || menu_trap=false
+done
+chk "Tab stays inside the lightbox while its menu is open" "true" "$menu_trap"
+shot "curation-menu-in-lightbox"
+axe_check "card menu opened from inside the lightbox, light, 1440px"
+
+agent-browser click '[data-testid="post-action-delete"]' >/dev/null 2>&1
+agent-browser wait 600 >/dev/null 2>&1
+chk "the confirmation opened from the lightbox mounts inside it" "true" \
+  "$(js "document.querySelector('[data-testid=\"media-lightbox\"]').contains(document.querySelector('$CONFIRM'))")"
+axe_check "delete confirmation opened from inside the lightbox, light, 1440px"
+shot "curation-delete-from-lightbox"
+
+# Confirming from the lightbox removes the post, which closes the lightbox by
+# construction (its position is derived from the loaded posts).
+lb_target="$(js "(document.querySelector('[data-testid=\"lightbox-open-on-x\"]').getAttribute('href')||'').split('/status/')[1]")"
+agent-browser click '[data-testid="confirm-dialog-confirm"]' >/dev/null 2>&1
+agent-browser wait 1200 >/dev/null 2>&1
+chk "the lightbox closes when its post is deleted" "0" "$(count '[data-testid="media-lightbox"]')"
+chk "and that post is in the trash too" "1" \
+  "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$lb_target';")"
+chk "the page is still usable, not blanked" "true" \
+  "$(js "document.querySelectorAll('[data-testid=\"post-card\"]').length > 0")"
+
+# Recovery is a documented manual step, so prove the documented statement works.
+recovered="$(dbq "INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media) SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media FROM deleted_bookmarks WHERE tweet_id='$target'; SELECT changes();")"
+chk "the documented restore recipe re-inserts the row" "1" "$recovered"
+chk "and it is live again" "1" "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE tweet_id='$target';")"
+chk "the trash keeps its copy as the audit trail" "1" \
+  "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$target';")"
+agent-browser reload >/dev/null 2>&1
+agent-browser wait 1200 >/dev/null 2>&1
+chk "the restored post is back on the page" "true" \
+  "$(js "!!Array.from(document.querySelectorAll('[data-testid=\"open-on-x\"]')).find(a=>a.getAttribute('href').endsWith('/status/$target'))")"
 
 # --- console ----------------------------------------------------------------
 echo

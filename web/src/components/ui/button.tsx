@@ -16,8 +16,13 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-surface-warm hover:text-foreground aria-expanded:bg-surface-warm aria-expanded:text-foreground dark:hover:bg-surface-warm/50",
+        // Solid, on the design's own destructive foreground. The previous soft
+        // form (`bg-destructive/10 text-destructive`) put the destructive colour
+        // on a 10% tint of itself and measured 4.32:1 — under the 4.5:1 floor,
+        // which axe reports as a serious contrast failure. `--destructive-foreground`
+        // exists for exactly this pairing and both themes clear the floor.
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

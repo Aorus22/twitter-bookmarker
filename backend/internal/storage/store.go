@@ -171,6 +171,143 @@ func (s *Store) Save(req model.SaveRequest) (model.SaveResponse, error) {
 	}, nil
 }
 
+// Delete removes a bookmark from the live set and keeps it, in one transaction.
+//
+// The row is *moved* to `deleted_bookmarks` rather than flagged in place. That
+// choice is what keeps every read path correct without a `deleted_at IS NULL`
+// filter — the reader, the index, the counts, the covers and the cursors all
+// query `bookmarks` and keep meaning what they say. It also makes the delete
+// genuinely recoverable: the trash holds the whole row, so restoring it later is
+// an INSERT ... SELECT that needs no reconstruction.
+//
+// Nothing is destroyed, so a crash mid-way rolls back to "still saved" rather
+// than "gone from the gallery and absent from the trash".
+//
+// Error classification:
+//   - *ValidationError → caller maps to 400
+//   - *NotFoundError   → caller maps to 404
+//   - anything else    → caller maps to 500
+func (s *Store) Delete(tweetID string) error {
+	if err := ValidateTweetID(tweetID); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.conn == nil {
+		return errors.New("store is not open")
+	}
+
+	tx, err := s.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete %s: %w", tweetID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	deletedAt := time.Now().UTC().Format(time.RFC3339)
+
+	// The archive INSERT doubles as the existence check: RowsAffected is 0 only
+	// when the SELECT matched nothing, so there is no window where the two
+	// statements disagree about whether the tweet was there.
+	res, err := tx.Exec(
+		`INSERT INTO deleted_bookmarks
+		   (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media, deleted_at)
+		 SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media, ?
+		   FROM bookmarks
+		  WHERE tweet_id = ?`,
+		deletedAt, tweetID,
+	)
+	if err != nil {
+		return fmt.Errorf("archive bookmark %s: %w", tweetID, err)
+	}
+
+	archived, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("archive bookmark %s: %w", tweetID, err)
+	}
+	if archived == 0 {
+		return &NotFoundError{TweetID: tweetID}
+	}
+
+	if _, err := tx.Exec(`DELETE FROM bookmarks WHERE tweet_id = ?`, tweetID); err != nil {
+		return fmt.Errorf("delete bookmark %s: %w", tweetID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete %s: %w", tweetID, err)
+	}
+
+	s.log.DeleteSuccess(tweetID)
+
+	return nil
+}
+
+// Reassign moves a bookmark into another existing collection.
+//
+// The target must already exist. Creating it here would mean inventing a display
+// name from a slug, and the extension owns folder names; a slug the database does
+// not know is a stale picker, which the caller should answer with 404.
+//
+// Error classification:
+//   - *ValidationError           → caller maps to 400
+//   - *NotFoundError             → caller maps to 404
+//   - *CollectionNotFoundError   → caller maps to 404
+//   - anything else              → caller maps to 500
+func (s *Store) Reassign(tweetID, slug string) error {
+	if err := ValidateTweetID(tweetID); err != nil {
+		return err
+	}
+	if err := ValidateSlug(slug); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.conn == nil {
+		return errors.New("store is not open")
+	}
+
+	tx, err := s.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin move %s: %w", tweetID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var collectionID int64
+	switch err := tx.QueryRow(`SELECT id FROM collections WHERE slug = ?`, slug).Scan(&collectionID); {
+	case errors.Is(err, sql.ErrNoRows):
+		return &CollectionNotFoundError{Slug: slug}
+	case err != nil:
+		return fmt.Errorf("resolve collection %s: %w", slug, err)
+	}
+
+	res, err := tx.Exec(
+		`UPDATE bookmarks SET collection_id = ? WHERE tweet_id = ?`,
+		collectionID, tweetID,
+	)
+	if err != nil {
+		return fmt.Errorf("move bookmark %s: %w", tweetID, err)
+	}
+
+	moved, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("move bookmark %s: %w", tweetID, err)
+	}
+	if moved == 0 {
+		return &NotFoundError{TweetID: tweetID}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit move %s: %w", tweetID, err)
+	}
+
+	s.log.MoveSuccess(tweetID, slug)
+
+	return nil
+}
+
 // Index returns every saved bookmark keyed by Tweet Status ID: the O(1)
 // saved-tweet lookup the content script fetches once per page entry.
 //

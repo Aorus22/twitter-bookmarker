@@ -23,6 +23,16 @@ function DialogPortal({
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
 }
 
+/**
+ * Where a Radix portal should mount.
+ *
+ * Radix defaults to `document.body`. That is wrong inside the media lightbox:
+ * the lightbox is itself a dialog with a focus trap that the accessibility gate
+ * (and `collection-page-lightbox.test.tsx`) asserts nothing escapes, so anything
+ * it opens has to be portalled *inside* its content element instead.
+ */
+export type PortalContainer = HTMLElement | null
+
 function DialogClose({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Close>) {
@@ -50,14 +60,21 @@ function DialogContent({
   overlayClassName,
   children,
   showCloseButton = true,
+  portalContainer,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
   /** Extra classes for the scrim only (Phase 8 tints the lightbox overlay). */
   overlayClassName?: string
+  /**
+   * Portal target, for a dialog opened from inside another dialog. Defaults to
+   * Radix's own behaviour (`document.body`); pass the enclosing dialog's content
+   * element to keep the outer focus trap intact.
+   */
+  portalContainer?: PortalContainer
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={portalContainer}>
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"

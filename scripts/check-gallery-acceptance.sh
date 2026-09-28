@@ -416,6 +416,135 @@ else
   miss "§80.25 SPA deep route + unknown-/api 404 (static serving arrives in Phase 9)"
 fi
 
+# ------------------------------------------- curation: soft delete + move
+# The curation contract lives on the bookmark resource, never under /api/gallery:
+# the gallery API is read-only (API-07), and these checks re-assert that *after*
+# curation exists rather than assuming it from the earlier §80.23 block.
+#
+# Placed last because it mutates the fixture: the sections above describe the
+# seeded data, and nothing below depends on a fixed row count.
+hdr "Curation — soft delete and move on /v1/bookmarks"
+
+cur="$(dbq "SELECT tweet_id FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE c.slug='linux' ORDER BY b.saved_at DESC LIMIT 1;")"
+cur_url="$(dbq "SELECT url FROM bookmarks WHERE tweet_id='$cur';")"
+cur_author="$(dbq "SELECT author FROM bookmarks WHERE tweet_id='$cur';")"
+live_before="$(dbq "SELECT COUNT(*) FROM bookmarks;")"
+trash_before="$(dbq "SELECT COUNT(*) FROM deleted_bookmarks;")"
+linux_before="$(jq -r '.items|length' <<<"$(j "$BASE/api/gallery/collections/linux/posts")")"
+idx_before="$(jq -r '.items|length' <<<"$(j "$BASE/v1/index")")"
+
+check "$([ -n "$cur" ] && echo true || echo false)" "the fixture offers a live linux row to curate" "tweet_id=[$cur]"
+
+# --- soft delete, not destruction
+del_body="$(curl -s --max-time 10 -X DELETE "$BASE/v1/bookmarks/$cur")"
+check "$(jq -r --arg id "$cur" '.status=="deleted" and .tweet_id==$id and .recoverable==true' <<<"$del_body" 2>/dev/null || echo false)" \
+  "DELETE /v1/bookmarks/{id} answers with the recoverable envelope" "$del_body"
+check "$([ "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$cur';")" = "1" ] && echo true || echo false)" \
+  "the row moved into deleted_bookmarks"
+check "$([ "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE tweet_id='$cur';")" = "0" ] && echo true || echo false)" \
+  "the row left the live set"
+check "$([ "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$cur' AND url='$cur_url' AND author='$cur_author' AND username<>'' AND tweet_date<>'' AND saved_at<>'' AND json_valid(media) AND deleted_at<>'';")" = "1" ] && echo true || echo false)" \
+  "the trashed row keeps its whole payload and stamps deleted_at"
+check "$([ "$(dbq "SELECT COUNT(*) FROM bookmarks;")" = "$((live_before-1))" ] && echo true || echo false)" \
+  "exactly one row left the live set" "was $live_before"
+check "$([ "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks;")" = "$((trash_before+1))" ] && echo true || echo false)" \
+  "exactly one row entered the trash" "was $trash_before"
+
+# --- every read path follows it, with no filter anyone could forget
+check "$([ "$(jq -r '.items|length' <<<"$(j "$BASE/api/gallery/collections/linux/posts")")" = "$((linux_before-1))" ] && echo true || echo false)" \
+  "the collection listing drops the deleted post immediately"
+check "$(jq -r --arg id "$cur" '[.items[]|select(.tweet_id==$id)]|length==0' <<<"$(j "$BASE/api/gallery/collections/linux/posts")")" \
+  "the deleted post is gone from the posts payload"
+check "$(jq -r --arg id "$cur" '(.items|has($id))|not' <<<"$(j "$BASE/v1/index")")" \
+  "the deleted post is gone from /v1/index"
+check "$([ "$(jq -r '.items|length' <<<"$(j "$BASE/v1/index")")" = "$((idx_before-1))" ] && echo true || echo false)" \
+  "/v1/index shrank by exactly one entry"
+# The summary's own aggregate must agree with the live rows, not merely be
+# non-negative: a stale count is exactly how a soft delete leaks back into the UI.
+linux_live="$(dbq "SELECT COUNT(*) FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE c.slug='linux';")"
+linux_summary="$(jq -r '[.collections[]|select(.name=="Linux")][0].post_count' <<<"$(j "$BASE/api/gallery/collections")")"
+check "$([ "$linux_summary" = "$linux_live" ] && echo true || echo false)" \
+  "the collection summary agrees with the live row count after a delete" \
+  "summary=$linux_summary live=$linux_live"
+
+# --- deletes that must be refused
+check "$([ "$(code -X DELETE "$BASE/v1/bookmarks/$cur")" = "404" ] && echo true || echo false)" \
+  "deleting an already-deleted post is 404, not a second move"
+check "$([ "$(code -X DELETE "$BASE/v1/bookmarks/not-a-number")" = "400" ] && echo true || echo false)" \
+  "DELETE rejects a non-numeric tweet id (400)"
+check "$([ "$(code -X DELETE "$BASE/v1/bookmarks/$(printf '9%.0s' $(seq 1 40))")" = "400" ] && echo true || echo false)" \
+  "DELETE rejects an over-long tweet id (400)"
+check "$([ "$(code -X PUT "$BASE/v1/bookmarks/$cur/collection" -H 'Content-Type: application/json' -d '{"slug":"ai"}')" = "404" ] && echo true || echo false)" \
+  "moving a post that is not saved is 404"
+
+# --- method gating, and the gallery API stays GET-only
+check "$(grep -qi '^allow: *DELETE' <<<"$(curl -s -o /dev/null -D - --max-time 10 -X POST "$BASE/v1/bookmarks/$cur" | tr -d '\r')" && echo true || echo false)" \
+  "POST on the delete route is 405 with Allow: DELETE"
+check "$(grep -qi '^allow: *PUT' <<<"$(curl -s -o /dev/null -D - --max-time 10 -X POST "$BASE/v1/bookmarks/$cur/collection" | tr -d '\r')" && echo true || echo false)" \
+  "POST on the move route is 405 with Allow: PUT"
+check "$([ "$(code -X DELETE "$BASE/api/gallery/collections/linux/posts")" = "405" ] && echo true || echo false)" \
+  "the gallery API still rejects DELETE (405) now that curation exists"
+check "$([ "$(code -X PUT "$BASE/api/gallery/collections/linux/posts")" = "405" ] && echo true || echo false)" \
+  "the gallery API still rejects PUT (405) too"
+check "$([ "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks;")" = "$((trash_before+1))" ] && echo true || echo false)" \
+  "none of those rejected calls touched the trash"
+
+# --- re-saving a deleted tweet succeeds: the trash never claims the id
+resave="$(code -X POST "$BASE/v1/bookmarks" -H 'Content-Type: application/json' \
+  -d "$(jq -cn --arg u "$cur_url" '{slug:"linux", name:"Linux", tweet:{url:$u, media:[], author:"Re-saved", username:"@resaved", tweet_date:"2026-09-01T00:00:00Z", text:"saved again after a delete"}}')")"
+check "$([ "$resave" = "201" ] && echo true || echo false)" \
+  "re-saving a previously deleted tweet succeeds (201)" "got $resave"
+check "$([ "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE url='$cur_url';")" = "1" ] && echo true || echo false)" \
+  "the re-save put the row back in the live set"
+check "$([ "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$cur';")" = "1" ] && echo true || echo false)" \
+  "the trash kept the earlier deletion as its audit trail"
+
+# --- move between existing collections
+mv="$(dbq "SELECT tweet_id FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE c.slug='linux' ORDER BY b.saved_at ASC LIMIT 1;")"
+ai_id="$(dbq "SELECT id FROM collections WHERE slug='ai';")"
+mv_body="$(curl -s --max-time 10 -X PUT "$BASE/v1/bookmarks/$mv/collection" -H 'Content-Type: application/json' -d '{"slug":"ai"}')"
+check "$(jq -r --arg id "$mv" '.status=="moved" and .tweet_id==$id and .slug=="ai"' <<<"$mv_body" 2>/dev/null || echo false)" \
+  "PUT /v1/bookmarks/{id}/collection answers with the new slug" "$mv_body"
+check "$([ "$(dbq "SELECT collection_id FROM bookmarks WHERE tweet_id='$mv';")" = "$ai_id" ] && echo true || echo false)" \
+  "the row's collection_id changed to the target collection"
+check "$([ "$(dbq "SELECT c.slug FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE b.tweet_id='$mv';")" = "ai" ] && echo true || echo false)" \
+  "and the joined slug follows it"
+check "$([ "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE tweet_id='$mv';")" = "1" ] && echo true || echo false)" \
+  "moving never duplicates the row"
+check "$(jq -r --arg id "$mv" '[.items[]|select(.tweet_id==$id)]|length==1' <<<"$(j "$BASE/api/gallery/collections/ai/posts")")" \
+  "the moved post appears in the destination collection"
+check "$(jq -r --arg id "$mv" '[.items[]|select(.tweet_id==$id)]|length==0' <<<"$(j "$BASE/api/gallery/collections/linux/posts")")" \
+  "and is gone from the one it left"
+
+# --- a move target must already exist: never auto-created
+check "$([ "$(code -X PUT "$BASE/v1/bookmarks/$mv/collection" -H 'Content-Type: application/json' -d '{"slug":"nope"}')" = "404" ] && echo true || echo false)" \
+  "moving to an unknown collection is 404"
+check "$([ "$(dbq "SELECT COUNT(*) FROM collections WHERE slug='nope';")" = "0" ] && echo true || echo false)" \
+  "the failed move did not create the collection"
+check "$([ "$(code -X PUT "$BASE/v1/bookmarks/$mv/collection" -H 'Content-Type: application/json' -d '{"slug":"../evil"}')" = "400" ] && echo true || echo false)" \
+  "moving to a path-traversal slug is 400"
+check "$([ "$(dbq "SELECT collection_id FROM bookmarks WHERE tweet_id='$mv';")" = "$ai_id" ] && echo true || echo false)" \
+  "the refused moves left the row where it was"
+
+# --- the documented manual restore actually works
+cur2="$(dbq "SELECT tweet_id FROM bookmarks b JOIN collections c ON c.id=b.collection_id WHERE c.slug='linux' ORDER BY b.saved_at ASC LIMIT 1;")"
+check "$([ "$(code -X DELETE "$BASE/v1/bookmarks/$cur2")" = "200" ] && echo true || echo false)" \
+  "a second row can be soft-deleted for the restore check"
+restored="$(dbq "INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+                 SELECT tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media
+                 FROM deleted_bookmarks WHERE id = (SELECT MAX(id) FROM deleted_bookmarks WHERE tweet_id='$cur2');
+                 SELECT changes();")"
+check "$([ "$restored" = "1" ] && echo true || echo false)" \
+  "the documented INSERT … SELECT recipe re-inserts the row" "changes()=$restored"
+check "$([ "$(dbq "SELECT COUNT(*) FROM bookmarks WHERE tweet_id='$cur2';")" = "1" ] && echo true || echo false)" \
+  "the restored row is live again"
+check "$(jq -r --arg id "$cur2" '[.items[]|select(.tweet_id==$id)]|length==1' <<<"$(j "$BASE/api/gallery/collections/linux/posts")")" \
+  "and the API serves it again with no restart"
+check "$([ "$(dbq "SELECT COUNT(*) FROM deleted_bookmarks WHERE tweet_id='$cur2';")" = "1" ] && echo true || echo false)" \
+  "the trash keeps its copy, so a restore is always auditable"
+check "$([ "$(code "$BASE/health")" = "200" ] && echo true || echo false)" \
+  "the backend is still the original process and is healthy throughout"
+
 # ------------------------------------------------------------------ summary
 hdr "Summary"
 printf '  passed %d, failed %d, skipped %d\n' "$pass" "$fail" "$skip"

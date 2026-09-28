@@ -32,7 +32,11 @@ import (
 // Version is the schema version this build writes and requires. It is stored in
 // the database's own PRAGMA user_version, so a future change can recognise an
 // old file instead of guessing at its shape.
-const Version = 1
+//
+// Version 2 moved a deleted bookmark out of `bookmarks` into `deleted_bookmarks`
+// (see trashSchema). A version-1 file is upgraded in place, which only ever adds
+// a table — no existing row is read, rewritten or dropped.
+const Version = 2
 
 // ErrNoDatabase reports that the database file does not exist. Callers use it to
 // tell "this storage directory has no data yet" apart from a real failure.
@@ -156,36 +160,59 @@ func dsn(path string, pragmas []string) string {
 
 // ensureSchema makes the database usable, or explains why it refuses to be.
 //
-// Four cases, and only the first writes:
+// Five cases, and only the first two write:
 //
 //	fresh         no tables, version 0        -> create the schema
 //	current       version == Version           -> verify the tables exist
+//	upgradable    version 1, exactly v1Tables  -> add the version-2 table
 //	foreign       tables but version 0         -> refuse (unrecognised file)
 //	other version version != Version           -> refuse (never migrate silently)
+//
+// The upgrade case exists because refusing every older file would strand the
+// archive the moment the schema grows. It is narrow on purpose: only the one
+// version this build knows how to extend, and only when the file really has that
+// version's exact table set.
 func ensureSchema(conn *sql.DB) error {
 	version, err := userVersion(conn)
 	if err != nil {
 		return err
 	}
-	tables, err := userTableCount(conn)
+	tables, err := userTables(conn)
 	if err != nil {
 		return err
 	}
 
 	switch {
-	case version == 0 && tables == 0:
+	case version == 0 && len(tables) == 0:
 		return applySchema(conn)
 	case version == Version:
 		return verifySchema(conn)
+	case version == 1 && equalStrings(tables, v1Tables):
+		return upgradeV1toV2(conn)
 	case version == 0:
 		return fmt.Errorf(
 			"database holds %d table(s) but declares no schema version; refusing to use an unrecognised file",
-			tables,
+			len(tables),
 		)
 	default:
 		return fmt.Errorf("%w: file is version %d, this build writes version %d",
 			ErrUnsupportedVersion, version, Version)
 	}
+}
+
+// equalStrings reports whether two table-name lists match exactly. Both sides are
+// ordered by the queries that produced them (SQLite's `ORDER BY name` and the
+// literal slices in schema.go), so a plain element-wise compare is enough.
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // userVersion reads PRAGMA user_version, which is 0 for a brand-new file.
@@ -197,17 +224,32 @@ func userVersion(conn *sql.DB) (int, error) {
 	return version, nil
 }
 
-// userTableCount counts the tables this database owns, ignoring SQLite's own
-// sqlite_master/sqlite_sequence bookkeeping.
-func userTableCount(conn *sql.DB) (int, error) {
-	var count int
-	err := conn.QueryRow(
-		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
-	).Scan(&count)
+// userTables lists the tables this database owns, ordered by name, ignoring
+// SQLite's own sqlite_master/sqlite_sequence bookkeeping. The order is what lets
+// ensureSchema compare the result against a literal slice.
+func userTables(conn *sql.DB) ([]string, error) {
+	rows, err := conn.Query(
+		`SELECT name FROM sqlite_master
+		  WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+		  ORDER BY name`,
+	)
 	if err != nil {
-		return 0, fmt.Errorf("inspect database: %w", err)
+		return nil, fmt.Errorf("inspect database: %w", err)
 	}
-	return count, nil
+	defer rows.Close()
+
+	tables := make([]string, 0, len(expectedTables))
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("inspect database: %w", err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("inspect database: %w", err)
+	}
+	return tables, nil
 }
 
 // applySchema creates every table and index and stamps the version, atomically:
@@ -228,6 +270,35 @@ func applySchema(conn *sql.DB) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit schema: %w", err)
+	}
+	return nil
+}
+
+// upgradeV1toV2 extends a version-1 file with the version-2 trash table.
+//
+// It only ever adds. Nothing reads, rewrites or drops a bookmark, so the upgrade
+// is safe on the live archive and cannot lose a row — the whole reason it is
+// allowed to touch an existing file at all. The stamp goes in the same
+// transaction as the DDL, so a crash leaves a version-1 file that the next
+// startup simply tries again.
+//
+// The caller has already checked that the file declares version 1 and holds
+// exactly v1Tables, so an unrecognised file is refused rather than altered.
+func upgradeV1toV2(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin upgrade transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(trashSchema); err != nil {
+		return fmt.Errorf("upgrade schema to version %d: %w", Version, err)
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", Version)); err != nil {
+		return fmt.Errorf("stamp upgraded schema version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit upgrade: %w", err)
 	}
 	return nil
 }

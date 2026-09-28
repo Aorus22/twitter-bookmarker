@@ -128,3 +128,16 @@ export const LIGHTBOX_KEYBOARD_HINT =
 export function formatLightboxCounter(current: number, total: number): string {
   return `Media ${current} of ${total}`
 }
+
+/**
+ * Curation failures.
+ *
+ * Both say "nothing was changed" because that is the contract: the request either
+ * completed, or the database was left exactly as it was. Without that sentence a
+ * failed delete reads as "maybe it half-worked", which is the one thing a user
+ * cannot check for themselves.
+ */
+export const DELETE_POST_FAILED_MESSAGE =
+  "Could not delete this bookmark. Nothing was changed."
+export const MOVE_POST_FAILED_MESSAGE =
+  "Could not move this bookmark. Nothing was changed."

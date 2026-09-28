@@ -437,3 +437,7 @@ func (s stubStore) Save(model.SaveRequest) (model.SaveResponse, error) {
 func (s stubStore) Index() (map[string]model.IndexEntry, error) {
 	return map[string]model.IndexEntry{}, nil
 }
+
+func (s stubStore) Delete(string) error { return s.err }
+
+func (s stubStore) Reassign(string, string) error { return s.err }

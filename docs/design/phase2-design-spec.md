@@ -235,7 +235,9 @@ has no backing CSV column — so it must not be rendered.
    - collection icon `96×96` `r24` gradient (deterministic from filename), white glyph
    - title Playfair Bold 38 at x=184
    - secondary line Inter Regular 12 muted at y=198 (description — **omit**, see §7)
-   - meta `186 posts ◫ 220 media` Inter Medium 11 muted at y=236 (mobile: 11)
+   - meta `186 posts ◫ 220 media` Inter Medium 11 muted at y=236 (mobile: 11) — **raised to
+     Inter Medium 16 muted** (see §7): the count of what is in the folder is the first thing the
+     page is asked, and at 11px it read as fine print under a 38px title
 3. **Toolbar** at y=292, all controls `40` tall:
    - search field `440×40` `r12` `surface`+border, placeholder `⌕ Search this collection…`
    - `Filter` button `86×40` `r12` `surface`+border with a filter glyph
@@ -251,7 +253,7 @@ has no backing CSV column — so it must not be rendered.
 
 | Measurement | Figma | This spec |
 |---|---|---|
-| Header: back link / icon / title / meta | `(64,112)` @11 · `96×96 r24` at `(64,144)` · Playfair Bold 38 at `(184,148)` · @11 at `(184,236)` | same |
+| Header: back link / icon / title / meta | `(64,112)` @11 · `96×96 r24` at `(64,144)` · Playfair Bold 38 at `(184,148)` · @11 at `(184,236)` | same positions; meta **16px**, not 11 (§7) |
 | Toolbar controls | search `440×40 r12` at `(64,292)`, Filter `86×40 r12` at `(516,292)`, Sort `150×40 r12` at `(612,292)` | same |
 | Media-type pills | `All/Images/Videos/Links/Text` at y=350, `r999` | **omitted** (§7) |
 | Topic pills | `Terminal ×/Tools ×/Self-hosting ×/Linux Tips ×` at y=394 | **omitted** (§7) |
@@ -512,6 +514,9 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 | `Empty gallery` / `Empty collection` / `Error` headline words | **Replaced with PRD strings** | PRD §59–§61 prescribes exact user-facing copy |
 | Mobile 2-column masonry at 390px | **1 column** | PRD §21/§66 require 1 column on small viewports |
 | Text-only gradient "quote panel" | **Kept** | Chosen design; PRD §22 only says an artificial placeholder is "not needed", and the panel adds no fake media semantics |
+| Collection-header meta (`186 posts ◫ 220 media`) | **11 → 16px** | "How many are in this folder" is the first question the page is asked; at 11px it read as fine print under a 38px title. The mockup's size is inherited from the *card* meta row, where 11px is right because the card is `292` wide and the row competes with the collage — the header has the whole column to itself |
+| Lightbox media counter (`n / total`) | **Replaced with dots over the open tweet** | The number counted the loaded archive rather than the tweet, so a one-image tweet read `1 / 39`; see §3.5 |
+| Lightbox single prev/next pair | **Split into a media pair and a post pair** | PRD §27 asks for navigation *inside one tweet*; walking the flattened sequence overrode it; see §3.5 |
 
 ---
 

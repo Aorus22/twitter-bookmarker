@@ -172,7 +172,7 @@ export function CollectionPage() {
             {collection === undefined ? null : (
               <p
                 data-testid="collection-counts"
-                className="text-[13px] leading-[1.4] font-medium text-muted"
+                className="text-base leading-[1.4] font-medium text-muted"
               >
                 {formatCollectionCounts(collection)}
               </p>

@@ -304,19 +304,43 @@ shot "infinite-scroll"
 # --- lightbox ---------------------------------------------------------------
 echo
 echo "Lightbox (LIGHT-01..06)"
-agent-browser scrollintoview '[data-testid="post-media-trigger"]' >/dev/null 2>&1
+# Open a tweet that owns more than one image, so the media-arrow checks below
+# have somewhere to step to. bulk.csv cycles 1..3 media per row, so the
+# `data-media-count="3"` card is deterministic.
+LT_SEL='[data-testid="post-card"][data-media-count="3"] [data-testid="post-media-trigger"]'
+# Identity of the open tweet, for the post-navigation checks below.
+lt_href() { js "document.querySelector('[data-testid=\"lightbox-open-on-x\"]').getAttribute('href')"; }
+agent-browser scrollintoview "$LT_SEL" >/dev/null 2>&1
 # §82.21 needs the card's own tweet URL to compare against; capture it before
 # the click, from the article that owns the media tile.
-agent-browser eval "window.__twbmClickedUrl = (() => { const t = document.querySelector('[data-testid=\"post-media-trigger\"]'); const card = t && t.closest('article'); const link = card && card.querySelector('[data-testid=\"open-on-x\"]'); return link ? link.getAttribute('href') : ''; })()" >/dev/null 2>&1
-agent-browser click '[data-testid="post-media-trigger"]' >/dev/null 2>&1
+agent-browser eval "window.__twbmClickedUrl = (() => { const t = document.querySelector('[data-testid=\"post-card\"][data-media-count=\"3\"] [data-testid=\"post-media-trigger\"]'); const card = t && t.closest('article'); const link = card && card.querySelector('[data-testid=\"open-on-x\"]'); return link ? link.getAttribute('href') : ''; })()" >/dev/null 2>&1
+card_media=$(js "(() => { const t = document.querySelector('[data-testid=\"post-card\"][data-media-count=\"3\"] [data-testid=\"post-media-trigger\"]'); const c = t && t.closest('article'); return c ? c.getAttribute('data-media-count') : ''; })()")
+agent-browser click "$LT_SEL" >/dev/null 2>&1
 agent-browser wait 700 >/dev/null 2>&1
 chk "dialog opens" "true" "$(js "!!document.querySelector('[data-testid=\"media-lightbox\"]')")"
 # PRD §82 integration scenario, browser steps 16-21 (HARD-05).
 chk "§82.16 clicking an image opened the lightbox" "true" "$(js "!!document.querySelector('[data-testid=\"media-lightbox\"]')")"
 chk "§82.17 the lightbox shows the clicked tweet's media" "true" \
   "$(js "(() => { const i = document.querySelector('[data-testid=\"lightbox-media-area\"] img'); return !!i && i.getAttribute('src').includes('pbs.twimg.com'); })()")"
-counter=$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').textContent")
-if printf '%s' "$counter" | grep -Eq '^[0-9]+ / [0-9]+$'; then pass "counter shows n / total ($counter)"; else fail "counter shows n / total" "got [$counter]"; fi
+# The indicator is dots counted over the *open tweet*, not the loaded archive.
+# `data-media-total` must equal the tweet's own media count, and there must be
+# exactly that many dots — the old text counter reported the position in the
+# flattened sequence of every loaded media, which read as "1 / 39" for a tweet
+# with one image.
+lt_total=$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-total')")
+lt_dots=$(js "document.querySelectorAll('[data-testid=\"lightbox-counter\"] > span[aria-hidden=\"true\"]').length")
+if [ -n "$card_media" ] && [ "$lt_total" = "$card_media" ]; then
+  pass "the dot indicator counts this tweet's media ($lt_total)"
+else
+  fail "the dot indicator counts this tweet's media" "card=$card_media indicator=$lt_total"
+fi
+chk "one dot per media in the tweet" "$card_media" "$lt_dots"
+chk "the indicator keeps the exact position for assistive tech" "true" \
+  "$(js "(() => { const c = document.querySelector('[data-testid=\"lightbox-counter\"]'); return /^Media [0-9]+ of [0-9]+$/.test(c.getAttribute('aria-label') || ''); })()")"
+chk "the two navigation axes have four distinct accessible names" "true" \
+  "$(js "(() => { const names = [...document.querySelectorAll('[data-testid=\"media-lightbox\"] button')].map((b) => b.getAttribute('aria-label')); return ['Previous media','Next media','Previous post','Next post'].every((n) => names.includes(n)); })()")"
+chk "the post controls sit outside the media area" "true" \
+  "$(js "(() => { const area = document.querySelector('[data-testid=\"lightbox-media-area\"]'); const b = document.querySelector('[data-testid=\"lightbox-next-post\"]'); return !!area && !!b && !area.contains(b); })()")"
 chk "lightbox shows the stored image, decoded" "true" \
   "$(js "(() => { const i = document.querySelector('[data-testid=\"lightbox-media-area\"] img'); return !!i && i.getAttribute('src').includes('pbs.twimg.com') && i.naturalWidth > 0; })()")"
 chk "three meta lines present" "true" \
@@ -331,13 +355,30 @@ chk "§82.21 Open on X targets the same tweet the card linked to" "true" \
   "$(js "(() => { const a = document.querySelector('[data-testid=\"lightbox-open-on-x\"]'); const href = a && a.getAttribute('href'); return !!window.__twbmClickedUrl && href === window.__twbmClickedUrl; })()")"
 shot "lightbox-open"
 
-# §82.18/§82.19: Right Arrow advances the media, Left Arrow returns.
+# §82.18/§82.19: Right Arrow advances the media *inside this tweet*, Left Arrow
+# returns. The media axis is clamped inside the tweet, so this is a statement
+# about the tweet's own images, not about walking into the next tweet.
+lt_media0=$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-index')")
 agent-browser press ArrowRight >/dev/null 2>&1
 agent-browser wait 400 >/dev/null 2>&1
-ne "§82.18 ArrowRight shows the next media" "$counter" "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').textContent")"
+ne "§82.18 ArrowRight shows the next media" "$lt_media0" "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-index')")"
 agent-browser press ArrowLeft >/dev/null 2>&1
 agent-browser wait 400 >/dev/null 2>&1
-chk "§82.19 ArrowLeft returns to the first media" "$counter" "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').textContent")"
+chk "§82.19 ArrowLeft returns to the first media" "$lt_media0" "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-index')")"
+
+# The post axis is the other pair: ArrowDown leaves this tweet for the next one
+# that has media, and lands on its first image. Identity is taken from the tweet
+# URL rather than the author name — bulk.csv reuses `Bulk Author {i % 7}`, so two
+# consecutive posts can share an author and the check would pass vacuously.
+lt_post0=$(lt_href)
+agent-browser press ArrowDown >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+ne "ArrowDown moves to the next post" "$lt_post0" "$(lt_href)"
+chk "the next post opens on its first media" "0" \
+  "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-index')")"
+agent-browser press ArrowUp >/dev/null 2>&1
+agent-browser wait 400 >/dev/null 2>&1
+chk "ArrowUp returns to the previous post" "$lt_post0" "$(lt_href)"
 
 agent-browser press Escape >/dev/null 2>&1
 agent-browser wait 500 >/dev/null 2>&1
@@ -516,8 +557,8 @@ chk "media tiles carry an author-derived accessible name" "true" \
 
 # Dialog semantics: opening the lightbox moves focus in, Tab is trapped, arrows
 # navigate, Escape closes and restores focus.
-agent-browser scrollintoview '[data-testid="post-media-trigger"]' >/dev/null 2>&1
-agent-browser click '[data-testid="post-media-trigger"]' >/dev/null 2>&1
+agent-browser scrollintoview "$LT_SEL" >/dev/null 2>&1
+agent-browser click "$LT_SEL" >/dev/null 2>&1
 agent-browser wait 700 >/dev/null 2>&1
 chk "opening the dialog moves focus inside it" "true" \
   "$(js "document.querySelector('[data-testid=\"media-lightbox\"]').contains(document.activeElement)")"
@@ -530,10 +571,10 @@ for _ in $(seq 1 12); do
   [ "$inside" = "true" ] || trap_ok=false
 done
 chk "Tab is trapped inside the open dialog" "true" "$trap_ok"
-c1=$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').textContent")
+c1=$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-index')")
 agent-browser press ArrowRight >/dev/null 2>&1
 agent-browser wait 400 >/dev/null 2>&1
-ne "ArrowRight navigates media inside the dialog" "$c1" "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').textContent")"
+ne "ArrowRight navigates media inside the dialog" "$c1" "$(js "document.querySelector('[data-testid=\"lightbox-counter\"]').getAttribute('data-media-index')")"
 agent-browser press Escape >/dev/null 2>&1
 agent-browser wait 500 >/dev/null 2>&1
 chk "Escape closes the dialog and restores focus" "true" \

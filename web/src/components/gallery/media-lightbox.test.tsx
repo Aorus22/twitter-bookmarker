@@ -4,12 +4,18 @@ import { describe, expect, it, vi } from "vitest"
 
 import { MediaLightbox, type MediaLightboxProps } from "./media-lightbox"
 import { makePost, pbsUrl, POST_NOW } from "@/test/fixtures"
+import { mediaDotWindow } from "@/lib/lightbox"
 
 /**
  * LIGHT-01/LIGHT-02/LIGHT-04/LIGHT-05 component contract (PRD-2 §26/§27/§67,
  * design spec §3.5). The component is presentational: the flattened index is a
  * prop, so every case here is a direct statement about the rendered panel,
- * counter, controls and responsive structure.
+ * controls and responsive structure.
+ *
+ * The navigation contract under test is the two-axis one: the arrows inside the
+ * media area move between the open tweet's own media and stop at its ends, the
+ * pair outside the panel moves between tweets, and the indicator is dots counted
+ * over the open tweet — never over the loaded archive.
  */
 
 const POSTS = [
@@ -40,23 +46,37 @@ const LONG_TEXT = `${"Wayland compositors and the Linux desktop. ".repeat(8)}End
 
 function renderLightbox(props: Partial<MediaLightboxProps> = {}) {
   const onClose = vi.fn()
-  const onPrev = vi.fn()
-  const onNext = vi.fn()
+  const onPrevMedia = vi.fn()
+  const onNextMedia = vi.fn()
+  const onPrevPost = vi.fn()
+  const onNextPost = vi.fn()
 
   const view = render(
     <MediaLightbox
       posts={POSTS}
       index={0}
       collectionName="Linux"
-      onPrev={onPrev}
-      onNext={onNext}
+      onPrevMedia={onPrevMedia}
+      onNextMedia={onNextMedia}
+      onPrevPost={onPrevPost}
+      onNextPost={onNextPost}
       onClose={onClose}
       now={POST_NOW}
       {...props}
     />
   )
 
-  return { onClose, onPrev, onNext, view }
+  return { onClose, onPrevMedia, onNextMedia, onPrevPost, onNextPost, view }
+}
+
+/** The indicator's dots, in order. The `sr-only` label span is not one. */
+function dots(counter: HTMLElement): HTMLElement[] {
+  return Array.from(counter.querySelectorAll('span[aria-hidden="true"]'))
+}
+
+/** True when the dot paints as the active one. */
+function isActiveDot(dot: HTMLElement): boolean {
+  return !dot.className.includes("bg-ink/25")
 }
 
 describe("MediaLightbox — contents (LIGHT-01)", () => {
@@ -82,10 +102,11 @@ describe("MediaLightbox — contents (LIGHT-01)", () => {
     const { view } = renderLightbox({ index: 2 })
 
     // Slot 2 is post 3's only image — post 2 has no media.
-    expect(within(screen.getByTestId("lightbox-media-area")).getByTestId("media-image")).toHaveAttribute(
-      "src",
-      pbsUrl("c1")
-    )
+    expect(
+      within(screen.getByTestId("lightbox-media-area")).getByTestId(
+        "media-image"
+      )
+    ).toHaveAttribute("src", pbsUrl("c1"))
     expect(screen.getByTestId("lightbox-author")).toHaveTextContent(
       "Linus Torvalds"
     )
@@ -137,67 +158,190 @@ describe("MediaLightbox — contents (LIGHT-01)", () => {
   })
 })
 
-describe("MediaLightbox — counter and controls (LIGHT-02/LIGHT-03)", () => {
-  it("shows n / total and exposes it to assistive tech", () => {
+describe("MediaLightbox — the media indicator is dots over this tweet (LIGHT-02)", () => {
+  it("renders one dot per media in the open tweet, not per loaded media", () => {
+    // Three media are loaded across the gallery; this tweet owns two of them.
+    renderLightbox({ index: 0 })
+
+    const counter = screen.getByTestId("lightbox-counter")
+    expect(dots(counter)).toHaveLength(2)
+    expect(counter.dataset.mediaTotal).toBe("2")
+    expect(counter.dataset.mediaIndex).toBe("0")
+    expect(counter).not.toHaveTextContent("3")
+  })
+
+  it("marks the active dot and keeps the position for assistive tech", () => {
     renderLightbox({ index: 1 })
 
     const counter = screen.getByTestId("lightbox-counter")
-    expect(counter).toHaveTextContent("2 / 3")
-    expect(counter).toHaveAttribute("aria-label", "Media 2 of 3")
+    const list = dots(counter)
+
+    expect(isActiveDot(list[0])).toBe(false)
+    expect(isActiveDot(list[1])).toBe(true)
+    // The visible form is dots; the exact position stays announced.
+    expect(counter).toHaveAttribute("aria-label", "Media 2 of 2")
     expect(counter).toHaveAttribute("role", "status")
   })
 
-  it("names the prev/next controls instead of relying on the glyphs", () => {
+  it("reports a single media as one dot on a one-image tweet", () => {
+    renderLightbox({ index: 2 })
+
+    const counter = screen.getByTestId("lightbox-counter")
+    expect(dots(counter)).toHaveLength(1)
+    expect(isActiveDot(dots(counter)[0])).toBe(true)
+    expect(counter).toHaveAttribute("aria-label", "Media 1 of 1")
+  })
+
+  it("slides a bounded window of dots for a long thread", () => {
+    const thread = makePost({
+      tweet_id: "9",
+      username: "@thread",
+      media: Array.from({ length: 12 }, (_, index) => pbsUrl(`t${index}`)),
+    })
+    renderLightbox({ posts: [thread], index: 5 })
+
+    const counter = screen.getByTestId("lightbox-counter")
+    const list = dots(counter)
+
+    expect(list).toHaveLength(9)
+    expect(counter.dataset.mediaTotal).toBe("12")
+    expect(counter.dataset.mediaIndex).toBe("5")
+    // The window is the same one the pure helper chose.
+    expect(mediaDotWindow(5, 12)).toEqual({ start: 1, count: 9 })
+    expect(list.filter(isActiveDot)).toHaveLength(1)
+    expect(isActiveDot(list[5 - 1])).toBe(true)
+  })
+})
+
+describe("MediaLightbox — the two control pairs (LIGHT-02/LIGHT-03)", () => {
+  it("names all four controls instead of relying on the glyphs", () => {
     renderLightbox({ index: 1 })
 
     expect(
       screen.getByRole("button", { name: "Previous media" })
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Next media" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Previous post" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Next post" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Close lightbox" })).toHaveAttribute(
       "data-testid",
       "lightbox-close"
     )
   })
 
-  it("disables previous on the very first loaded item", () => {
-    renderLightbox({ index: 0 })
-
+  it("disables the media arrows at the ends of the open tweet", () => {
+    // Two separate renders — one per boundary — because each `render` mounts its
+    // own dialog and a combined test would find both copies.
+    const first = renderLightbox({ index: 0 })
     expect(screen.getByTestId("lightbox-prev")).toBeDisabled()
     expect(screen.getByTestId("lightbox-next")).toBeEnabled()
+    first.view.unmount()
+
+    renderLightbox({ index: 1 })
+    expect(screen.getByTestId("lightbox-prev")).toBeEnabled()
+    expect(screen.getByTestId("lightbox-next")).toBeDisabled()
   })
 
-  it("disables next on the very last loaded item", () => {
+  it("disables both media arrows on a one-image tweet", () => {
     renderLightbox({ index: 2 })
 
+    expect(screen.getByTestId("lightbox-prev")).toBeDisabled()
     expect(screen.getByTestId("lightbox-next")).toBeDisabled()
-    expect(screen.getByTestId("lightbox-prev")).toBeEnabled()
   })
 
-  it("calls the navigation handlers when the controls are clicked", async () => {
+  it("disables the post arrows at the loaded edges", () => {
+    const first = renderLightbox({ index: 0 })
+    expect(screen.getByTestId("lightbox-prev-post")).toBeDisabled()
+    expect(screen.getByTestId("lightbox-next-post")).toBeEnabled()
+    first.view.unmount()
+
+    renderLightbox({ index: 2 })
+    expect(screen.getByTestId("lightbox-prev-post")).toBeEnabled()
+    expect(screen.getByTestId("lightbox-next-post")).toBeDisabled()
+  })
+
+  it("calls the media handler each media arrow enables", async () => {
     const user = userEvent.setup()
-    const { onNext, onPrev, onClose } = renderLightbox({ index: 1 })
+    const first = renderLightbox({ index: 0 })
 
     await user.click(screen.getByTestId("lightbox-next"))
+    expect(first.onNextMedia).toHaveBeenCalledTimes(1)
+    expect(first.onPrevMedia).not.toHaveBeenCalled()
+    first.view.unmount()
+
+    const second = renderLightbox({ index: 1 })
     await user.click(screen.getByTestId("lightbox-prev"))
+    expect(second.onPrevMedia).toHaveBeenCalledTimes(1)
+    expect(second.onNextMedia).not.toHaveBeenCalled()
+  })
+
+  it("calls the post handler each post arrow enables", async () => {
+    const user = userEvent.setup()
+    const first = renderLightbox({ index: 1 })
+
+    // @grace has no media, so @ada -> @linus in one post step.
+    await user.click(screen.getByTestId("lightbox-next-post"))
+    expect(first.onNextPost).toHaveBeenCalledTimes(1)
+    expect(first.onPrevPost).not.toHaveBeenCalled()
+    first.view.unmount()
+
+    const second = renderLightbox({ index: 2 })
+    await user.click(screen.getByTestId("lightbox-prev-post"))
+    expect(second.onPrevPost).toHaveBeenCalledTimes(1)
+    expect(second.onNextPost).not.toHaveBeenCalled()
+  })
+
+  it("calls close from the info panel's × control", async () => {
+    const user = userEvent.setup()
+    const { onClose } = renderLightbox({ index: 1 })
+
     await user.click(screen.getByTestId("lightbox-close"))
 
-    expect(onNext).toHaveBeenCalledTimes(1)
-    expect(onPrev).toHaveBeenCalledTimes(1)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the post controls out of the media area and leaves it unclipped", () => {
+    renderLightbox({ index: 0 })
+
+    const mediaArea = screen.getByTestId("lightbox-media-area")
+    expect(
+      within(mediaArea).queryByTestId("lightbox-next-post")
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("lightbox-next-post").className).toContain(
+      "min-[1400px]:-right-14"
+    )
+    // The panel must not clip, or the gutter controls could not be drawn.
+    expect(screen.getByTestId("media-lightbox").className).toContain(
+      "md:overflow-visible"
+    )
   })
 })
 
 describe("MediaLightbox — keyboard (LIGHT-04)", () => {
-  it("navigates with ArrowLeft and ArrowRight", async () => {
+  it("drives the media arrows with ArrowLeft and ArrowRight", async () => {
     const user = userEvent.setup()
-    const { onNext, onPrev } = renderLightbox({ index: 1 })
+    const { onNextMedia, onPrevMedia, onNextPost } = renderLightbox({ index: 1 })
 
     await user.keyboard("{ArrowRight}")
     await user.keyboard("{ArrowLeft}")
 
-    expect(onNext).toHaveBeenCalledTimes(1)
-    expect(onPrev).toHaveBeenCalledTimes(1)
+    expect(onNextMedia).toHaveBeenCalledTimes(1)
+    expect(onPrevMedia).toHaveBeenCalledTimes(1)
+    expect(onNextPost).not.toHaveBeenCalled()
+  })
+
+  it("drives the post arrows with ArrowDown and ArrowUp", async () => {
+    const user = userEvent.setup()
+    const { onNextPost, onPrevPost, onNextMedia } = renderLightbox({ index: 1 })
+
+    await user.keyboard("{ArrowDown}")
+    await user.keyboard("{ArrowUp}")
+
+    expect(onNextPost).toHaveBeenCalledTimes(1)
+    expect(onPrevPost).toHaveBeenCalledTimes(1)
+    expect(onNextMedia).not.toHaveBeenCalled()
   })
 
   it("closes on Escape through the dialog primitive", async () => {
@@ -212,14 +356,16 @@ describe("MediaLightbox — keyboard (LIGHT-04)", () => {
   it("does not let the arrow keys scroll the page behind the dialog", () => {
     renderLightbox({ index: 1 })
 
-    const event = new KeyboardEvent("keydown", {
-      key: "ArrowRight",
-      bubbles: true,
-      cancelable: true,
-    })
-    screen.getByTestId("media-lightbox").dispatchEvent(event)
+    for (const key of ["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"]) {
+      const event = new KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true,
+      })
+      screen.getByTestId("media-lightbox").dispatchEvent(event)
 
-    expect(event.defaultPrevented).toBe(true)
+      expect(event.defaultPrevented).toBe(true)
+    }
   })
 })
 
@@ -248,6 +394,24 @@ describe("MediaLightbox — responsive structure and scrim (LIGHT-02)", () => {
     expect(info.className).toContain("rounded-xl")
     expect(info.className).toContain("bg-surface-warm")
     expect(info.className).toContain("p-[22px]")
+  })
+
+  it("keeps the post controls inside the media area until there is a gutter", () => {
+    renderLightbox({ index: 1 })
+
+    const prev = screen.getByTestId("lightbox-prev-post").className
+    expect(prev).toContain("left-[42px]")
+    expect(prev).toContain("top-[42px]")
+    expect(prev).toContain("min-[1400px]:-left-14")
+    expect(prev).toContain("min-[1400px]:top-1/2")
+
+    const next = screen.getByTestId("lightbox-next-post").className
+    expect(next).toContain("right-[42px]")
+    expect(next).toContain("min-[1400px]:-right-14")
+    // Between `md` and the 1400px gutter the info panel sits to the right, so the
+    // next-post button has to skip it (30 + 330 + 30 + 12). Anchoring it to the
+    // panel's own corner instead would drop it on top of the `×` close control.
+    expect(next).toContain("md:right-[402px]")
   })
 
   it("tints the scrim with the spec colour", () => {
@@ -290,6 +454,8 @@ describe("MediaLightbox — clamp and broken media (LIGHT-01)", () => {
     expect(screen.getByTestId("lightbox-author")).toHaveTextContent(
       "Ada Lovelace"
     )
-    expect(screen.getByTestId("lightbox-counter")).toHaveTextContent("1 / 3")
+    const counter = screen.getByTestId("lightbox-counter")
+    expect(dots(counter)).toHaveLength(2)
+    expect(counter.dataset.mediaIndex).toBe("0")
   })
 })

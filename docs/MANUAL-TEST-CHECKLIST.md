@@ -567,10 +567,11 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 | # | Step | Expected |
 |---|---|---|
 | 16 | Click an image tile | Lightbox dialog opens for that tweet |
-| 17 | Look at the media area | The clicked tweet's image, plus author/handle meta and a `n / total` counter |
-| 18 | Press `→` | The counter advances to the next media |
-| 19 | Press `←` | The counter returns to the previous media |
+| 17 | Look at the media area | The clicked tweet's image, plus author/handle meta; the indicator is **dots**, one per image *in that tweet* (a 4-image tweet shows 4 dots even when the collection has hundreds), with the active one filled |
+| 18 | Press `→` (or click the arrow inside the media area) | The next dot fills — the next image of **the same tweet**; at the tweet's last image the control is disabled and `→` does nothing |
+| 19 | Press `←` (or click the arrow inside the media area) | The previous image of the same tweet; disabled at the tweet's first image |
 | 20 | Inspect **Open on X** | `href` is the canonical `https://x.com/<user>/status/<id>`; `target="_blank"` + `rel="noopener noreferrer"` |
+| 20a | Press `↓` (or click the **double-chevron** button outside the panel) | The lightbox moves to the next tweet that has media, skipping text-only tweets, and shows that tweet's **first** image with the dots reset to its count; `↑` (or the left double-chevron) goes back. Below 1400 px wide these two buttons sit at the media area's top corners rather than in the page gutter |
 | 21 | Click **Open on X** | The original tweet opens in a new tab (requires network); `Esc` closes the lightbox and returns focus to the tile |
 
 ### Steps 22–24 — live data, no restart
@@ -583,9 +584,12 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 
 **Accessibility sub-check (HARD-04).** Repeat steps 3–21 with a keyboard only
 (`Tab` / `Shift+Tab` / `Enter` / `Space` / arrows / `Esc`): every control is
-reachable, paints a visible focus ring, the lightbox traps `Tab`, `Esc` restores
-focus to the originating tile, and images carry an author-derived `alt`. With a
-screen reader, the nav, toolbar and lightbox announce meaningful names.
+reachable, paints a visible focus ring, the lightbox traps `Tab` and names all
+four navigation controls distinctly (`Previous media` / `Next media` /
+`Previous post` / `Next post` — the two pairs look alike), `Esc` restores focus
+to the originating tile, and images carry an author-derived `alt`. With a screen
+reader, the nav, toolbar and lightbox announce meaningful names, and the dots
+indicator announces the exact position (`Media 2 of 4`).
 
 **Responsive sub-check (HARD-03).** At 390 / 768 / 1440 px the masonry shows
 1 / 2 / 4 columns; **Filter** is a Sheet at 390 and a Popover at 1440; the

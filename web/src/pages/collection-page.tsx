@@ -172,7 +172,7 @@ export function CollectionPage() {
             {collection === undefined ? null : (
               <p
                 data-testid="collection-counts"
-                className="text-[11px] leading-[1.4] font-medium text-muted"
+                className="text-[13px] leading-[1.4] font-medium text-muted"
               >
                 {formatCollectionCounts(collection)}
               </p>
@@ -243,8 +243,10 @@ export function CollectionPage() {
           posts={posts}
           index={lightbox.index}
           collectionName={displayName}
-          onPrev={lightbox.goPrev}
-          onNext={lightbox.goNext}
+          onPrevMedia={lightbox.goPrevMedia}
+          onNextMedia={lightbox.goNextMedia}
+          onPrevPost={lightbox.goPrevPost}
+          onNextPost={lightbox.goNextPost}
           onClose={lightbox.close}
         />
       </div>

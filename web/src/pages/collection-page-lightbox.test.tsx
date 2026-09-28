@@ -15,10 +15,12 @@ import {
 
 /**
  * LIGHT-01…LIGHT-06 end-to-end on the collection route: clicking a media tile
- * opens the lightbox at that exact item, prev/next walk within a tweet and on
- * into the next loaded tweet (skipping text-only posts), Escape/arrows work,
- * focus is trapped and restored, the scroll offset survives the dialog, and the
- * last loaded item's `next` is disabled without ever triggering a page fetch.
+ * opens the lightbox at that exact item, the media arrows walk only that tweet's
+ * media while the post arrows cross into the next loaded tweet (skipping
+ * text-only posts), the dots count the open tweet rather than the archive,
+ * Escape/arrows work, focus is trapped and restored, the scroll offset survives
+ * the dialog, and the last loaded item's `next` is disabled without ever
+ * triggering a page fetch.
  *
  * Every `fetch` is mocked and URL-routed (no network, no server).
  */
@@ -97,20 +99,29 @@ function activeSrc(dialog: HTMLElement) {
   return within(dialog).getByTestId("media-image").getAttribute("src")
 }
 
+/**
+ * The dots indicator's state as one comparable string. The indicator is dots,
+ * not text, so the meaningful assertion is which media of *which tweet's* media
+ * is active — the `svg`/`/` text form of the old counter is gone.
+ */
+function mediaPosition(dialog: HTMLElement): string {
+  const counter = within(dialog).getByTestId("lightbox-counter")
+  return `${counter.dataset.mediaIndex}/${counter.dataset.mediaTotal}`
+}
+
 afterEach(() => {
   window.scrollY = 0
 })
 
 describe("CollectionPage — opening the lightbox at the clicked media (LIGHT-01)", () => {
-  it("opens at the clicked item with the matching counter and image", async () => {
+  it("opens at the clicked item with the matching dots and image", async () => {
     const user = userEvent.setup()
     renderPage()
 
     const { dialog } = await openLightbox(user, "Media 2 of 2 from @ada")
 
-    expect(within(dialog).getByTestId("lightbox-counter")).toHaveTextContent(
-      "2 / 3"
-    )
+    // Two dots: @ada's two images, not the three loaded across the gallery.
+    expect(mediaPosition(dialog)).toBe("1/2")
     expect(activeSrc(dialog)).toBe(pbsUrl("a2"))
     expect(within(dialog).getByTestId("lightbox-author")).toHaveTextContent(
       "Ada Lovelace"
@@ -123,9 +134,7 @@ describe("CollectionPage — opening the lightbox at the clicked media (LIGHT-01
 
     const { dialog } = await openLightbox(user, "Media from @linus")
 
-    expect(within(dialog).getByTestId("lightbox-counter")).toHaveTextContent(
-      "3 / 3"
-    )
+    expect(mediaPosition(dialog)).toBe("0/1")
     expect(activeSrc(dialog)).toBe(pbsUrl("c1"))
   })
 
@@ -139,51 +148,72 @@ describe("CollectionPage — opening the lightbox at the clicked media (LIGHT-01
   })
 })
 
-describe("CollectionPage — navigation across tweets (LIGHT-03)", () => {
-  it("walks the current tweet then continues into the next tweet's media", async () => {
+describe("CollectionPage — media arrows stay inside the tweet (LIGHT-03)", () => {
+  it("walks the open tweet's media and stops at its ends", async () => {
     const user = userEvent.setup()
     renderPage()
 
     const { dialog } = await openLightbox(user, "Media 1 of 2 from @ada")
-    const counter = within(dialog).getByTestId("lightbox-counter")
 
-    expect(counter).toHaveTextContent("1 / 3")
+    expect(mediaPosition(dialog)).toBe("0/2")
     expect(within(dialog).getByTestId("lightbox-prev")).toBeDisabled()
 
     await user.click(within(dialog).getByTestId("lightbox-next"))
-    expect(counter).toHaveTextContent("2 / 3")
+    expect(mediaPosition(dialog)).toBe("1/2")
     expect(activeSrc(dialog)).toBe(pbsUrl("a2"))
     expect(within(dialog).getByTestId("lightbox-author")).toHaveTextContent(
       "Ada Lovelace"
     )
 
-    // Slot 3 skips the text-only @grace post and lands on @linus.
+    // @ada's last image: the media axis stops here, so @linus is untouched.
+    expect(within(dialog).getByTestId("lightbox-next")).toBeDisabled()
     await user.click(within(dialog).getByTestId("lightbox-next"))
-    expect(counter).toHaveTextContent("3 / 3")
+    expect(mediaPosition(dialog)).toBe("1/2")
+
+    await user.click(within(dialog).getByTestId("lightbox-prev"))
+    expect(mediaPosition(dialog)).toBe("0/2")
+  })
+})
+
+describe("CollectionPage — post arrows cross tweets (LIGHT-03)", () => {
+  it("skips the text-only tweet and lands on the neighbour's first media", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const { dialog } = await openLightbox(user, "Media 1 of 2 from @ada")
+
+    expect(within(dialog).getByTestId("lightbox-prev-post")).toBeDisabled()
+
+    // Second media of @ada, then one post step to @linus (skipping @grace),
+    // which owns a single image — so the dots go back to one.
+    await user.click(within(dialog).getByTestId("lightbox-next"))
+    await user.click(within(dialog).getByTestId("lightbox-next-post"))
+
+    expect(mediaPosition(dialog)).toBe("0/1")
     expect(activeSrc(dialog)).toBe(pbsUrl("c1"))
     expect(within(dialog).getByTestId("lightbox-author")).toHaveTextContent(
       "Linus Torvalds"
     )
-    expect(within(dialog).getByTestId("lightbox-next")).toBeDisabled()
+    expect(within(dialog).getByTestId("lightbox-next-post")).toBeDisabled()
 
-    // …and back again.
-    await user.click(within(dialog).getByTestId("lightbox-prev"))
-    expect(counter).toHaveTextContent("2 / 3")
-    expect(activeSrc(dialog)).toBe(pbsUrl("a2"))
+    // …and back to @ada's first image, not to the media index we left from.
+    await user.click(within(dialog).getByTestId("lightbox-prev-post"))
+    expect(mediaPosition(dialog)).toBe("0/2")
+    expect(activeSrc(dialog)).toBe(pbsUrl("a1"))
+    expect(within(dialog).getByTestId("lightbox-prev-post")).toBeDisabled()
   })
 
-  it("never wraps past the last loaded item", async () => {
+  it("never wraps past the last loaded tweet", async () => {
     const user = userEvent.setup()
     renderPage()
 
     const { dialog } = await openLightbox(user, "Media from @linus")
 
-    await user.click(within(dialog).getByTestId("lightbox-next"))
-    await user.click(within(dialog).getByTestId("lightbox-next"))
+    await user.click(within(dialog).getByTestId("lightbox-next-post"))
+    await user.click(within(dialog).getByTestId("lightbox-next-post"))
 
-    expect(within(dialog).getByTestId("lightbox-counter")).toHaveTextContent(
-      "3 / 3"
-    )
+    expect(mediaPosition(dialog)).toBe("0/1")
+    expect(activeSrc(dialog)).toBe(pbsUrl("c1"))
   })
 
   it("does not fetch another page as a side effect of opening or navigating", async () => {
@@ -194,46 +224,67 @@ describe("CollectionPage — navigation across tweets (LIGHT-03)", () => {
     const { dialog } = await openLightbox(user, "Media 1 of 2 from @ada")
 
     await user.click(within(dialog).getByTestId("lightbox-next"))
-    await user.click(within(dialog).getByTestId("lightbox-next"))
+    await user.click(within(dialog).getByTestId("lightbox-next-post"))
     await user.keyboard("{ArrowRight}")
+    await user.keyboard("{ArrowDown}")
 
     expect(postsRequests(fetchMock)).toHaveLength(before)
   })
 
-  it("disables next at the last loaded item and keeps it a no-op", async () => {
+  it("disables next at the last loaded tweet and keeps it a no-op", async () => {
     const user = userEvent.setup()
     const fetchMock = renderPage()
 
     const { dialog } = await openLightbox(user, "Media from @linus")
     const before = postsRequests(fetchMock).length
 
-    expect(within(dialog).getByTestId("lightbox-next")).toBeDisabled()
+    expect(within(dialog).getByTestId("lightbox-next-post")).toBeDisabled()
 
-    await user.keyboard("{ArrowRight}")
+    await user.keyboard("{ArrowDown}")
 
-    expect(within(dialog).getByTestId("lightbox-counter")).toHaveTextContent(
-      "3 / 3"
-    )
+    expect(mediaPosition(dialog)).toBe("0/1")
     expect(postsRequests(fetchMock)).toHaveLength(before)
   })
 })
 
 describe("CollectionPage — keyboard control (LIGHT-04)", () => {
-  it("navigates with ArrowLeft and ArrowRight", async () => {
+  it("navigates media with ArrowLeft and ArrowRight", async () => {
     const user = userEvent.setup()
     renderPage()
 
     const { dialog } = await openLightbox(user, "Media 1 of 2 from @ada")
-    const counter = within(dialog).getByTestId("lightbox-counter")
 
     await user.keyboard("{ArrowRight}")
-    expect(counter).toHaveTextContent("2 / 3")
+    expect(mediaPosition(dialog)).toBe("1/2")
 
+    // The media axis is clamped inside @ada; the arrow does not change tweets.
     await user.keyboard("{ArrowRight}")
-    expect(counter).toHaveTextContent("3 / 3")
+    expect(mediaPosition(dialog)).toBe("1/2")
+    expect(within(dialog).getByTestId("lightbox-author")).toHaveTextContent(
+      "Ada Lovelace"
+    )
 
     await user.keyboard("{ArrowLeft}")
-    expect(counter).toHaveTextContent("2 / 3")
+    expect(mediaPosition(dialog)).toBe("0/2")
+  })
+
+  it("navigates posts with ArrowDown and ArrowUp", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const { dialog } = await openLightbox(user, "Media 1 of 2 from @ada")
+
+    await user.keyboard("{ArrowDown}")
+    expect(mediaPosition(dialog)).toBe("0/1")
+    expect(within(dialog).getByTestId("lightbox-author")).toHaveTextContent(
+      "Linus Torvalds"
+    )
+
+    await user.keyboard("{ArrowUp}")
+    expect(mediaPosition(dialog)).toBe("0/2")
+    expect(within(dialog).getByTestId("lightbox-author")).toHaveTextContent(
+      "Ada Lovelace"
+    )
   })
 
   it("closes on Escape", async () => {
@@ -296,11 +347,10 @@ describe("CollectionPage — focus management (LIGHT-05)", () => {
     renderPage()
 
     const { dialog } = await openLightbox(user, "Media 1 of 2 from @ada")
-    const counter = within(dialog).getByTestId("lightbox-counter")
 
     await user.keyboard("{ArrowRight}")
-    await user.keyboard("{ArrowRight}")
-    expect(counter).toHaveTextContent("3 / 3")
+    expect(mediaPosition(dialog)).toBe("1/2")
+    // @ada's last image disables the media-next control it was sitting on.
     expect(within(dialog).getByTestId("lightbox-next")).toBeDisabled()
     expect(document.activeElement).not.toBe(
       within(dialog).getByTestId("lightbox-next")
@@ -309,7 +359,9 @@ describe("CollectionPage — focus management (LIGHT-05)", () => {
 
     // …so the arrows still work at the boundary.
     await user.keyboard("{ArrowLeft}")
-    expect(counter).toHaveTextContent("2 / 3")
+    expect(mediaPosition(dialog)).toBe("0/2")
+    expect(within(dialog).getByTestId("lightbox-prev")).toBeDisabled()
+    expect(dialog.contains(document.activeElement)).toBe(true)
   })
 
   it("returns focus to the media trigger that opened it", async () => {

@@ -4,8 +4,8 @@ import {
   findSlotIndex,
   flattenMediaSlots,
   slotAt,
-  stepSlotIndex,
-  type LightboxDirection,
+  stepMediaIndex,
+  stepPostIndex,
 } from "@/lib/lightbox"
 import { readScrollY, restoreScrollY } from "@/lib/scroll"
 import type { GalleryPost } from "@/types"
@@ -15,11 +15,13 @@ import type { GalleryPost } from "@/types"
  *
  * Owns exactly one piece of state — the **identity** of the selected media (its
  * owning tweet plus its index inside that tweet's media array) — and derives
- * the current position in the flattened media sequence from it. That position
- * is what makes prev/next honest across tweet boundaries: walking it forwards
- * leaves the current tweet and enters the next loaded tweet's media without any
- * per-post bookkeeping. It is bounded by the loaded list, so the lightbox never
- * triggers a page fetch to satisfy a navigation.
+ * the current position in the flattened media sequence from it. The flattened
+ * position stays the single source of truth for *where we are*, while the two
+ * navigation axes are carved out of it: `goPrevMedia`/`goNextMedia` move within
+ * the open tweet and stop at its ends (PRD-2 §27), and
+ * `goPrevPost`/`goNextPost` jump to the previous/next tweet that has media. The
+ * sequence is bounded by the loaded list, so the lightbox never triggers a page
+ * fetch to satisfy a navigation.
  *
  * Deriving the position (rather than storing it) means a search/filter/sort
  * change that replaces the loaded list closes the lightbox by construction: the
@@ -52,10 +54,14 @@ export interface UseMediaLightboxResult {
   ) => void
   /** Close, restore focus to the trigger and restore the gallery offset. */
   close: () => void
-  /** Step one media back; a no-op at the first loaded slot. */
-  goPrev: () => void
-  /** Step one media forward; a no-op at the last loaded slot. */
-  goNext: () => void
+  /** Step one media back **inside the open tweet**; a no-op at its first media. */
+  goPrevMedia: () => void
+  /** Step one media forward **inside the open tweet**; a no-op at its last. */
+  goNextMedia: () => void
+  /** Step to the previous tweet that has media; a no-op at the first loaded. */
+  goPrevPost: () => void
+  /** Step to the next tweet that has media; a no-op at the last loaded. */
+  goNextPost: () => void
 }
 
 /** Identity of the selected media, stable across list changes. */
@@ -134,11 +140,11 @@ export function useMediaLightbox(
   }, [])
 
   const step = useCallback(
-    (direction: LightboxDirection) => {
+    (stepper: (position: number) => number) => {
       if (index === null) {
         return
       }
-      const next = stepSlotIndex(index, slots.length, direction)
+      const next = stepper(index)
       if (next === index) {
         return
       }
@@ -147,16 +153,37 @@ export function useMediaLightbox(
         setSelected(selection)
       }
     },
-    [index, selectionAt, slots.length]
+    [index, selectionAt]
   )
 
-  const goPrev = useCallback(() => {
-    step("prev")
-  }, [step])
+  // Two independent axes, matching the two pairs of controls the lightbox
+  // renders: media *within* the open tweet (PRD-2 §27) and the tweet itself.
+  // Both are clamped, never wrapping, and both are bounded by the loaded list so
+  // navigating never triggers a page fetch.
+  const goPrevMedia = useCallback(() => {
+    step((position) => stepMediaIndex(position, slots, "prev"))
+  }, [slots, step])
 
-  const goNext = useCallback(() => {
-    step("next")
-  }, [step])
+  const goNextMedia = useCallback(() => {
+    step((position) => stepMediaIndex(position, slots, "next"))
+  }, [slots, step])
 
-  return { index, total: slots.length, open, close, goPrev, goNext }
+  const goPrevPost = useCallback(() => {
+    step((position) => stepPostIndex(position, slots, "prev"))
+  }, [slots, step])
+
+  const goNextPost = useCallback(() => {
+    step((position) => stepPostIndex(position, slots, "next"))
+  }, [slots, step])
+
+  return {
+    index,
+    total: slots.length,
+    open,
+    close,
+    goPrevMedia,
+    goNextMedia,
+    goPrevPost,
+    goNextPost,
+  }
 }

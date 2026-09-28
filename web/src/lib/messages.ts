@@ -101,6 +101,15 @@ export const COLLECTION_META_LABEL = "Collection"
 export const LIGHTBOX_PREVIOUS_LABEL = "Previous media"
 export const LIGHTBOX_NEXT_LABEL = "Next media"
 
+/**
+ * Design spec §3.5 — the outer pair of controls, which move between **tweets**
+ * rather than between the media inside one tweet. Named separately from the
+ * inner pair: the two sit close together on screen, and a shared "previous"
+ * would leave a screen-reader user unable to tell them apart.
+ */
+export const LIGHTBOX_PREVIOUS_POST_LABEL = "Previous post"
+export const LIGHTBOX_NEXT_POST_LABEL = "Next post"
+
 /** Design spec §3.5 — the info panel's `×` close control. */
 export const LIGHTBOX_CLOSE_LABEL = "Close lightbox"
 
@@ -113,7 +122,7 @@ export const LIGHTBOX_TITLE_PREFIX = "Post media by"
 
 /** PRD-2 §27 — the keyboard hint exposed as the dialog's description. */
 export const LIGHTBOX_KEYBOARD_HINT =
-  "Use the left and right arrow keys to browse media. Press Escape to close."
+  "Use the left and right arrow keys to browse the media in this post, the up and down arrow keys to move between posts, and Escape to close."
 
 /** Builds the lightbox counter's assistive-tech name (`Media 2 of 4`). */
 export function formatLightboxCounter(current: number, total: number): string {

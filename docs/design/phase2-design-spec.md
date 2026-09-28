@@ -374,7 +374,8 @@ the **Bookmarked date** range (PRD §31) and remain manually overridable.
 - **Scrim** full viewport `#120d14` at `82%` opacity.
 - **Panel** `1220×820` centered, `r24`, `surface`, `shadow-popover`
 - **Media area** `800×760` at inset `30`, `r20`, near-black backdrop; active image contained;
-  prev/next controls at the left/right edges; a `n / total` counter
+  media prev/next controls at the media area's left/right edges, vertically centered; a **dots**
+  indicator pill at the bottom centre
 - **Info panel** `330×760` at x=860, `r20`, `surface-warm`, padding `22`
   - `×` close at top-right `(286,16)` Inter Medium 22
   - author Inter SemiBold 13, `@username` Inter Regular 10 muted
@@ -382,8 +383,37 @@ the **Bookmarked date** range (PRD §31) and remain manually overridable.
   - meta block Inter Regular 10 muted, three lines: `Posted <date>` / `Saved <date>` / `Collection <name>`
   - `Open on X ↗` button `286×42` `r12` `surface`+border pinned near the bottom (`y=690`)
 - **Mobile**: media on top (contained, ~55vh) with the info panel stacked below.
-- Keyboard: `Escape` closes, `←`/`→` navigate; focus is trapped and restored. Navigation
-  crosses tweet boundaries once the last media of a post is passed (PRD §27).
+- Keyboard: `Escape` closes, `←`/`→` navigate media, `↑`/`↓` navigate posts; focus is trapped and
+  restored.
+
+**Two navigation axes (revised 2026-09-28).** PRD §27's subject is *one tweet* — "next image /
+previous image di dalam tweet yang sama" — and it only permits (does not require) continuing into
+the next tweet. The single flattened sequence the spec originally described conflated the two, so
+the controls are now split:
+
+- The arrows **inside** the media area step through the open tweet's own media and stop at its
+  ends. This is what PRD §27 asks for, and the previous behaviour (stepping past the last image
+  into the next tweet's first) overrode it.
+- Moving between tweets gets its own pair of double-chevron controls **outside the panel**, in the
+  page gutter at `left/right -56px`, vertically centered. Each step lands on the target tweet's
+  *first* media and skips tweets with no media. Below `1400px` the panel (`min(1220, 100vw-32)`)
+  leaves no gutter wide enough to hold a `40px` control, so the same two buttons fall back to the
+  media area's top corners (`top: 42px`, i.e. panel padding `30` + `12`; the right one also skips
+  the info panel — `30 + 330 + 30 + 12 = 402`) — still visually separate from the mid-height media
+  arrows and still carrying the same accessible names. The fallback stops at the media area and
+  *not* the panel's own corners: the panel's top-right is where the `×` close control lives, so a
+  post button landing there would overlap it. The panel therefore does not clip on `md` and up
+  (`md:overflow-visible`) so the gutter controls can be drawn; it remains inside the dialog content
+  and so inside its focus trap.
+
+**Dots, not a number (revised 2026-09-28).** The `n / total` counter is replaced by one dot per
+media **in the open tweet**, active dot filled `ink`, the rest `ink/25`, in a `surface/85` pill.
+The old number was the position in the flattened sequence of every *loaded* media, so a tweet with
+one image read `1 / 39` — a number about the archive rather than about the tweet, which is exactly
+the ambiguity the dots remove. Threads longer than 9 media slide a 9-wide window that always
+contains the active dot (`mediaDotWindow`); the exact position is kept as the indicator's
+`aria-label` (`Media 2 of 4`) so assistive tech loses nothing. The dots are `aria-hidden` —
+announcing "dot 2 of 4" alongside the label would say the same thing twice.
 
 ### 3.6 Product states — frame `6:594`
 
@@ -431,7 +461,7 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 | `DateRangeFilter` | 6 | local dates → RFC3339 UTC boundaries |
 | `SortSelect` | 6 | four modes |
 | `InfiniteLoader` | 7 | IntersectionObserver sentinel + bottom spinner |
-| `MediaLightbox` | 8 | Dialog, focus trap, prev/next, keyboard |
+| `MediaLightbox` | 8 | Dialog, focus trap, media + post navigation, keyboard |
 | `LightboxInfoPanel` | 8 | author, text, dates, collection, Open on X |
 
 ---
@@ -457,7 +487,9 @@ string wins. The Figma secondary lines are adopted as supporting copy. The mocku
 - Semantic `<button>` / `<a>`; the post's `Open on X` is a real link.
 - Every image gets `alt` text derived from author + tweet context; decorative collage tiles
   get `alt=""` and `aria-hidden`.
-- Lightbox is a Dialog with a focus trap; `Escape` closes; arrows navigate.
+- Lightbox is a Dialog with a focus trap; `Escape` closes; `←`/`→` navigate the open tweet's media
+  and `↑`/`↓` navigate posts. All four controls carry distinct accessible names — the two pairs sit
+  close together, so the icons alone are not enough to tell them apart.
 - Contrast: dark-mode `muted` and `accent` are pre-lightened (§2.2). Verify with the
   `figma_lint_design` / axe checks during Phase 10.
 - Text-only cards must expose the tweet URL in text form (the `Open on X` link), never only

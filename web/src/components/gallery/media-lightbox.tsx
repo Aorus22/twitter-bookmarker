@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react"
 import { useEffect, useMemo, useRef, type KeyboardEvent } from "react"
 
 import { LightboxInfoPanel } from "@/components/gallery/lightbox-info-panel"
@@ -9,12 +9,19 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { flattenMediaSlots, slotAt } from "@/lib/lightbox"
+import {
+  flattenMediaSlots,
+  mediaDotWindow,
+  postsWithMedia,
+  slotAt,
+} from "@/lib/lightbox"
 import { displayHandle } from "@/lib/post-meta"
 import {
   LIGHTBOX_KEYBOARD_HINT,
   LIGHTBOX_NEXT_LABEL,
+  LIGHTBOX_NEXT_POST_LABEL,
   LIGHTBOX_PREVIOUS_LABEL,
+  LIGHTBOX_PREVIOUS_POST_LABEL,
   LIGHTBOX_TITLE_PREFIX,
   formatLightboxCounter,
 } from "@/lib/messages"
@@ -26,22 +33,43 @@ import type { GalleryPost } from "@/types"
  *
  * A **controlled, presentational** Radix Dialog: the caller (the
  * `useMediaLightbox` controller in `CollectionPage`) owns the flattened index,
- * and this component derives the active `(postIndex, mediaIndex)` slot, the
- * `n / total` counter and the two boundary flags from `posts` + `index` with
- * the same pure helpers the controller uses. Deriving rather than storing means
- * a late page append can never make the rendered item disagree with the index.
+ * and this component derives the active `(postIndex, mediaIndex)` slot and every
+ * control's enabled state from `posts` + `index` with the same pure helpers the
+ * controller uses. Deriving rather than storing means a late page append can
+ * never make the rendered item disagree with the index.
+ *
+ * **Two navigation axes, two pairs of controls.** PRD-2 §27's subject is one
+ * tweet ("next image / previous image di dalam tweet yang sama"), so the arrows
+ * *inside* the media area move between that tweet's own media and stop at its
+ * ends. Moving between tweets is a different job, and it gets its own pair,
+ * rendered *outside* the panel in the page gutter where it cannot be mistaken for
+ * the media arrows, with double-chevron glyphs so the two pairs stay
+ * distinguishable at a glance and by icon alone. Below `1400px` the panel leaves
+ * no gutter to sit in, so the same two buttons fall back to the media area's top
+ * corners — still separate from the mid-height media arrows, still the same
+ * controls and the same accessible names.
+ *
+ * The `n / total` counter of the original design is now **dots**, one per media
+ * in the open tweet. The old number was the position in the *flattened* sequence
+ * of loaded media, which read as "1 / 39" for a tweet whose only image happened
+ * to be 39th in the collection — a number about the archive, not about the tweet.
+ * Dots cannot be misread that way, and `mediaDotWindow` slides a window once a
+ * thread carries more media than can be read as dots. The exact position is kept
+ * for assistive tech as the region's accessible name.
  *
  * Desktop (design spec §3.5): a `1220×820` r24 `surface` panel with a 30px
  * inset, an `800×760` r20 near-black media area holding the contained active
- * image with prev/next at its left/right edges and the counter, and a `330×760`
- * r20 `surface-warm` info panel beside it. Below `md` the panel is
- * `flex-col` — media on top at ~55vh, info stacked below.
+ * image, and a `330×760` r20 `surface-warm` info panel beside it. Below `md` the
+ * panel is `flex-col` — media on top at ~55vh, info stacked below. The panel
+ * deliberately does **not** clip on `md` and up: that is what lets the post
+ * controls sit in the gutter while still being children of the dialog content,
+ * and so still inside its focus trap.
  *
- * Keyboard (PRD-2 §27): `Escape` and the focus trap come from Radix; the arrow
- * keys are handled here on the dialog content (never a global listener) and are
- * `preventDefault`ed so the page behind cannot scroll. Radix does not bind the
- * arrow keys (verified: its `FocusScope` intercepts only `Tab`), so they always
- * reach this handler.
+ * Keyboard (PRD-2 §27): `Escape` and the focus trap come from Radix; `←`/`→`
+ * drive the media arrows and `↑`/`↓` the post arrows, handled on the dialog
+ * content (never a global listener) and `preventDefault`ed so the page behind
+ * cannot scroll. Radix does not bind the arrow keys (verified: its `FocusScope`
+ * intercepts only `Tab`), so they always reach this handler.
  *
  * Image `alt`: unlike the decorative card thumbnails, the lightbox image is the
  * dialog's primary content, so it carries a real author-derived name matching
@@ -58,10 +86,14 @@ export interface MediaLightboxProps {
   index: number | null
   /** Backend collection `DisplayName` for the `Collection <name>` meta line. */
   collectionName: string
-  /** Step one media back (no-op at the first loaded slot). */
-  onPrev: () => void
-  /** Step one media forward (no-op at the last loaded slot). */
-  onNext: () => void
+  /** Step one media back inside the open tweet (no-op at its first media). */
+  onPrevMedia: () => void
+  /** Step one media forward inside the open tweet (no-op at its last media). */
+  onNextMedia: () => void
+  /** Step to the previous tweet that has media (no-op at the first loaded). */
+  onPrevPost: () => void
+  /** Step to the next tweet that has media (no-op at the last loaded). */
+  onNextPost: () => void
   /** Close the lightbox. */
   onClose: () => void
   /** Reference "today" for the year-aware date format; defaults to the clock. */
@@ -80,15 +112,52 @@ function describeMediaAlt(
     : `Media ${mediaIndex + 1} of ${mediaTotal} from ${handle}`
 }
 
-const CONTROL_CLASS =
-  "absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-card outline-none transition-colors hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-40"
+/**
+ * Shared shell of the four round controls. The positioning classes are kept out
+ * of this constant on purpose: `top` and `left` differ per pair, and two
+ * conflicting Tailwind `top-*` utilities in one class list would be resolved by
+ * stylesheet order rather than by intent.
+ */
+const CONTROL_BASE =
+  "absolute flex size-10 items-center justify-center rounded-full border border-border bg-surface text-ink shadow-card outline-none transition-colors hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-40"
+
+const MEDIA_CONTROL_CLASS = cn(CONTROL_BASE, "top-1/2 -translate-y-1/2")
+
+const POST_CONTROL_CLASS = cn(
+  CONTROL_BASE,
+  // Inside the media area's top corners until there is a gutter to move into.
+  "top-[42px] min-[1400px]:top-1/2 min-[1400px]:-translate-y-1/2"
+)
+
+/**
+ * Horizontal offsets for the post pair. The left button is always 12px inside the
+ * media area's left edge, which is the panel padding (`30`) plus `12`. The right
+ * one has to skip over the info panel when the two sit side by side: panel
+ * padding `30` + info panel `330` + flex gap `30` + the same `12` inset = `402`.
+ * Below `md` the panel is stacked, so the media area spans the full width and
+ * `42` is right again. From `1400px` there is a real gutter and both move outside
+ * the panel — `-14` is `-56px`, and the panel is `min(1220, 100vw - 32)` centered,
+ * so the gutter is at least 90px at that width.
+ *
+ * The fallback deliberately stops at the media area rather than the panel's own
+ * corners: the panel's top-right is where the `×` close control lives, and a
+ * post button landing on top of it would be both an overlap and a focus-trap
+ * collision.
+ */
+const POST_PREV_POSITION =
+  "left-[42px] min-[1400px]:-left-14"
+
+const POST_NEXT_POSITION =
+  "right-[42px] md:right-[402px] min-[1400px]:-right-14"
 
 export function MediaLightbox({
   posts,
   index,
   collectionName,
-  onPrev,
-  onNext,
+  onPrevMedia,
+  onNextMedia,
+  onPrevPost,
+  onNextPost,
   onClose,
   now,
 }: MediaLightboxProps) {
@@ -96,13 +165,27 @@ export function MediaLightbox({
   const slot = index === null ? undefined : slotAt(slots, index)
   const post = slot === undefined ? undefined : posts[slot.postIndex]
   const hasActive = slot !== undefined && post !== undefined
-  const prevRef = useRef<HTMLButtonElement | null>(null)
-  const nextRef = useRef<HTMLButtonElement | null>(null)
 
-  const total = slots.length
-  const position = slot === undefined || index === null ? 0 : index + 1
-  const hasPrev = hasActive && index !== null && index > 0
-  const hasNext = hasActive && index !== null && index < total - 1
+  const mediaIndex = slot === undefined ? 0 : slot.mediaIndex
+  const mediaTotal = post === undefined ? 0 : post.media.length
+  const hasPrevMedia = hasActive && mediaIndex > 0
+  const hasNextMedia = hasActive && mediaIndex < mediaTotal - 1
+
+  // Which tweets own media, and where the open one sits among them. A tweet with
+  // no media is never a destination, so post navigation cannot land on a tweet
+  // with nothing to show.
+  const owners = useMemo(() => postsWithMedia(slots), [slots])
+  const ownerPosition = slot === undefined ? -1 : owners.indexOf(slot.postIndex)
+  const hasPrevPost = hasActive && ownerPosition > 0
+  const hasNextPost = hasActive && ownerPosition < owners.length - 1
+
+  const dots = mediaDotWindow(mediaIndex, mediaTotal)
+  const counterLabel = formatLightboxCounter(mediaIndex + 1, mediaTotal)
+
+  const prevMediaRef = useRef<HTMLButtonElement | null>(null)
+  const nextMediaRef = useRef<HTMLButtonElement | null>(null)
+  const prevPostRef = useRef<HTMLButtonElement | null>(null)
+  const nextPostRef = useRef<HTMLButtonElement | null>(null)
 
   // A browser blurs a control the instant it becomes `disabled`, and Radix's
   // focus trap ignores a blur whose `relatedTarget` is null — so arrow
@@ -110,7 +193,9 @@ export function MediaLightbox({
   // that had focus (jsdom keeps reporting the disabled button as the active
   // element, which also makes `user-event` swallow the next key press). Pull
   // focus back onto an enabled control whenever the active media changes and
-  // focus is no longer on something usable.
+  // focus is no longer on something usable. A one-media tweet disables both
+  // media arrows, so the chain continues into the post arrows before falling
+  // back to the close control.
   useEffect(() => {
     if (!hasActive) {
       return
@@ -125,21 +210,33 @@ export function MediaLightbox({
     }
 
     const fallback =
-      (hasNext ? nextRef.current : null) ??
-      (hasPrev ? prevRef.current : null) ??
+      (hasNextMedia ? nextMediaRef.current : null) ??
+      (hasPrevMedia ? prevMediaRef.current : null) ??
+      (hasNextPost ? nextPostRef.current : null) ??
+      (hasPrevPost ? prevPostRef.current : null) ??
       document.querySelector<HTMLElement>('[data-testid="lightbox-close"]')
     fallback?.focus()
-  }, [hasActive, index, hasNext, hasPrev])
+  }, [hasActive, index, hasNextMedia, hasPrevMedia, hasNextPost, hasPrevPost])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft") {
       event.preventDefault()
-      onPrev()
+      onPrevMedia()
       return
     }
     if (event.key === "ArrowRight") {
       event.preventDefault()
-      onNext()
+      onNextMedia()
+      return
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault()
+      onPrevPost()
+      return
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault()
+      onNextPost()
     }
   }
 
@@ -162,7 +259,7 @@ export function MediaLightbox({
         showCloseButton={false}
         overlayClassName="bg-[#120d14]/82 supports-backdrop-filter:backdrop-blur-none"
         onKeyDown={handleKeyDown}
-        className="flex max-h-[calc(100svh-2rem)] w-[calc(100vw-2rem)] flex-col gap-[30px] overflow-y-auto rounded-2xl bg-surface p-[30px] shadow-popover ring-0 sm:max-w-[1220px] md:h-[820px] md:flex-row md:overflow-hidden"
+        className="flex max-h-[calc(100svh-2rem)] w-[calc(100vw-2rem)] flex-col gap-[30px] overflow-y-auto rounded-2xl bg-surface p-[30px] shadow-popover ring-0 sm:max-w-[1220px] md:h-[820px] md:flex-row md:overflow-visible"
       >
         <DialogTitle className="sr-only">
           {slot === undefined || post === undefined
@@ -193,40 +290,91 @@ export function MediaLightbox({
               />
 
               <button
-                ref={prevRef}
+                ref={prevMediaRef}
                 type="button"
                 data-testid="lightbox-prev"
                 aria-label={LIGHTBOX_PREVIOUS_LABEL}
-                disabled={!hasPrev}
-                onClick={onPrev}
-                className={cn(CONTROL_CLASS, "left-3")}
+                disabled={!hasPrevMedia}
+                onClick={onPrevMedia}
+                className={cn(MEDIA_CONTROL_CLASS, "left-3")}
               >
                 <ChevronLeft aria-hidden="true" className="size-5" />
               </button>
 
               <button
-                ref={nextRef}
+                ref={nextMediaRef}
                 type="button"
                 data-testid="lightbox-next"
                 aria-label={LIGHTBOX_NEXT_LABEL}
-                disabled={!hasNext}
-                onClick={onNext}
-                className={cn(CONTROL_CLASS, "right-3")}
+                disabled={!hasNextMedia}
+                onClick={onNextMedia}
+                className={cn(MEDIA_CONTROL_CLASS, "right-3")}
               >
                 <ChevronRight aria-hidden="true" className="size-5" />
               </button>
 
-              <p
+              {/* One dot per media *in this tweet*. `data-media-index` and
+                  `data-media-total` expose the state the dots encode so the
+                  browser acceptance run can assert that the indicator counts
+                  this tweet and not the loaded archive. */}
+              <div
                 data-testid="lightbox-counter"
+                data-media-index={mediaIndex}
+                data-media-total={mediaTotal}
                 role="status"
-                aria-label={formatLightboxCounter(position, total)}
-                className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-sm bg-surface/85 px-2 py-0.5 text-[11px] leading-[1.4] font-medium text-ink"
+                aria-label={counterLabel}
+                className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-surface/85 px-2.5 py-1.5"
               >
-                {`${position} / ${total}`}
-              </p>
+                <span className="sr-only">{counterLabel}</span>
+                {Array.from(
+                  { length: dots.count },
+                  (_, offset) => dots.start + offset
+                ).map((dot) => (
+                  <span
+                    key={dot}
+                    aria-hidden="true"
+                    className={cn(
+                      "size-1.5 rounded-full transition-colors",
+                      dot === mediaIndex ? "bg-ink" : "bg-ink/25"
+                    )}
+                  />
+                ))}
+              </div>
             </>
           )}
         </div>
+
+        {/* The post pair. A sibling of the media area rather than a child of it,
+            so it can escape the media area's `overflow-hidden` and reach the
+            page gutter; a child of the dialog content, so Radix's focus trap
+            still owns it. */}
+        {slot === undefined || post === undefined ? null : (
+          <>
+            <button
+              ref={prevPostRef}
+              type="button"
+              data-testid="lightbox-prev-post"
+              aria-label={LIGHTBOX_PREVIOUS_POST_LABEL}
+              disabled={!hasPrevPost}
+              onClick={onPrevPost}
+              className={cn(POST_CONTROL_CLASS, POST_PREV_POSITION)}
+            >
+              <ChevronsLeft aria-hidden="true" className="size-5" />
+            </button>
+
+            <button
+              ref={nextPostRef}
+              type="button"
+              data-testid="lightbox-next-post"
+              aria-label={LIGHTBOX_NEXT_POST_LABEL}
+              disabled={!hasNextPost}
+              onClick={onNextPost}
+              className={cn(POST_CONTROL_CLASS, POST_NEXT_POSITION)}
+            >
+              <ChevronsRight aria-hidden="true" className="size-5" />
+            </button>
+          </>
+        )}
 
         {slot === undefined || post === undefined ? null : (
           <LightboxInfoPanel

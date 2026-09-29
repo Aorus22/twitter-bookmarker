@@ -146,6 +146,71 @@ func TestTokenFollowsEnv(t *testing.T) {
 	}
 }
 
+func TestBasicAuthFollowsEnv(t *testing.T) {
+	t.Setenv(config.EnvBasicAuth, "")
+	if user, password, enabled := config.BasicAuth(); enabled || user != "" || password != "" {
+		t.Fatalf("BasicAuth() = (%q, %q, %v), want it disabled when unset", user, password, enabled)
+	}
+
+	cases := []struct {
+		name         string
+		raw          string
+		wantUser     string
+		wantPassword string
+	}{
+		{name: "plain pair", raw: "aorus:hunter2", wantUser: "aorus", wantPassword: "hunter2"},
+		{name: "surrounding space", raw: "  aorus:hunter2  ", wantUser: "aorus", wantPassword: "hunter2"},
+		// Only the first colon separates, so a password may contain its own.
+		{name: "password with colons", raw: "aorus:a:b:c", wantUser: "aorus", wantPassword: "a:b:c"},
+		// Malformed shapes stay enabled, so the middleware can fail closed rather
+		// than quietly serve the gallery.
+		{name: "no separator", raw: "aorushunter2", wantUser: "aorushunter2", wantPassword: ""},
+		{name: "empty user", raw: ":hunter2", wantUser: "", wantPassword: "hunter2"},
+		{name: "empty password", raw: "aorus:", wantUser: "aorus", wantPassword: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvBasicAuth, tc.raw)
+			user, password, enabled := config.BasicAuth()
+			if !enabled {
+				t.Fatal("enabled = false, want true whenever the variable is set")
+			}
+			if user != tc.wantUser || password != tc.wantPassword {
+				t.Fatalf("BasicAuth() = (%q, %q), want (%q, %q)", user, password, tc.wantUser, tc.wantPassword)
+			}
+		})
+	}
+}
+
+func TestValidateBasicAuth(t *testing.T) {
+	// Not configured is always fine: the feature stays off.
+	if err := config.ValidateBasicAuth("", "", false); err != nil {
+		t.Fatalf("ValidateBasicAuth with the feature off = %v, want nil", err)
+	}
+	if err := config.ValidateBasicAuth("aorus", "hunter2", true); err != nil {
+		t.Fatalf("ValidateBasicAuth with a full pair = %v, want nil", err)
+	}
+
+	// A half-written credential is refused, naming the variable, because "anyone
+	// with no password" is not a shape this accepts.
+	for _, tc := range []struct{ name, user, password string }{
+		{name: "no user", user: "", password: "hunter2"},
+		{name: "no password", user: "aorus", password: ""},
+		{name: "neither", user: "", password: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := config.ValidateBasicAuth(tc.user, tc.password, true)
+			if err == nil {
+				t.Fatal("ValidateBasicAuth = nil, want an error")
+			}
+			if !strings.Contains(err.Error(), config.EnvBasicAuth) {
+				t.Fatalf("error %q does not name %s", err, config.EnvBasicAuth)
+			}
+		})
+	}
+}
+
 func TestStorageDirFollowsHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

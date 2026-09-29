@@ -52,6 +52,20 @@ const (
 	// start without it — so an exposed port is never an unauthenticated one.
 	EnvToken = "TWITTER_BOOKMARKER_TOKEN"
 
+	// EnvBasicAuth names the environment variable holding the credentials the
+	// browser asks for in its own dialog, written user:password:
+	//
+	//	TWITTER_BOOKMARKER_BASIC_AUTH=aorus:correct-horse-battery-staple
+	//
+	// It exists for the one case a token cannot cover. A tunnel terminates on
+	// loopback, so its traffic is indistinguishable from a local request by peer
+	// address, and a browser has nowhere to put a bearer token — yet that traffic
+	// is the only traffic that arrives from outside. Setting this makes anything
+	// arriving through a proxy ask for a password first, using HTTP Basic, which
+	// every browser renders as a native dialog. Direct requests from this machine
+	// carry no forwarding headers and stay unaffected.
+	EnvBasicAuth = "TWITTER_BOOKMARKER_BASIC_AUTH"
+
 	// DBName is the SQLite database inside the storage directory. It is the one
 	// durable file the backend owns; the gallery serves nothing but what it
 	// reads from here.
@@ -124,6 +138,38 @@ func resolveAddr(raw string) (string, error) {
 
 // Token returns the configured bearer token, or "" when none is set.
 func Token() string { return strings.TrimSpace(os.Getenv(EnvToken)) }
+
+// BasicAuth returns the credentials from $TWITTER_BOOKMARKER_BASIC_AUTH.
+//
+// enabled reports whether the variable is set at all, and it is deliberately true
+// even for a value ValidateBasicAuth would reject: if a malformed credential ever
+// reached a running server, the safe failure is to challenge every proxied
+// request, not to serve the gallery because the shape was unexpected. The
+// password may contain colons; only the first one separates it from the user.
+func BasicAuth() (user, password string, enabled bool) {
+	raw := strings.TrimSpace(os.Getenv(EnvBasicAuth))
+	if raw == "" {
+		return "", "", false
+	}
+	user, password, _ = strings.Cut(raw, ":")
+	return user, password, true
+}
+
+// ValidateBasicAuth rejects a malformed $TWITTER_BOOKMARKER_BASIC_AUTH.
+//
+// Both halves are required. An empty user would read as "anyone" and an empty
+// password as "no password", so neither is a shape this accepts: the variable is
+// either a real credential or it is not set at all. It is checked before the
+// socket is opened, alongside the token rule.
+func ValidateBasicAuth(user, password string, enabled bool) error {
+	if !enabled {
+		return nil
+	}
+	if user == "" || password == "" {
+		return fmt.Errorf("%s must be user:password with both parts non-empty", EnvBasicAuth)
+	}
+	return nil
+}
 
 // IsLoopback reports whether addr can only be reached from this machine.
 //

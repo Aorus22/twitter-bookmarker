@@ -17,8 +17,13 @@ import (
 // NewServer reads the token from the environment, so a developer who exports one
 // to run the server for real would otherwise watch unrelated tests answer 401.
 // Tests that want a token set it themselves with t.Setenv.
+//
+// $TWITTER_BOOKMARKER_BASIC_AUTH is cleared for the same reason: it gates the
+// public surface, so leaving a real password in the environment would turn every
+// proxied test request into a 401.
 func TestMain(m *testing.M) {
 	_ = os.Unsetenv(config.EnvToken)
+	_ = os.Unsetenv(config.EnvBasicAuth)
 	os.Exit(m.Run())
 }
 

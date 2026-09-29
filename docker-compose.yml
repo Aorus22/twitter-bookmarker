@@ -28,9 +28,11 @@ services:
       # Where the SQLite database and its backups live.
       TWITTER_BOOKMARKER_DIR: ${TWITTER_BOOKMARKER_DATA_DIR:?set TWITTER_BOOKMARKER_DATA_DIR in .env}
       TWITTER_BOOKMARKER_ADDR: ${TWITTER_BOOKMARKER_ADDR:-127.0.0.1:43121}
-      # Empty means "no token": send no Authorization header, accept loopback
-      # peers, refuse everything else.
+      # The two credentials. Empty means off: the token then only guards a
+      # non-loopback bind, and the password does not exist, which leaves the public
+      # URL open to anyone who has it.
       TWITTER_BOOKMARKER_TOKEN: ${TWITTER_BOOKMARKER_TOKEN:-}
+      TWITTER_BOOKMARKER_BASIC_AUTH: ${TWITTER_BOOKMARKER_BASIC_AUTH:-}
 
     volumes:
       # The same absolute path inside the container as on the host, both taken

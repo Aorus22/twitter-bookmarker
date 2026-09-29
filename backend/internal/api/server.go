@@ -16,6 +16,10 @@ import (
 // maxBodyBytes caps the request body (PRD: strict, bounded payloads).
 const maxBodyBytes = 1 << 20 // 1 MiB
 
+// healthPath is how a client checks reachability before it has proved anything,
+// so both credential rules leave it open. It answers with no bookmark data.
+const healthPath = "/health"
+
 // BookmarkStore is the persistence surface the API needs.
 //
 // Index is part of it rather than a separate interface because both read the
@@ -67,7 +71,7 @@ func NewServer(store BookmarkStore, log *logging.Logger) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", methodGate(http.MethodGet, s.handleHealth))
+	mux.HandleFunc(healthPath, methodGate(http.MethodGet, s.handleHealth))
 	mux.HandleFunc("/v1/index", methodGate(http.MethodGet, s.handleIndex))
 	mux.HandleFunc("/v1/bookmarks", methodGate(http.MethodPost, s.handleSave))
 	// Curation (PRD-2 §5 amended). Two separate single-method patterns rather
@@ -97,7 +101,8 @@ func NewServer(store BookmarkStore, log *logging.Logger) http.Handler {
 	// index.html fallback for a client route (PROD-01, PROD-03).
 	mux.HandleFunc("/", s.handleStatic)
 
-	return withExtensionCORS(withToken(mux, config.Token()))
+	user, password, basicAuth := config.BasicAuth()
+	return withExtensionCORS(withBasicAuth(withToken(mux, config.Token()), user, password, basicAuth))
 }
 
 // protectedPathPrefixes are the API surfaces a token covers when one is
@@ -123,6 +128,11 @@ func isProtectedPath(path string) bool {
 // own RemoteAddr and never from X-Forwarded-For, so it cannot be forged by a
 // remote caller; running this server behind a reverse proxy would therefore put
 // every request behind the token, which is the safe direction.
+//
+// A proxy that runs *on* this machine — a tunnel, typically — arrives from
+// loopback and is therefore invisible to this rule. That is the gap withBasicAuth
+// fills, and it is the reason to set both when a tunnel is in play: the token
+// covers a reachable interface, the basic credential covers the proxied path.
 func withToken(next http.Handler, token string) http.Handler {
 	if token == "" {
 		return next
@@ -162,6 +172,81 @@ func bearerMatches(expected, header string) bool {
 	// ConstantTimeCompare returns 0 for different lengths as well, so the length
 	// check is folded in rather than branched on.
 	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
+}
+
+// withBasicAuth puts the browser's own password dialog in front of traffic that
+// arrived through a tunnel.
+//
+// The gap it fills is narrow and worth stating plainly. withToken above cannot
+// see tunnel traffic at all: cloudflared connects from loopback, so a public
+// request arrives looking exactly like a local one and skips the token rule
+// entirely. The browser gallery, meanwhile, has no field to put a bearer token
+// in. So the public surface needs a credential the browser can supply by itself,
+// which is what HTTP Basic is: answer 401 with a WWW-Authenticate header and the
+// browser asks, natively, with no page of ours involved.
+//
+// What counts as "through a tunnel" is decided by the forwarding headers
+// cloudflared adds rather than by the peer address, because the peer address is
+// loopback on both sides of that line. That inverts the stance withToken takes,
+// so the direction is what makes it safe: a request is exempt only when it
+// carries neither header, and forging extra headers can only make a caller's own
+// request stricter, never looser. Dropping the headers requires running on this
+// machine, which can read the database directly anyway.
+//
+// The bearer token is accepted here as well as in withToken, so the phone patch
+// and any script keep working through the tunnel while browsers get the dialog.
+// enabled comes from config.BasicAuth and is true even for a malformed value: the
+// failure mode of a typo must be a challenge, not an open gallery.
+func withBasicAuth(next http.Handler, user, password string, enabled bool) http.Handler {
+	if !enabled {
+		return next
+	}
+	token := config.Token()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == healthPath || isDirectRequest(r) || credentialsAccepted(r, token, user, password) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Basic realm="twitter-bookmarker", charset="UTF-8"`)
+		writeJSON(w, http.StatusUnauthorized, model.ErrorResponse{
+			Status: "error",
+			Reason: "unauthorized",
+		})
+	})
+}
+
+// credentialsAccepted reports whether the request presents either credential the
+// server knows: the configured bearer token, or the browser's basic credentials.
+func credentialsAccepted(r *http.Request, token, user, password string) bool {
+	if token != "" && bearerMatches(token, r.Header.Get("Authorization")) {
+		return true
+	}
+	presentedUser, presentedPassword, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	return credentialMatches(user, presentedUser) && credentialMatches(password, presentedPassword)
+}
+
+// credentialMatches compares one half of a basic credential in constant time. An
+// empty expected value matches nothing, so a half-configured credential cannot be
+// satisfied by sending nothing.
+func credentialMatches(expected, presented string) bool {
+	if expected == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(presented)) == 1
+}
+
+// isDirectRequest reports whether the request came straight from this machine
+// rather than through the tunnel: a loopback peer carrying neither of the headers
+// a Cloudflare tunnel adds. Both are checked because a tunnel always adds at
+// least one, so their absence is what a local caller looks like.
+func isDirectRequest(r *http.Request) bool {
+	if r.Header.Get("CF-Connecting-IP") != "" || r.Header.Get("X-Forwarded-For") != "" {
+		return false
+	}
+	return config.IsLoopback(r.RemoteAddr)
 }
 
 // withExtensionCORS echoes an extension origin only. Arbitrary web origins are

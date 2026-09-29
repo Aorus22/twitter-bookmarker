@@ -139,22 +139,31 @@ Two things the Makefile cannot do for you: open the port in the host firewall
 Debian), and give the machine a stable address. `make run` prints the resolved
 `==> listen:` line and a reminder whenever the bind is not loopback.
 
-### A tunnel is a third way in, and the token does not cover it
+### A tunnel is a third way in, and what covers it
 
 An SSH forward or a Cloudflare tunnel keeps the default loopback bind and needs
 neither the address nor the firewall rule — and because `cloudflared` runs on
 this machine, it connects from `127.0.0.1`, so the server sees a loopback peer and
-**does not ask for the token**. The tunnel's URL is therefore the only thing
-between the internet and the whole bookmark database.
+the bearer token never comes into play.
 
-That is a deliberate choice, not an oversight: the mobile client is still being
-built, and adding an auth step to the tunnel would mean another setting to keep in
-step with it. If it ever needs closing, the shape of the fix is known — treat a
-request carrying a proxy header as non-loopback (Cloudflare always sets
-`CF-Connecting-IP`), which makes such traffic require the bearer token while
-leaving direct local requests alone. Note that a named tunnel with a stable
-hostname also beats a quick `trycloudflare.com` URL, which changes on every
-restart and would have to be re-entered in the client each time.
+What covers that path is `TWITTER_BOOKMARKER_BASIC_AUTH`. Anything arriving
+through a proxy must present those credentials — which a browser asks for in its
+own dialog, with no page of ours involved — or the bearer token, which is what a
+client that cannot show a dialog, such as the phone patch, sends instead. The line
+between public and local is drawn by the headers a tunnel adds (`CF-Connecting-IP`,
+`X-Forwarded-For`) rather than by the peer address, because the peer address is
+loopback on both sides of it. The direction is what makes that safe: a request is
+exempt only when it carries neither header, so forging headers can only make a
+request stricter, never looser, and removing them takes a process already running
+on this machine — which can read the database directly anyway.
+
+`/health` stays open under both rules: it answers with no bookmark data and it is
+how a client checks reachability before it has proved anything. Leave the variable
+unset and the tunnel URL is open to whoever has it.
+
+A named tunnel with a stable hostname also beats a quick `trycloudflare.com` URL,
+which changes on every restart and would have to be re-entered in the client each
+time.
 
 ---
 
@@ -215,10 +224,12 @@ and just use `make run` — see [Where the database lives](#where-the-database-l
 TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 ```
 
-The same file takes two optional keys — `TWITTER_BOOKMARKER_ADDR` and
-`TWITTER_BOOKMARKER_TOKEN` — when a device on the network has to reach the
-server. Both are needed together; see
-[Where the server listens](#where-the-server-listens).
+The same file takes three optional keys — `TWITTER_BOOKMARKER_ADDR`,
+`TWITTER_BOOKMARKER_TOKEN` and `TWITTER_BOOKMARKER_BASIC_AUTH` — when a device on
+the network has to reach the server. The address and the token are needed
+together; see [Where the server listens](#where-the-server-listens), and
+[A tunnel is a third way in](#a-tunnel-is-a-third-way-in-and-what-covers-it) for
+what the password adds.
 
 Expected startup output (structured `slog` text):
 
@@ -269,7 +280,7 @@ this machine with a published port, the peer was `172.17.0.1` — meaning every
 client would need a token, *including the gallery in the browser*, which has no
 token field. `network_mode: host` keeps the address the server sees, so the rules
 in [Where the server listens](#where-the-server-listens) and
-[A tunnel is a third way in](#a-tunnel-is-a-third-way-in-and-the-token-does-not-cover-it)
+[A tunnel is a third way in](#a-tunnel-is-a-third-way-in-and-what-covers-it)
 apply verbatim. It also means the port keys below are real host ports, not
 mappings.
 
@@ -314,16 +325,26 @@ Handy consequences: it is HTTPS, which removes the cleartext warning the phone
 patch has when you point it at a LAN address, so use this URL for both the
 extension's custom mode and the patch.
 
-The caveat is the same one as any loopback tunnel: the connector talks to
-`localhost`, the server sees a loopback peer, and no token is asked for. **The URL
-is public and unauthenticated** — whoever has it can read, move and delete
-bookmarks, and the random suffix is obscurity rather than a lock. Cloudflare Access
-is what this account already uses in front of `obsidian.nadif.dev`, but a browser
-can complete an Access login while the phone patch cannot, so locking this one down
-needs an Access service token plus two headers in the patch.
+It asks for a password before serving anything. That is
+`TWITTER_BOOKMARKER_BASIC_AUTH` in `.env`, in `user:password` form, and the
+browser renders the prompt natively — no login page exists in this app and none is
+needed. Two credentials, deliberately:
 
-To remove it: drop that one ingress rule from the `Laptop` tunnel and delete the
-DNS record. Both live in Cloudflare, not here.
+| Client | Credential | Why |
+|---|---|---|
+| Browser at the public URL | the `user:password` value | it can show a dialog |
+| Phone patch, curl, scripts | `TWITTER_BOOKMARKER_TOKEN` | it cannot, so it sends `Authorization: Bearer` instead |
+| Browser or extension on this machine | none | no forwarding headers, so nothing is asked |
+
+The phone is therefore a configuration step, not a code change: paste the token
+into the patch's token field. The extension needs nothing as long as it points at
+`http://127.0.0.1:43121`; if you aim it at the public URL instead, it will get
+401s, because an extension cannot answer a Basic dialog either.
+
+Leave either variable empty in `.env` and that credential stops existing — no
+password means the public URL is open to whoever has it. To remove the address
+entirely: drop the one ingress rule from the `Laptop` tunnel and delete the DNS
+record. Both live in Cloudflare, not here.
 
 ### 3. Load the unpacked extension
 

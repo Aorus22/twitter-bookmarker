@@ -65,6 +65,13 @@ func run(args []string, stdout io.Writer) error {
 	if err := config.Validate(addr, token); err != nil {
 		return err
 	}
+	// The basic credential is validated here too, before anything on disk is
+	// touched, so a mistyped password is reported at startup rather than as a
+	// login dialog that refuses every attempt.
+	user, password, basicAuth := config.BasicAuth()
+	if err := config.ValidateBasicAuth(user, password, basicAuth); err != nil {
+		return err
+	}
 
 	dir, err := config.EnsureStorageDir()
 	if err != nil {
@@ -106,6 +113,9 @@ func run(args []string, stdout io.Writer) error {
 	if token != "" && !config.IsLoopback(addr) {
 		log.TokenRequired(config.EnvToken)
 	}
+	if basicAuth {
+		log.BasicAuthRequired(config.EnvBasicAuth)
+	}
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -146,9 +156,12 @@ func printUsage(w io.Writer) {
 			"Listen address: $%s, or %s when that is unset. A non-loopback address\n"+
 			"also requires $%s: other hosts can reach it, so it is never served\n"+
 			"without a bearer token.\n"+
+			"Browser password: $%s, written user:password. Requests that arrive\n"+
+			"through a tunnel or other proxy must present it (or the bearer token);\n"+
+			"requests straight from this machine do not.\n"+
 			"Storage directory: $%s, or ~/%s when that is unset.\n"+
 			"The database is %s inside it, and it is the only file the server owns.\n\n"+
 			"  -h, --help  show this help and exit\n",
 		serverName, addr, config.EnvAddr, config.DefaultAddr(), config.EnvToken,
-		config.EnvDir, config.DirName, config.DBName)
+		config.EnvBasicAuth, config.EnvDir, config.DirName, config.DBName)
 }

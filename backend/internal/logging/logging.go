@@ -54,6 +54,13 @@ func (lg *Logger) TokenRequired(env string) {
 	lg.Slog().Info("the API requires a bearer token from other hosts", "env", env)
 }
 
+// BasicAuthRequired reports that requests arriving through a proxy must present
+// the browser's basic credentials, or the bearer token. Neither the user name nor
+// the password is logged: the message names the variable to change instead.
+func (lg *Logger) BasicAuthRequired(env string) {
+	lg.Slog().Info("proxied requests require the browser password", "env", env)
+}
+
 // WebAssets reports the directory the built single-page app is served from
 // (PRD-2 §11).
 func (lg *Logger) WebAssets(dir string) {

@@ -125,15 +125,19 @@ fi
 note "building the patch bundle (this needs network the first time)"
 (
     cd "$WORK"
-    # Two steps on purpose. `buildAndroid` is what assembles the Android side of a
-    # bundle (the extension .mpe files and the classes.dex that lets Morphe Manager
-    # run a patch on a phone); `generatePatchesList` packages whatever exists, so
-    # calling it alone yields a bundle that looks complete but cannot be applied on
-    # Android. It is not a dependency of the packaging task, which is exactly why
-    # this has its own step.
-    ./gradlew --no-daemon --console=plain "${VERSION_ARG[@]+"${VERSION_ARG[@]}"}" clean buildAndroid
+    # The bundle itself is the `jar` output: the Morphe plugin renames the jar to
+    # .mpp. `buildAndroid` is what makes it installable on a phone — it D8-compiles
+    # the patch classes and merges classes.dex into that same file, which is how
+    # Morphe Manager (running on Android) can load the patches at all.
+    #
+    # Order matters, and it is not the obvious one: `generatePatchesList` writes
+    # patches-list.json next to the bundle and does not touch it, but running any
+    # later Gradle invocation makes `jar` run again — which rewrites the .mpp from
+    # the classes and silently drops the dex. So packaging and checks happen first
+    # and `buildAndroid` is last, and then the content check below verifies it.
     ./gradlew --no-daemon --console=plain "${VERSION_ARG[@]+"${VERSION_ARG[@]}"}" \
-        :patches:checkStringResources :patches:generatePatchesList
+        clean :patches:checkStringResources :patches:generatePatchesList
+    ./gradlew --no-daemon --console=plain "${VERSION_ARG[@]+"${VERSION_ARG[@]}"}" buildAndroid
 )
 
 mkdir -p "$OUT"
@@ -168,10 +172,12 @@ else
 fi
 
 if [ -n "$entries" ]; then
+    missing=()
     for required in classes.dex extensions/twitter.mpe; do
-        if ! grep -qx "$required" <<<"$entries"; then
-            die "$(basename "$bundle") has no $required; a patch manager cannot load it"
-        fi
+        grep -qx "$required" <<<"$entries" || missing+=("$required")
     done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        die "$(basename "$bundle") is missing ${missing[*]}; a patch manager cannot load it"
+    fi
     note "bundle contains classes.dex and extensions/twitter.mpe"
 fi

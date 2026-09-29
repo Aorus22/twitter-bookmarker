@@ -5,6 +5,10 @@
  * every `HEALTH_CHECK` / `GET_SAVED_INDEX` / `SAVE_TWEET` message is answered
  * here and the corresponding request is issued through `shared/api.ts`.
  *
+ * The target base URL is resolved from `chrome.storage.local` on every message
+ * (PRD §50): the popup can switch between the loopback default and a custom URL
+ * while the worker holds no state between messages.
+ *
  * Invariants:
  *  - the listener always resolves to one of the documented response shapes and
  *    never throws out of `chrome.runtime.onMessage` (XI/PRD §39);
@@ -15,29 +19,42 @@
  */
 
 import { bgErrorFrom, checkHealth, fetchSavedIndex, postBookmark } from "../shared/api.ts";
+import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
 import { isExtensionMessage } from "../shared/messages.ts";
 import type { ExtensionMessage, ExtensionResponse } from "../shared/messages.ts";
+import { getSettings } from "../shared/storage.ts";
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info("[twitter-bookmarker] service worker installed");
 });
 
+/**
+ * The configured backend for this message. `getSettings` never rejects and
+ * already applies the defaults, so a storage hiccup simply falls back to the
+ * loopback address.
+ */
+async function activeBaseUrl(): Promise<string> {
+  return resolveBackendBaseUrl(await getSettings());
+}
+
 /** Resolve one validated message to a response. Never rejects. */
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
+  const baseUrl = await activeBaseUrl();
+
   switch (message.type) {
     case "HEALTH_CHECK":
-      return { ok: true, connected: await checkHealth() };
+      return { ok: true, connected: await checkHealth(baseUrl) };
 
     case "GET_SAVED_INDEX":
       try {
-        return { ok: true, index: await fetchSavedIndex() };
+        return { ok: true, index: await fetchSavedIndex(baseUrl) };
       } catch (error) {
         return { ok: false, index: null, error: bgErrorFrom(error) };
       }
 
     case "SAVE_TWEET":
       try {
-        const outcome = await postBookmark(message.payload);
+        const outcome = await postBookmark(message.payload, baseUrl);
         return outcome.kind === "saved"
           ? { ok: true, result: outcome.body }
           : { ok: true, duplicate: outcome.body };

@@ -312,6 +312,15 @@ body {
   color: var(--bad);
 }
 
+/* The address actually in use — a long custom URL must wrap, not clip. */
+.status-target {
+  margin: 4px 0 0 17px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 /* Categories -------------------------------------------------------------- */
 
 .category-list {
@@ -476,6 +485,13 @@ body {
   color: var(--muted);
 }
 
+.field-hint {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .field input[type="text"] {
   flex: 1 1 auto;
   min-width: 0;
@@ -627,6 +643,19 @@ body {
   background: var(--accent);
   color: var(--accent-foreground);
   font-weight: 600;
+}
+
+/* Custom backend URL form (revealed only while "Custom" is selected) ------- */
+
+.backend-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-warm);
 }
 
 /* Focus & motion ---------------------------------------------------------- */

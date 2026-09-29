@@ -89,6 +89,21 @@ test("checkHealth is false for a non-ok body, a non-200 status, and a transport 
   assert.equal(await checkHealth(), false, "a dead backend is 'disconnected', not an error");
 });
 
+test("every call targets the given base URL, base path included", async () => {
+  const calls = captureFetch(() => jsonResponse(200, HEALTH_OK));
+  await checkHealth("http://192.168.1.10:8080");
+  assert.equal(calls[0].url, "http://192.168.1.10:8080/health");
+  assert.equal(calls[0].init.cache, "no-store", "Retry must never read a cached 200");
+
+  const indexCalls = captureFetch(() => jsonResponse(200, { items: {} }));
+  await fetchSavedIndex("https://server.example/tw-bookmarker");
+  assert.equal(indexCalls[0].url, "https://server.example/tw-bookmarker/v1/index");
+
+  const postCalls = captureFetch(() => jsonResponse(201, SAVED_BODY));
+  await postBookmark(SAMPLE_REQUEST, "http://127.0.0.1:9999");
+  assert.equal(postCalls[0].url, "http://127.0.0.1:9999/v1/bookmarks");
+});
+
 /* -------------------------------------------------------------------------- */
 /* POST /v1/bookmarks                                                         */
 /* -------------------------------------------------------------------------- */

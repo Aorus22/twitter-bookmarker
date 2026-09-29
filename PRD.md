@@ -199,7 +199,7 @@ Recommended default backend address:
 http://127.0.0.1:43121
 ```
 
-Port harus disimpan sebagai satu constant sehingga mudah diganti di source code, tetapi tidak perlu configurable dari UI pada MVP.
+Port harus disimpan sebagai satu constant sehingga mudah diganti di source code. Extension popup menyediakan pilihan **Localhost** (default di atas) atau **Custom**: user boleh mengisi URL sendiri, baik host dengan port (`192.168.1.10:8080`) maupun URL lengkap dengan base path (`https://server.example/tw-bookmarker`). Lihat §50.
 
 Backend dijalankan manual oleh user.
 
@@ -1802,6 +1802,48 @@ popover
 
 ---
 
+## `backendMode`
+
+Possible:
+
+```text
+localhost
+custom
+```
+
+Recommended default:
+
+```text
+localhost
+```
+
+`localhost` selalu memakai alamat loopback default (`http://127.0.0.1:43121`).
+
+---
+
+## `backendUrl`
+
+Type:
+
+```text
+string
+```
+
+Base URL yang dipakai saat `backendMode` = `custom`. Boleh host dengan port
+(`192.168.1.10:8080`) atau URL lengkap dengan base path
+(`https://server.example/tw-bookmarker`). Skema yang diterima hanya `http` dan
+`https`; kalau skema tidak ditulis, dianggap `http`. Trailing slash, query, dan
+fragment dibuang saat disimpan. Nilai yang tidak valid diabaikan dan jatuh ke
+alamat loopback default.
+
+Recommended default:
+
+```text
+http://127.0.0.1:43121
+```
+
+---
+
 # 51. Extension Storage Change Propagation
 
 Content script harus mendengarkan:
@@ -1834,6 +1876,12 @@ Jangan:
 ```
 
 Tidak boleh expose server ke LAN secara default.
+
+Extension hanya boleh mengirim data ke base URL yang dikonfigurasi user di
+popup: alamat loopback default, atau `backendUrl` saat `backendMode` = `custom`
+(§50). Karena targetnya bisa berubah, `host_permissions` extension memuat
+`http://*/*` dan `https://*/*`; tidak ada request ke host lain yang pernah
+dilakukan, dan user adalah satu-satunya pihak yang bisa mengubah targetnya.
 
 Backend harus menolak arbitrary path.
 

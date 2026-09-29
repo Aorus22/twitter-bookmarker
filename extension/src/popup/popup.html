@@ -36,10 +36,17 @@
           <h2 id="backend-heading" class="eyebrow">Backend</h2>
           <button id="backend-retry" type="button" class="link-button">Retry</button>
         </div>
-        <p id="backend-status" class="status status--checking" role="status" aria-live="polite">
+        <p
+          id="backend-status"
+          class="status status--checking"
+          role="status"
+          aria-live="polite"
+          aria-describedby="backend-target"
+        >
           <span class="status-dot" aria-hidden="true"></span>
           <span class="status-text">Checking&hellip;</span>
         </p>
+        <p id="backend-target" class="status-target"></p>
       </section>
 
       <section class="section" aria-labelledby="categories-heading">
@@ -104,6 +111,38 @@
             <button type="button" class="segmented-option" data-mode="inline" role="radio" aria-checked="false">
               Inline
             </button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <span class="setting-label" id="backend-mode-label">Backend URL</span>
+          <div id="backend-mode" class="segmented" role="radiogroup" aria-labelledby="backend-mode-label">
+            <button type="button" class="segmented-option" data-backend="localhost" role="radio" aria-checked="true">
+              Localhost
+            </button>
+            <button type="button" class="segmented-option" data-backend="custom" role="radio" aria-checked="false">
+              Custom
+            </button>
+          </div>
+        </div>
+
+        <div id="backend-custom" class="backend-custom" hidden>
+          <label class="field">
+            <span class="field-label">URL</span>
+            <input
+              id="backend-url"
+              type="text"
+              inputmode="url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="http://127.0.0.1:43121"
+              aria-describedby="backend-url-hint"
+            />
+          </label>
+          <p id="backend-url-hint" class="field-hint">Host with an optional port and path, e.g. http://192.168.1.10:43121</p>
+          <p id="backend-url-error" class="inline-error" role="alert" hidden></p>
+          <div class="add-form-actions">
+            <button id="backend-url-save" type="button" class="button button--primary">Save</button>
           </div>
         </div>
       </section>

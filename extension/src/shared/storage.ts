@@ -11,6 +11,7 @@
  *  - no function in this module performs any network request.
  */
 
+import { normalizeBackendMode, normalizeBackendUrl } from "./backend-url.ts";
 import {
   DEFAULT_CATEGORY_COLOR,
   DEFAULT_SETTINGS,
@@ -88,6 +89,10 @@ export function normalizeStore(raw: unknown): Store {
         ? rawSettings.unbookmarkAfterSave
         : DEFAULT_SETTINGS.unbookmarkAfterSave,
     displayMode: normalizeDisplayMode(rawSettings.displayMode),
+    backendMode: normalizeBackendMode(rawSettings.backendMode),
+    // A v2 record has no custom URL at all; a malformed one falls back to the
+    // loopback default rather than leaving the Custom field blank.
+    backendUrl: normalizeBackendUrl(rawSettings.backendUrl) ?? DEFAULT_SETTINGS.backendUrl,
   };
 
   const rawCategories = Array.isArray(raw.categories) ? raw.categories : [];
@@ -267,6 +272,14 @@ export async function setSettings(partial: Partial<Settings>): Promise<Settings>
           : store.settings.unbookmarkAfterSave,
       displayMode:
         partial.displayMode === undefined ? store.settings.displayMode : normalizeDisplayMode(partial.displayMode),
+      backendMode:
+        partial.backendMode === undefined ? store.settings.backendMode : normalizeBackendMode(partial.backendMode),
+      // An unparseable URL keeps the previously saved one instead of clobbering
+      // it; the popup validates before calling, so this is only a safety net.
+      backendUrl:
+        partial.backendUrl === undefined
+          ? store.settings.backendUrl
+          : (normalizeBackendUrl(partial.backendUrl) ?? store.settings.backendUrl),
     };
     return { store: { ...store, settings }, result: settings };
   });

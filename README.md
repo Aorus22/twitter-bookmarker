@@ -165,9 +165,10 @@ are synchronous per request and the commit is fsynced.
 ### 4. Create categories
 
 Open the extension popup and add e.g. `AI`, `Linux`, `Design`. Pick colours,
-drag to reorder, and choose **Popover** or **Inline**. Everything is saved to
-`chrome.storage.local` immediately and propagates to open X tabs without a
-reload.
+drag to reorder, and choose **Popover** or **Inline**. Under **Backend URL**, keep
+**Localhost** for the default `http://127.0.0.1:43121`, or pick **Custom** and enter
+another base URL. Everything is saved to `chrome.storage.local` immediately and
+propagates to open X tabs without a reload.
 
 ### 5. Use it
 
@@ -350,8 +351,13 @@ directory still contains CSVs. It opens
 
 ## Backend API
 
-Base URL: `http://127.0.0.1:43121`. CORS is granted only to extension origins
-(`chrome-extension://…`); arbitrary web origins are never allowed.
+Base URL: `http://127.0.0.1:43121` by default. The extension popup's **Backend URL**
+setting can point the same API at a custom base URL (`192.168.1.10:8080`, or
+`https://server.example/tw-bookmarker`); the server itself always binds loopback
+(§52), so a custom target means a server the user runs or exposes themselves. CORS is
+granted only to extension origins (`chrome-extension://…`); arbitrary web origins are
+never allowed. Extension pages and the service worker reach the API through their
+`host_permissions`, so a custom host needs no CORS change.
 
 ### `GET /health`
 
@@ -660,6 +666,9 @@ lives in **[`docs/MANUAL-TEST-CHECKLIST.md`](docs/MANUAL-TEST-CHECKLIST.md)**.
 ### Popup says Disconnected / toast says `Backend unavailable`
 
 - Is the server running? `curl -s http://127.0.0.1:43121/health`
+- Check the address printed under the status dot: it is exactly what is being
+  probed (`/health` appended to it is the tooltip). If **Backend URL** is
+  **Custom**, that address — not `127.0.0.1:43121` — is the one that must answer.
 - The extension probes `/health` with a ~1.5 s timeout, so a stopped backend
   shows Disconnected without hanging.
 - Nothing is lost: the tweet stays bookmarked and no bookmark row is written.
@@ -724,6 +733,8 @@ extension. Do not hardcode X selectors in other modules.
 
 ### Permissions
 
-The extension requests only `storage` plus host access to `https://x.com/*` and
-`http://127.0.0.1:43121/*`. It never requests `history`, `downloads`,
-`bookmarks`, `tabs`, `notifications`, or `scripting`.
+The extension requests only `storage` plus host access to `https://x.com/*` and to
+`http://*/*` / `https://*/*`. The two wildcards exist so the popup's **Backend URL**
+setting can point at any user-chosen host; the extension only ever fetches the
+configured backend base URL (loopback by default) and never any other host. It never
+requests `history`, `downloads`, `bookmarks`, `tabs`, `notifications`, or `scripting`.

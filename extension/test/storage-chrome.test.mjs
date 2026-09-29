@@ -75,9 +75,19 @@ test("first run yields PRD defaults under the single storage key", async () => {
   // A non-numeric version is discarded in favour of the current one; nothing reads
   // the stored version to decide how to migrate.
   assert.equal(store.version, 2);
-  assert.deepEqual(store.settings, { unbookmarkAfterSave: false, displayMode: "popover" });
+  assert.deepEqual(store.settings, {
+    unbookmarkAfterSave: false,
+    displayMode: "popover",
+    backendMode: "localhost",
+    backendUrl: "http://127.0.0.1:43121",
+  });
   assert.deepEqual(store.categories, []);
-  assert.deepEqual(await storage.getSettings(), { unbookmarkAfterSave: false, displayMode: "popover" });
+  assert.deepEqual(await storage.getSettings(), {
+    unbookmarkAfterSave: false,
+    displayMode: "popover",
+    backendMode: "localhost",
+    backendUrl: "http://127.0.0.1:43121",
+  });
   assert.deepEqual(await storage.getCategories(), []);
   assert.equal(stored(), undefined, "reads never write");
 });
@@ -212,23 +222,56 @@ test("deleteCategory removes only that category and renumbers the rest", async (
   assert.ok(a.id && c.id);
 });
 
+const PRD_DEFAULT_SETTINGS = {
+  unbookmarkAfterSave: false,
+  displayMode: "popover",
+  backendMode: "localhost",
+  backendUrl: "http://127.0.0.1:43121",
+};
+
 test("setSettings merges partial updates over the defaults", async () => {
   resetStorage();
 
   assert.deepEqual(await storage.setSettings({ unbookmarkAfterSave: true }), {
+    ...PRD_DEFAULT_SETTINGS,
     unbookmarkAfterSave: true,
-    displayMode: "popover",
   });
 
   assert.deepEqual(await storage.setSettings({ displayMode: "inline" }), {
+    ...PRD_DEFAULT_SETTINGS,
     unbookmarkAfterSave: true,
     displayMode: "inline",
   });
 
-  assert.deepEqual(await storage.getSettings(), { unbookmarkAfterSave: true, displayMode: "inline" });
+  assert.deepEqual(await storage.getSettings(), {
+    ...PRD_DEFAULT_SETTINGS,
+    unbookmarkAfterSave: true,
+    displayMode: "inline",
+  });
 
   // An unknown mode cannot corrupt storage.
   assert.equal((await storage.setSettings({ displayMode: "bogus" })).displayMode, "popover");
+});
+
+test("setSettings stores a normalized custom backend URL", async () => {
+  resetStorage();
+
+  const settings = await storage.setSettings({
+    backendMode: "custom",
+    backendUrl: "  192.168.1.10:8080/  ",
+  });
+  assert.equal(settings.backendMode, "custom");
+  assert.equal(settings.backendUrl, "http://192.168.1.10:8080", "scheme is defaulted and the slash dropped");
+  assert.deepEqual(await storage.getSettings(), settings, "the write is persisted, not just returned");
+
+  // Back to Localhost: the custom URL is remembered but no longer used.
+  const loopback = await storage.setSettings({ backendMode: "localhost" });
+  assert.equal(loopback.backendMode, "localhost");
+  assert.equal(loopback.backendUrl, "http://192.168.1.10:8080");
+
+  // An unusable URL keeps the previous value rather than clearing it.
+  assert.equal((await storage.setSettings({ backendUrl: "ftp://nope" })).backendUrl, "http://192.168.1.10:8080");
+  assert.equal((await storage.setSettings({ backendMode: "nonsense" })).backendMode, "localhost");
 });
 
 test("getStore tolerates malformed storage instead of throwing", async () => {
@@ -239,7 +282,7 @@ test("getStore tolerates malformed storage instead of throwing", async () => {
   // A non-numeric version is discarded in favour of the current one; nothing reads
   // the stored version to decide how to migrate.
   assert.equal(store.version, 2);
-  assert.deepEqual(store.settings, { unbookmarkAfterSave: false, displayMode: "popover" });
+  assert.deepEqual(store.settings, PRD_DEFAULT_SETTINGS);
   assert.deepEqual(store.categories, [], "entries without an id are dropped, not crashed on");
 });
 

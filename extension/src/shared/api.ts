@@ -1,9 +1,14 @@
 /**
- * Backend HTTP client (PRD §17–§21, §25).
+ * Backend HTTP client (PRD §17–§21, §25, §50).
  *
- * This is the extension's **only** network surface. It is imported exclusively
- * by `background/service-worker.ts`: the content script sends messages and never
- * performs a backend `fetch` itself (SAVE-01/SAVE-02).
+ * This is the extension's **only** network surface. The content script sends
+ * messages and never performs a backend `fetch` itself (SAVE-01/SAVE-02); the
+ * service worker calls these functions, and the popup reuses {@link checkHealth}
+ * for its status probe.
+ *
+ * Every function takes the base URL to call. Callers resolve it from settings
+ * through `shared/backend-url.ts`; the default keeps the loopback address for
+ * callers (and tests) that do not care about the custom-URL setting.
  *
  * Every failure is normalized onto the {@link BgError} union so the service
  * worker can answer with the documented response shapes and never throw:
@@ -13,7 +18,7 @@
  *  - any other non-2xx                 → `internal`          (BackendRequestError)
  */
 
-import { BACKEND_BASE_URL, HEALTH_PATH, HEALTH_TIMEOUT_MS } from "./constants.ts";
+import { DEFAULT_BACKEND_BASE_URL, HEALTH_PATH, HEALTH_TIMEOUT_MS } from "./constants.ts";
 import type { BgError } from "./messages.ts";
 import type {
   DuplicateResult,
@@ -90,11 +95,16 @@ async function readJson(response: Response): Promise<unknown> {
  * One fetch with a hard timeout. Any transport-level failure — including the
  * abort this function itself raises — becomes {@link BackendUnavailableError}.
  */
-async function request(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+async function request(
+  baseUrl: string,
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(`${BACKEND_BASE_URL}${path}`, { ...init, signal: controller.signal });
+    return await fetch(`${baseUrl}${path}`, { ...init, signal: controller.signal });
   } catch (error) {
     throw new BackendUnavailableError("backend_unavailable", { cause: error });
   } finally {
@@ -139,11 +149,17 @@ function isDuplicateResult(value: unknown): value is DuplicateResult {
 /**
  * Probe `GET /health` (PRD §44). Resolves `false` for any non-`200`, any body
  * that is not `{"status":"ok"}`, and any transport failure — never throws, since
- * "connected" is a status, not an error.
+ * "connected" is a status, not an error. The response is never cached, so a
+ * Retry always re-probes the backend.
  */
-export async function checkHealth(): Promise<boolean> {
+export async function checkHealth(baseUrl: string = DEFAULT_BACKEND_BASE_URL): Promise<boolean> {
   try {
-    const response = await request(HEALTH_PATH, { method: "GET" }, HEALTH_TIMEOUT_MS);
+    const response = await request(
+      baseUrl,
+      HEALTH_PATH,
+      { method: "GET", cache: "no-store" },
+      HEALTH_TIMEOUT_MS,
+    );
     if (!response.ok) return false;
     const body = await readJson(response);
     return isHealthResponse(body) && body.status === "ok";
@@ -156,8 +172,8 @@ export async function checkHealth(): Promise<boolean> {
  * Fetch the global saved index (`GET /v1/index`, PRD §18, §34). Callers take
  * `Object.keys(index.items)` as the O(1) saved-tweet Set.
  */
-export async function fetchSavedIndex(): Promise<SavedIndex> {
-  const response = await request(INDEX_PATH, { method: "GET" }, REQUEST_TIMEOUT_MS);
+export async function fetchSavedIndex(baseUrl: string = DEFAULT_BACKEND_BASE_URL): Promise<SavedIndex> {
+  const response = await request(baseUrl, INDEX_PATH, { method: "GET" }, REQUEST_TIMEOUT_MS);
   if (!response.ok) throw errorFor(response);
   const body = await readJson(response);
   if (!isSavedIndex(body)) throw new BackendRequestError("internal", response.status, "malformed_index");
@@ -176,8 +192,12 @@ export type PostBookmarkOutcome =
  * other failure reject with the matching {@link BackendUnavailableError} /
  * {@link BackendRequestError}.
  */
-export async function postBookmark(payload: SaveRequest): Promise<PostBookmarkOutcome> {
+export async function postBookmark(
+  payload: SaveRequest,
+  baseUrl: string = DEFAULT_BACKEND_BASE_URL,
+): Promise<PostBookmarkOutcome> {
   const response = await request(
+    baseUrl,
     BOOKMARKS_PATH,
     {
       method: "POST",

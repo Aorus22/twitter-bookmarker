@@ -181,6 +181,14 @@ on `prefers-color-scheme`, not the SPA's `localStorage` preference: the popup ru
 The add-category colour palette (`extension/src/shared/constants.ts`) is drawn from the
 same accents, so new category dots start inside the theme.
 
+The **Backend URL** row (Localhost / Custom, §2.4/§2.5 tokens only) reuses the same
+`.segmented` pill as Category display and the add-category form's `.field` / `.button`
+primitives, so it introduces no new component and no new token. Its card is the same
+`--surface-warm` well as the add form. The probed address sits under the status row in
+`--muted` at 11px with `overflow-wrap: anywhere`, so a long custom URL wraps inside the
+360 px frame instead of clipping; an invalid URL surfaces through the existing
+`.inline-error` (coral `--bad` on `--surface-warm`), never as a colour-only cue.
+
 ---
 
 ## 3. Layout specification

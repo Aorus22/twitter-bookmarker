@@ -9,6 +9,14 @@
 /** How category controls are rendered on an X bookmark tweet (PRD §32, §33). */
 export type DisplayMode = "popover" | "inline";
 
+/**
+ * Which backend the extension talks to (PRD §5, §50).
+ *
+ * - `localhost` uses the fixed loopback default (`DEFAULT_BACKEND_BASE_URL`);
+ * - `custom` uses the user-saved `Settings.backendUrl`.
+ */
+export type BackendMode = "localhost" | "custom";
+
 /** A user-defined bookmark category, persisted in `chrome.storage.local` (PRD §7). */
 export interface Category {
   /** Stable internal identifier; never changes across renames. */
@@ -29,6 +37,15 @@ export interface Settings {
   unbookmarkAfterSave: boolean;
   /** How category controls are rendered on the X bookmarks page. */
   displayMode: DisplayMode;
+  /** Which backend address the worker and the popup use. */
+  backendMode: BackendMode;
+  /**
+   * The saved base URL used when `backendMode` is `custom` (e.g.
+   * `http://192.168.1.10:43121` or `https://server.example/tw-bookmarker`):
+   * a normalized http(s) origin plus an optional base path. A missing or
+   * unparseable value falls back to the loopback default.
+   */
+  backendUrl: string;
 }
 
 /** The whole `chrome.storage.local` payload, under a single documented key. */

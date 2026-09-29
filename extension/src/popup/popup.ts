@@ -1,17 +1,22 @@
 /**
  * Popup entry point.
  *
- * Wires the three popup sections together on load:
+ * Wires the four popup sections together on load:
  *   - categories (CRUD / colour / drag order),
  *   - settings (auto-unbookmark, Popover/Inline),
+ *   - backend target (Localhost / Custom URL),
  *   - backend status (`GET /health`).
  *
  * Any `chrome.storage.local` change — including our own writes — rerenders the
- * two storage-backed sections, so the popup can never show stale state.
+ * storage-backed sections, so the popup can never show stale state. The health
+ * probe runs whenever the *resolved* backend address changes, so a custom URL
+ * takes effect the moment it is saved.
  */
 
+import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
 import { getStore, onStoreChanged } from "../shared/storage.ts";
 import type { Store } from "../shared/types.ts";
+import { initBackendSettings } from "./backend-settings.ts";
 import { initBackendStatus } from "./backend-status.ts";
 import { initCategoryManager } from "./category-manager.ts";
 import { initSettings } from "./settings.ts";
@@ -31,11 +36,22 @@ function bootstrap(): void {
   try {
     const categories = initCategoryManager();
     const settings = initSettings();
+    const backendSettings = initBackendSettings();
     const backend = initBackendStatus();
+
+    /** The address the last probe used; `null` until the first render. */
+    let probedBaseUrl: string | null = null;
 
     const render = (store: Store): void => {
       categories.render(store);
       settings.render(store);
+      backendSettings.render(store);
+      backend.render(store);
+
+      const baseUrl = resolveBackendBaseUrl(store.settings);
+      if (baseUrl === probedBaseUrl) return;
+      probedBaseUrl = baseUrl;
+      void backend.check();
     };
 
     onStoreChanged(render);
@@ -43,8 +59,6 @@ function bootstrap(): void {
     void getStore()
       .then(render)
       .catch(reportBootError);
-
-    void backend.check();
   } catch (error) {
     reportBootError(error);
   }

@@ -22,8 +22,15 @@ export const STORAGE_KEY = "twitterBookmarker";
  */
 export const SCHEMA_VERSION = 2;
 
-/** Backend base URL (PRD §5). Loopback only; never configurable from the UI. */
-export const BACKEND_BASE_URL = "http://127.0.0.1:43121";
+/**
+ * Default backend base URL (PRD §5, §50).
+ *
+ * The loopback address of the manually started server. The popup can switch to a
+ * user-entered custom URL (`Settings.backendMode === "custom"`), but this
+ * constant stays the fallback for `localhost` mode and for any unparseable
+ * stored value.
+ */
+export const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:43121";
 
 /** Path of the backend health endpoint. */
 export const HEALTH_PATH = "/health";
@@ -35,6 +42,10 @@ export const HEALTH_TIMEOUT_MS = 1500;
 export const DEFAULT_SETTINGS: Settings = {
   unbookmarkAfterSave: false,
   displayMode: "popover",
+  backendMode: "localhost",
+  // Pre-filled with the loopback address so switching to Custom starts from a
+  // valid URL the user can just edit (typically the port).
+  backendUrl: DEFAULT_BACKEND_BASE_URL,
 };
 
 /**

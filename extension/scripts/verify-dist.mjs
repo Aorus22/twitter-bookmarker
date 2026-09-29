@@ -38,8 +38,8 @@ async function verifyManifest() {
   assert.deepEqual(manifest.permissions, ["storage"]);
   pass('permissions are exactly ["storage"]');
 
-  assert.deepEqual(manifest.host_permissions, ["https://x.com/*", "http://127.0.0.1:43121/*"]);
-  pass("host_permissions are exactly x.com + 127.0.0.1:43121");
+  assert.deepEqual(manifest.host_permissions, ["https://x.com/*", "http://*/*", "https://*/*"]);
+  pass("host_permissions cover x.com plus any user-chosen http(s) backend host");
 
   const forbidden = ["history", "downloads", "bookmarks", "geolocation", "notifications", "tabs", "scripting"];
   for (const permission of forbidden) {
@@ -168,7 +168,7 @@ async function verifyPopupWiring() {
   const htmlIds = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
 
   const requiredIds = new Set();
-  for (const file of ["category-manager.ts", "settings.ts", "backend-status.ts"]) {
+  for (const file of ["category-manager.ts", "settings.ts", "backend-settings.ts", "backend-status.ts"]) {
     const source = await readFile(path.join(ROOT, "src/popup", file), "utf8");
     for (const match of source.matchAll(/requireEl<[^>]*>\("([^"]+)"\)/g)) requiredIds.add(match[1]);
   }
@@ -209,6 +209,9 @@ async function verifySettingsWiring() {
     "1500",
     "AbortController",
     "unbookmarkAfterSave",
+    "displayMode",
+    "backendMode",
+    "backendUrl",
     "popover",
     "inline",
     "onStoreChanged",
@@ -220,6 +223,44 @@ async function verifySettingsWiring() {
   assert.ok(popup.includes("onStoreChanged(render)"), "popup must rerender through onStoreChanged");
   assert.ok(popup.includes("window.confirm"), "delete must use a native confirmation");
   pass("popup bootstrap subscribes to onStoreChanged and delete confirms natively");
+}
+
+/**
+ * Confirm the configurable backend target is wired end to end: the manifest may
+ * reach any user-chosen host, the markup offers Localhost/Custom plus a URL
+ * field, and the popup bundle resolves the target from the settings.
+ */
+async function verifyBackendTargetWiring() {
+  const raw = await readFile(path.join(DIST, "manifest.json"), "utf8");
+  const manifest = JSON.parse(raw);
+  for (const pattern of ["http://*/*", "https://*/*"]) {
+    assert.ok(
+      manifest.host_permissions.includes(pattern),
+      `host_permissions must include ${pattern} or a custom backend URL cannot be fetched`,
+    );
+  }
+  pass("manifest allows fetching a custom backend host");
+
+  const html = await readFile(path.join(DIST, "popup/popup.html"), "utf8");
+  for (const needle of ['data-backend="localhost"', 'data-backend="custom"', 'id="backend-url"']) {
+    assert.ok(html.includes(needle), `popup.html is missing ${needle}`);
+  }
+  pass("popup markup offers the Localhost/Custom choice and a custom URL field");
+
+  const popup = await readFile(path.join(DIST, "popup/popup.js"), "utf8");
+  for (const needle of ["backendMode", "localhost", "custom", "http://", "https:"]) {
+    assert.ok(popup.includes(needle), `built popup bundle is missing ${JSON.stringify(needle)}`);
+  }
+  assert.ok(
+    popup.includes("setSettings"),
+    "the backend target must be persisted through the storage module",
+  );
+  pass("built popup bundle parses, persists, and resolves the backend target");
+
+  const worker = await readFile(path.join(DIST, "background/service-worker.js"), "utf8");
+  assert.ok(worker.includes("backendMode"), "the worker must resolve the backend from settings");
+  assert.ok(worker.includes("storage.local"), "the worker must read chrome.storage.local");
+  pass("service worker resolves the backend target from chrome.storage.local");
 }
 
 /** Confirm each bundle was emitted in the format the manifest requires. */
@@ -247,6 +288,7 @@ try {
   await verifyPopupAssets();
   await verifyPopupWiring();
   await verifySettingsWiring();
+  await verifyBackendTargetWiring();
   await verifyBundleFormats();
   console.log(`\nAll ${checks.length} dist checks passed.`);
 } catch (error) {

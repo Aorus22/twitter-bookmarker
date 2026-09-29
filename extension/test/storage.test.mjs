@@ -22,7 +22,12 @@ test("normalizeStore returns PRD defaults for empty/missing input", () => {
     const store = normalizeStore(raw);
     assert.equal(store.version, 2);
     assert.deepEqual(store.settings, DEFAULT_SETTINGS);
-    assert.deepEqual(store.settings, { unbookmarkAfterSave: false, displayMode: "popover" });
+    assert.deepEqual(store.settings, {
+      unbookmarkAfterSave: false,
+      displayMode: "popover",
+      backendMode: "localhost",
+      backendUrl: "http://127.0.0.1:43121",
+    });
     assert.deepEqual(store.categories, []);
   }
 });
@@ -30,7 +35,12 @@ test("normalizeStore returns PRD defaults for empty/missing input", () => {
 test("normalizeStore keeps valid values and rejects invalid ones", () => {
   const store = normalizeStore({
     version: 99,
-    settings: { unbookmarkAfterSave: true, displayMode: "inline" },
+    settings: {
+      unbookmarkAfterSave: true,
+      displayMode: "inline",
+      backendMode: "custom",
+      backendUrl: "http://192.168.1.10:8080/",
+    },
     categories: [
       { id: "a", name: "Linux", slug: "linux", color: "#ABCDEF", order: 0 },
       { id: "b", name: "AI & LLM", slug: "not-valid SLUG", color: "red", order: 1 },
@@ -40,7 +50,13 @@ test("normalizeStore keeps valid values and rejects invalid ones", () => {
   });
 
   assert.equal(store.version, 2);
-  assert.deepEqual(store.settings, { unbookmarkAfterSave: true, displayMode: "inline" });
+  assert.deepEqual(store.settings, {
+    unbookmarkAfterSave: true,
+    displayMode: "inline",
+    backendMode: "custom",
+    backendUrl: "http://192.168.1.10:8080",
+    // The trailing slash is dropped so endpoint paths never double up.
+  });
 
   assert.deepEqual(
     store.categories.map((c) => c.id),
@@ -127,7 +143,13 @@ test("a v1 store whose categories carry `filename` migrates to `slug` losslessly
   );
   assert.deepEqual(store.categories.map((c) => c.color), ["#10b981", "#4f46e5", "#ef4444", "#0ea5e9"]);
   assert.deepEqual(store.categories.map((c) => c.order), [0, 1, 2, 3]);
-  assert.deepEqual(store.settings, { unbookmarkAfterSave: true, displayMode: "inline" });
+  // A v1 record predates the configurable backend, so it loads as Localhost.
+  assert.deepEqual(store.settings, {
+    unbookmarkAfterSave: true,
+    displayMode: "inline",
+    backendMode: "localhost",
+    backendUrl: "http://127.0.0.1:43121",
+  });
   for (const c of store.categories) {
     assert.equal(c.filename, undefined, "the old field is not carried over");
     assert.ok(isValidSlug(c.slug));
@@ -200,4 +222,29 @@ test("normalizeDisplayMode and normalizeColor clamp to valid values", () => {
   assert.equal(normalizeColor("red"), DEFAULT_CATEGORY_COLOR);
   assert.equal(normalizeColor(undefined), DEFAULT_CATEGORY_COLOR);
   assert.equal(normalizeColor("#fff"), DEFAULT_CATEGORY_COLOR);
+});
+
+test("normalizeStore clamps the backend target to a usable address", () => {
+  const backendOf = (settings) => normalizeStore({ settings }).settings;
+
+  assert.deepEqual(backendOf({ backendMode: "custom", backendUrl: "localhost:8080" }), {
+    unbookmarkAfterSave: false,
+    displayMode: "popover",
+    backendMode: "custom",
+    backendUrl: "http://localhost:8080",
+  });
+
+  assert.equal(backendOf({ backendMode: "bogus" }).backendMode, "localhost", "unknown mode -> localhost");
+  assert.equal(backendOf({}).backendMode, "localhost");
+  assert.equal(
+    backendOf({ backendMode: "custom", backendUrl: "ftp://server/file" }).backendUrl,
+    "http://127.0.0.1:43121",
+    "a non-http(s) URL falls back to the loopback default",
+  );
+  assert.equal(
+    backendOf({ backendMode: "custom", backendUrl: "http://user:pass@host" }).backendUrl,
+    "http://127.0.0.1:43121",
+    "embedded credentials are rejected",
+  );
+  assert.equal(backendOf({ backendMode: "custom", backendUrl: "   " }).backendUrl, "http://127.0.0.1:43121");
 });

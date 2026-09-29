@@ -120,6 +120,8 @@ export DB="$STORAGE/tw-bookmarker.db"
 | B6 | Popup live reorder without reload | Browser (popup) |
 | B7 | Popup Connected / Disconnected | Browser (popup) |
 | B8 | Double-click category → one request | Browser + backend log |
+| B9 | Inline category display | Browser |
+| B10 | Custom backend URL | Browser (popup) + backend |
 | C1 | Multiline tweet | Browser |
 | C2 | Emoji author | Browser |
 | C3 | Quoted tweet (parent text only) | Browser |
@@ -418,6 +420,8 @@ curl -s http://127.0.0.1:43121/api/gallery/collections | python3 -m json.tool  #
 **Expected**
 - The probe uses `GET /health` with a ~1.5 s timeout; a stopped backend shows
   **Disconnected** without hanging the popup.
+- The address under the status is the one actually probed (`/health` appended to
+  it is the tooltip), so a custom backend can never be silently ignored.
 
 ---
 
@@ -437,6 +441,57 @@ curl -s http://127.0.0.1:43121/api/gallery/collections | python3 -m json.tool  #
 sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux';"
 ```
 - Exactly 1 row for that tweet (the primary key makes a second insert impossible).
+
+---
+
+### B9 — Inline category display  ·  PRD §32 / §33 / §51
+
+**Steps**
+1. Open the popup and set **Category display** to **Inline**.
+2. Without reloading X, look at any bookmark tweet on `/i/history`.
+3. Switch back to **Popover** and look again.
+
+**Expected**
+- Inline: every tweet shows its category chips directly on the organizer row
+  (one chip per category, no expand trigger).
+- Popover: the same row shows a single **Organize** trigger that opens the
+  category popover instead.
+- Both modes come from the content script that was *already loaded*: switching the
+  setting must not require a tab reload (PRD §51). If the mode does not change,
+  the tab is still running a stale content script — reload the extension in
+  `chrome://extensions` and hard-reload the tab.
+
+---
+
+### B10 — Custom backend URL  ·  PRD §50
+
+**Steps**
+1. Start the server on its default port; open the popup → **Connected**,
+   address `http://127.0.0.1:43121`.
+2. Set **Backend URL** to **Custom**, type `ftp://nope`, click **Save** →
+   inline error, nothing is persisted.
+3. Type `192.168.1.10:8080/` (or any reachable host with a port) and click
+   **Save**.
+4. Restart the server on that same port and click **Retry**.
+
+**Expected**
+- Step 2: the error `Enter a valid http:// or https:// URL…` appears; the status
+  card still shows the old address.
+- Step 3: the address under the status becomes the normalized
+  `http://192.168.1.10:8080` (scheme defaulted, trailing slash dropped), the
+  field shows the same normalized value, and the status re-probes immediately.
+- Step 4: **Connected** against the custom server; a save from X lands in *that*
+  server's database, not in the default one.
+- Switching back to **Localhost** restores `http://127.0.0.1:43121` while
+  remembering the custom URL for next time.
+
+**Inspect on disk**
+```bash
+# What the extension persisted (open the popup, then run in the popup's console):
+#   chrome.storage.local.get("twitterBookmarker").then((s) => console.log(s.twitterBookmarker.settings))
+```
+- `backendMode: "custom"`, `backendUrl: "http://192.168.1.10:8080"` — one storage
+  key only, and no second key for the URL.
 
 ---
 

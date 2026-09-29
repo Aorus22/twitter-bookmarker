@@ -1,46 +1,34 @@
 /**
- * Popup — backend connection status (PRD §43, §44).
+ * Popup — backend connection status (PRD §43, §44, §50).
  *
- * On popup open, probe `GET {BACKEND_BASE_URL}/health` from the extension
- * context with a short AbortController timeout:
- *   `200 {"status":"ok"}` -> `● Connected`, anything else -> `● Disconnected`.
+ * On popup open (and whenever the configured backend changes), probe
+ * `GET {baseUrl}/health` from the extension context with a short AbortController
+ * timeout: `200 {"status":"ok"}` -> `● Connected`, anything else ->
+ * `● Disconnected`. The address actually in use is shown underneath, so a
+ * custom URL is never silently wrong.
+ *
+ * The probe itself lives in `shared/api.ts` (`checkHealth`) — the same function
+ * the service worker answers `HEALTH_CHECK` with — so the popup and the worker
+ * always agree on the target and the timeout.
  *
  * The extension never starts the backend; a failed probe is simply Disconnected
  * and never becomes an unhandled rejection.
  */
 
-import { BACKEND_BASE_URL, HEALTH_PATH, HEALTH_TIMEOUT_MS } from "../shared/constants.ts";
-import type { HealthResponse } from "../shared/types.ts";
+import { checkHealth } from "../shared/api.ts";
+import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
+import { DEFAULT_BACKEND_BASE_URL, HEALTH_PATH } from "../shared/constants.ts";
+import type { Store } from "../shared/types.ts";
 
-/** The `GET /health` URL used by the popup. */
-export function healthUrl(): string {
-  return `${BACKEND_BASE_URL}${HEALTH_PATH}`;
-}
-
-/** True only for a `200` response whose body has `status: "ok"`. */
-export async function probeBackend(timeoutMs: number = HEALTH_TIMEOUT_MS): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(healthUrl(), {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!response.ok) return false;
-
-    const body = (await response.json().catch(() => null)) as HealthResponse | null;
-    return body !== null && body.status === "ok";
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
+/** The `GET /health` URL for one base URL. */
+export function healthUrl(baseUrl: string): string {
+  return `${baseUrl}${HEALTH_PATH}`;
 }
 
 export interface BackendStatusPanel {
-  /** Run a fresh health probe and render the result. */
+  /** Adopt the store's backend target and render its address (no probe). */
+  render(store: Store): void;
+  /** Probe the current target and render the result. */
   check(): Promise<void>;
 }
 
@@ -53,8 +41,11 @@ function requireEl<T extends Element>(id: string): T {
 export function initBackendStatus(): BackendStatusPanel {
   const statusEl = requireEl<HTMLParagraphElement>("backend-status");
   const retryButton = requireEl<HTMLButtonElement>("backend-retry");
+  const targetEl = requireEl<HTMLParagraphElement>("backend-target");
   const textEl = statusEl.querySelector<HTMLSpanElement>(".status-text");
 
+  /** The target the last `render` selected; `check` always probes this one. */
+  let baseUrl = DEFAULT_BACKEND_BASE_URL;
   let checking = false;
 
   function setState(state: "checking" | "connected" | "disconnected"): void {
@@ -68,14 +59,19 @@ export function initBackendStatus(): BackendStatusPanel {
     retryButton.disabled = state === "checking";
   }
 
+  function renderTarget(): void {
+    targetEl.textContent = baseUrl;
+    targetEl.title = healthUrl(baseUrl);
+  }
+
   async function check(): Promise<void> {
     if (checking) return;
     checking = true;
     setState("checking");
 
-    // `probeBackend` already swallows fetch failures; this catch is belt-and-braces
+    // `checkHealth` already swallows fetch failures; this catch is belt-and-braces
     // so a health probe can never surface as an unhandled rejection.
-    const connected = await probeBackend().catch(() => false);
+    const connected = await checkHealth(baseUrl).catch(() => false);
 
     checking = false;
     setState(connected ? "connected" : "disconnected");
@@ -85,5 +81,10 @@ export function initBackendStatus(): BackendStatusPanel {
     void check();
   });
 
-  return { check };
+  function render(store: Store): void {
+    baseUrl = resolveBackendBaseUrl(store.settings);
+    renderTarget();
+  }
+
+  return { render, check };
 }

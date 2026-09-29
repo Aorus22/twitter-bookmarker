@@ -1,8 +1,10 @@
-// Service-worker message router tests (SAVE-01/SAVE-02, PRD §25/§21/§39).
+// Service-worker message router tests (SAVE-01/SAVE-02, PRD §25/§21/§39/§50).
 //
-// Stubs the `chrome.runtime` surface the worker registers on, stubs `fetch`, and
-// asserts the worker answers every message with a documented shape — including
-// transport failures — and never throws out of the listener.
+// Stubs the `chrome.runtime` + `chrome.storage.local` surface the worker uses,
+// stubs `fetch`, and asserts the worker answers every message with a documented
+// shape — including transport failures — and never throws out of the listener.
+// The worker resolves its backend address from storage on every message, so the
+// stored settings are part of the fixture.
 
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -10,6 +12,9 @@ import assert from "node:assert/strict";
 const realFetch = globalThis.fetch;
 
 let listener = null;
+/** The single stored `Store` object, or `null` for "first run". */
+let storedStore = null;
+
 globalThis.chrome = {
   runtime: {
     onInstalled: { addListener() {} },
@@ -19,7 +24,26 @@ globalThis.chrome = {
       },
     },
   },
+  storage: {
+    local: {
+      async get(key) {
+        if (storedStore === null) return {};
+        return typeof key === "string" ? { [key]: structuredClone(storedStore) } : {};
+      },
+      async set(items) {
+        for (const value of Object.values(items)) storedStore = structuredClone(value);
+      },
+    },
+    onChanged: { addListener() {}, removeListener() {} },
+  },
 };
+
+/** Persist settings the way the popup would, under the one documented key. */
+async function storeSettings(settings) {
+  await globalThis.chrome.storage.local.set({
+    twitterBookmarker: { version: 2, settings, categories: [] },
+  });
+}
 
 // The worker registers its listener at import time, so `chrome` must be stubbed
 // first.
@@ -27,6 +51,7 @@ await import("../src/background/service-worker.ts");
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  storedStore = null;
 });
 
 function jsonResponse(status, body) {
@@ -64,6 +89,37 @@ test("HEALTH_CHECK resolves { ok, connected } from GET /health", async () => {
   assert.equal(returned, true, "the channel stays open for the async answer");
   assert.deepEqual(await response, { ok: true, connected: true });
   assert.match(calls[0].url, /\/health$/);
+});
+
+test("every request follows the stored backend target (PRD §50)", async () => {
+  // Default: no stored settings at all -> the loopback default.
+  const localCalls = captureFetch(() => jsonResponse(200, { status: "ok" }));
+  await dispatch({ type: "HEALTH_CHECK" }).response;
+  assert.equal(localCalls[0].url, "http://127.0.0.1:43121/health");
+
+  // Custom mode -> the user-saved address, base path included.
+  await storeSettings({ backendMode: "custom", backendUrl: "https://server.example/tw-bookmarker" });
+
+  const customCalls = captureFetch(() => jsonResponse(200, { status: "ok" }));
+  await dispatch({ type: "HEALTH_CHECK" }).response;
+  assert.equal(customCalls[0].url, "https://server.example/tw-bookmarker/health");
+
+  const indexCalls = captureFetch(() => jsonResponse(200, { items: {} }));
+  await dispatch({ type: "GET_SAVED_INDEX" }).response;
+  assert.equal(indexCalls[0].url, "https://server.example/tw-bookmarker/v1/index");
+
+  const saveCalls = captureFetch(() => jsonResponse(201, { status: "saved", tweet_id: "1", url: "u", slug: "s", saved_at: "t" }));
+  await dispatch({
+    type: "SAVE_TWEET",
+    payload: { slug: "s", name: "S", tweet: { url: "u", media: [], author: "a", username: "@a", tweet_date: "t", text: "" } },
+  }).response;
+  assert.equal(saveCalls[0].url, "https://server.example/tw-bookmarker/v1/bookmarks");
+
+  // A malformed stored URL falls back to loopback rather than failing the request.
+  await storeSettings({ backendMode: "custom", backendUrl: "not a url" });
+  const fallbackCalls = captureFetch(() => jsonResponse(200, { status: "ok" }));
+  await dispatch({ type: "HEALTH_CHECK" }).response;
+  assert.equal(fallbackCalls[0].url, "http://127.0.0.1:43121/health");
 });
 
 test("GET_SAVED_INDEX resolves the parsed index", async () => {

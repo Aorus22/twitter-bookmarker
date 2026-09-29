@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Categorize X bookmarks into per-category CSV files through a local backend.",
   "permissions": ["storage"],
-  "host_permissions": ["https://x.com/*", "http://127.0.0.1:43121/*"],
+  "host_permissions": ["https://x.com/*", "http://*/*", "https://*/*"],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"

@@ -191,6 +191,11 @@ and just use `make run` — see [Where the database lives](#where-the-database-l
 TWITTER_BOOKMARKER_DIR := $(HOME)/Personal/twitter-bookmarker
 ```
 
+The same file takes two optional keys — `TWITTER_BOOKMARKER_ADDR` and
+`TWITTER_BOOKMARKER_TOKEN` — when a device on the network has to reach the
+server. Both are needed together; see
+[Where the server listens](#where-the-server-listens).
+
 Expected startup output (structured `slog` text):
 
 ```text

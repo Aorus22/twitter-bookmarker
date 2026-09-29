@@ -63,6 +63,36 @@ button, which is the reason this is a small patch rather than research:
    distinct from the native bookmark it sits next to. If the lookup ever fails,
    the code falls back to an icon that is known to exist in the app and logs it.
 
+## What the next phase has to answer
+
+Two things are unknown until this runs on a device. Neither blocks the skeleton.
+
+**The tweet date.** `POST /v1/bookmarks` requires `tweet_date` and requires it to
+be RFC3339 (`backend/internal/storage/store.go` rejects an empty or unparsable
+one), so the phone cannot leave it out the way it can leave out media. The
+entities expose id, username, profile name, user id, text and media — no
+timestamp — and the app's own model is obfuscated. The plan, in order:
+
+1. Scan the tweet object at runtime for a `long`/`Long` accessor whose value is a
+   plausible epoch-millis. Snowflake ids are ~1.9e18 ms, which lands around the
+   year 62000, so an id cannot be mistaken for a timestamp — the range check
+   alone separates them. `Debug.getObject()` plus reflection makes this possible
+   with no name known at patch time.
+2. If no candidate survives, ask `https://api.fxtwitter.com/x/status/<id>` for
+   `created_at` — the endpoint Piko's own `TweetInfoAPI` already calls. This
+   costs a request per save and fails offline, so it is the fallback, not the
+   default.
+
+Piko's "Log server response" setting and `Debug.describeFields()` /
+`describeMethods()` are the tools for confirming which one is needed.
+
+**Plain HTTP on the LAN.** The backend a phone can reach is `http://<lan-ip>:43121`,
+and X ships a network security config that may refuse cleartext. If
+`HttpURLConnection` is blocked, the fix is to ship a `network_security_config.xml`
+through the resource patch that is already here (or replace the app's
+`android:networkSecurityConfig` attribute), then a raw socket client, then an
+Intent to a companion app as the last resort.
+
 ## Building
 
 ### In CI (the supported path)

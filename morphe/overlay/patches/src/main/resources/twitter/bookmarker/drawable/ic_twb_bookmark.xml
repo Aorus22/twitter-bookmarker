@@ -21,8 +21,10 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:pathData="M17,3H7C5.9,3 5.01,3.9 5.01,5L5,21l7,-3 7,3V5c0,-1.1 -0.9,-2 -2,-2zM17,18l-5,-2.18L7,18V5h10v13z" />
-    <!-- Plus, sitting in the cut-out middle. -->
+    <!-- Plus, sitting in the cut-out middle. Deliberately bold: at 24 dp a
+         hairline plus reads as a smudge, and this is the only difference from the
+         native bookmark's silhouette. -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12.8,9.4h-1.6v1.6H9.6v1.6h1.6v1.6h1.6v-1.6h1.6v-1.6h-1.6z" />
+        android:pathData="M13.1,7.9h-2.2v2.1H8.8v2.2h2.1v2.1h2.2v-2.1h2.1v-2.2h-2.1z" />
 </vector>

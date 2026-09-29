@@ -21,7 +21,7 @@ at this stage is a hooking failure and nothing else.
 |---|---|
 | Button appears in the action bar | not yet run on a device |
 | Tweet object read from the action bar | not yet run on a device |
-| Patch bundle compiles | **not yet built**: needs a `read:packages` token, see below |
+| Patch bundle compiles | built by CI (`.github/workflows/morphe-patch.yml`); that workflow has not run yet |
 | Settings (base URL, token, test connection) | not written |
 | `POST /v1/bookmarks`, saved state, collections sheet | not written |
 
@@ -65,14 +65,29 @@ button, which is the reason this is a small patch rather than research:
 
 ## Building
 
+### In CI (the supported path)
+
+`.github/workflows/morphe-patch.yml` builds `morphe/` on a GitHub runner, where
+the workflow token can read Morphe's registry, and — when started manually —
+publishes the bundle as a release asset:
+
+1. **Actions → Morphe patch bundle → Run workflow.** The optional `version`
+   input defaults to `<piko pin>-twb.<short sha>`, e.g. `3.9.0-twb.d0ec851`.
+2. On success the release `v<version>` carries `patches-<version>.mpp`, whose
+   sha256 is in the run summary. Push and pull-request runs build without
+   publishing, so a broken overlay is visible before anything is released.
+3. If the registry ever rejects the default workflow token, create a PAT with
+   the `read:packages` scope and store it as the **`MORPHE_REGISTRY_TOKEN`**
+   secret; the workflow prefers it automatically.
+
+### Locally
+
 ```bash
 gh auth refresh -h github.com -s read:packages   # once, for the active account
 GITHUB_TOKEN="$(gh auth token)" morphe/build.sh
 ```
 
-The artifact lands in `morphe/out/patches-<version>.mpp`.
-
-Prerequisites, and why each one is real:
+The artifact lands in `morphe/out/`. Prerequisites, and why each one is real:
 
 | Requirement | Why |
 |---|---|
@@ -84,24 +99,38 @@ Prerequisites, and why each one is real:
 `build.sh --refresh` re-fetches upstream before building. The pin itself is the
 `UPSTREAM_COMMIT` variable at the top of the script.
 
-### If the token is the blocker
-
-Grant the scope (`gh auth refresh -s read:packages`, interactive), or build in CI
-the way Piko itself does: a GitHub Actions run gets the registry access without a
-personal token. Nothing else in this directory depends on which of the two you
-choose.
-
 ## Installing on the phone
 
-1. Morphe Manager → add this repository as a patch source (its releases carry the
-   `.mpp`). One source is enough: our bundle contains every Piko patch plus ours,
-   so adding Piko's own release as well would duplicate patch names.
-2. Patch the X APK (`com.twitter.android`, `12.19.1-release.0`) and install it.
-3. Open a tweet: the button sits beside the native bookmark action. Tapping it
+**Morphe Manager → Add source → `https://github.com/Aorus22/twitter-bookmarker`.**
+Manager resolves the repository's newest release, so the morphe releases are
+tagged `v<pin>-twb.<sha>` to stay recognisable among any other releases this
+repository may publish later; if it ever picks the wrong one, re-run the workflow
+(its release becomes the newest again).
+
+One source is enough: our bundle contains every Piko patch plus ours, so adding
+Piko's own release as well would duplicate patch names. Select **Save to Twitter
+Bookmarker** when patching, and install the result:
+
+1. Patch `com.twitter.android` `12.19.1-release.0` and install the APK.
+2. Open a tweet: the button sits beside the native bookmark action. Tapping it
    shows `Twitter Bookmarker: https://x.com/<user>/status/<id>`.
 
 If the button does not appear, the hook did not land — check Morphe's patch log
 for the patch name rather than guessing from the UI.
+
+### Without Manager
+
+The bundle is a normal `.mpp`: download it from the release and patch on a
+desktop with the Morphe CLI (`java -jar morphe-cli.jar patch --patches
+patches-<version>.mpp <input>.apkm`; run it with `--help` for your version's exact
+flags), or use Morphe Desktop, which accepts a local patch bundle.
+
+### The bundle says "Piko"
+
+Morphe shows the bundle's own metadata, which upstream defines in
+`patches/build.gradle.kts` as `name = "Piko"`. Overwriting that file in the
+overlay would mean vendoring it and letting it drift on the next pin bump, so the
+name stays upstream's; the patch inside is called **Save to Twitter Bookmarker**.
 
 ## Licence
 

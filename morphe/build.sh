@@ -113,10 +113,20 @@ cp -R "$ROOT/overlay/." "$WORK/"
 
 # --- build ------------------------------------------------------------------
 
+# Optional. Without it the bundle is named patches-unspecified.mpp, which works
+# but says nothing; CI sets it to the release version so the file name matches
+# the tag it is published under.
+VERSION_ARG=()
+if [ -n "${BUNDLE_VERSION:-}" ]; then
+    VERSION_ARG=("-Pversion=$BUNDLE_VERSION")
+    note "version: $BUNDLE_VERSION"
+fi
+
 note "building the patch bundle (this needs network the first time)"
 (
     cd "$WORK"
-    ./gradlew --no-daemon --console=plain clean :patches:checkStringResources :patches:generatePatchesList
+    ./gradlew --no-daemon --console=plain "${VERSION_ARG[@]+"${VERSION_ARG[@]}"}" \
+        clean :patches:checkStringResources :patches:generatePatchesList
 )
 
 mkdir -p "$OUT"

@@ -11,6 +11,7 @@
 package app.crimera.patches.twitter.bookmarker
 
 import app.crimera.patches.twitter.entity.entityGenerator
+import app.crimera.patches.twitter.misc.extension.sharedExtensionPatch
 import app.crimera.patches.twitter.utils.Constants.COMPATIBILITY_X
 import app.crimera.patches.twitter.utils.Constants.PATCHES_DESCRIPTOR
 import app.crimera.utils.changeFirstString
@@ -67,24 +68,27 @@ private object SetTweetFingerprint : Fingerprint(
 /**
  * Adds the Twitter Bookmarker save button next to the native bookmark action.
  *
- * This is the Phase 2 skeleton: the button exists and reads the tweet the action
- * bar already holds, then reports the tweet URL in a toast. It deliberately does
- * not talk to the backend yet, so that a failure here is a hooking failure and
- * nothing else.
+ * The button reads the tweet the action bar already holds, offers the backend's
+ * collections in a native sheet, and posts the tweet to the chosen one. The app's
+ * own bookmark action is untouched: this never reads or writes the account's real
+ * bookmarks.
  */
 @Suppress("unused")
 val saveToBookmarkerPatch =
     bytecodePatch(
         name = "Save to Twitter Bookmarker",
         description =
-            "Adds a save button to the tweet inline action bar. The tweet is read from " +
-                "the action bar and handed to the Twitter Bookmarker extension classes.",
+            "Adds a save button to the tweet inline action bar that sends the tweet to a " +
+                "Twitter Bookmarker backend. The native bookmark action keeps working as before.",
     ) {
         compatibleWith(COMPATIBILITY_X)
 
         // The entity patches rewrite the placeholders in entity/Tweet.java, which is
-        // how SaveButton turns the raw tweet object into a URL and a username.
-        dependsOn(saveToBookmarkerResourcePatch, entityGenerator)
+        // how SaveButton turns the raw tweet object into a URL, a handle and a date.
+        // The shared extension is what loads our Java code and provides Utils/Logger,
+        // so it is named here rather than inherited from whichever patches happen to
+        // be selected alongside this one.
+        dependsOn(saveToBookmarkerResourcePatch, entityGenerator, sharedExtensionPatch)
 
         execute {
             // Hand every inflated action bar to the extension class, right before

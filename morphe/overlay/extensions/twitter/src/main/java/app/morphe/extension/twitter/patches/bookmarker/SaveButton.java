@@ -21,6 +21,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -28,15 +29,15 @@ import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.ResourceType;
 import app.morphe.extension.shared.ResourceUtils;
 import app.morphe.extension.shared.Utils;
-import app.morphe.extension.twitter.entity.Tweet;
 
 /**
  * The save button on the tweet inline action bar: a sibling of the native
  * bookmark action, never a replacement for it.
  *
- * <p>Phase 2 skeleton. The click reads the tweet out of the action bar and shows
- * its URL, so a hooked-but-wrong build is obvious. Nothing is sent anywhere and
- * the app's own bookmark state is never touched.
+ * <p>A tap saves the tweet into one of the collections the backend knows; a
+ * long press edits the backend address and token. The app's own bookmark state
+ * is never read and never written — the two bookmarks are independent by design,
+ * so nothing here can damage the account's real bookmarks.
  */
 @SuppressWarnings("unused")
 public class SaveButton {
@@ -121,6 +122,12 @@ public class SaveButton {
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         Gravity.CENTER));
         container.setOnClickListener(v -> onSaveClicked(inlineActionBar));
+        container.setOnLongClickListener(v -> {
+            // The only discoverable place for the address fields: the gesture is
+            // on the button that needs them.
+            BookmarkerSettingsDialog.show(v.getContext(), null);
+            return true;
+        });
 
         wrapper.addView(
                 container,
@@ -135,21 +142,80 @@ public class SaveButton {
         wrapper.post(() -> syncFromNeighbour(inlineActionBar, container, icon));
     }
 
+    /**
+     * One tap, one save: read the tweet, list the collections, ask which one,
+     * then post. Each step can fail on its own and says so — a tap that silently
+     * does nothing is indistinguishable from a patch that did not apply.
+     */
     private static void onSaveClicked(ViewGroup inlineActionBar) {
+        Object rawTweet;
         try {
-            Object rawTweet = readField(inlineActionBar, getTweetFieldName());
-            if (rawTweet == null) {
-                Utils.showToastShort("Twitter Bookmarker: no tweet data");
-                return;
-            }
-
-            String link = new Tweet(rawTweet).getTweetLink();
-            Logger.printInfo(() -> "twb: tapped " + link);
-            Utils.showToastShort("Twitter Bookmarker: " + link);
+            rawTweet = readField(inlineActionBar, getTweetFieldName());
         } catch (Exception e) {
             Logger.printException(() -> "twb: could not read the tweet", e);
             Utils.showToastShort("Twitter Bookmarker: could not read the tweet");
+            return;
         }
+
+        if (rawTweet == null) {
+            Utils.showToastShort("Twitter Bookmarker: no tweet data");
+            return;
+        }
+
+        Context context = inlineActionBar.getContext();
+        if (!BookmarkerPrefs.isConfigured()) {
+            // Nothing to save into yet, so the first tap is the one that asks.
+            Utils.showToastShort("Twitter Bookmarker: set the backend URL to start saving");
+            BookmarkerSettingsDialog.show(context, null);
+            return;
+        }
+
+        Utils.runOnBackgroundThread(() -> {
+            try {
+                BookmarkerApi.Draft draft = TweetDraft.from(rawTweet);
+                String missing = TweetDraft.missingField(draft);
+                if (missing != null) {
+                    toast("Twitter Bookmarker: " + missing + " is not available for this tweet");
+                    return;
+                }
+
+                List<BookmarkerApi.Collection> collections = BookmarkerApi.collections(
+                        BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken());
+
+                Utils.runOnMainThread(() -> {
+                    Logger.printInfo(() -> "twb: tapped " + draft.url);
+                    BookmarkerSheets.showCollectionPicker(
+                            context, draft, collections,
+                            (slug, name) -> save(draft, slug, name));
+                });
+            } catch (Exception e) {
+                Logger.printException(() -> "twb: could not list collections", e);
+                toast("Twitter Bookmarker: " + reason(e));
+            }
+        });
+    }
+
+    /**
+     * The save itself, off the main thread. A 409 is reported in the backend's
+     * own words ("already saved in …"), because the tweet may well be in a
+     * different collection than the one just picked.
+     */
+    private static void save(BookmarkerApi.Draft draft, String slug, String name) {
+        Utils.runOnBackgroundThread(() -> {
+            BookmarkerApi.Result result = BookmarkerApi.save(
+                    BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(), slug, name, draft);
+            toast("Twitter Bookmarker: " + result.message);
+        });
+    }
+
+    /** Toasts from wherever the work happened; Android wants a looper thread. */
+    private static void toast(String message) {
+        Utils.runOnMainThread(() -> Utils.showToastShort(message));
+    }
+
+    private static String reason(Exception e) {
+        String message = e.getMessage();
+        return message == null || message.isEmpty() ? e.getClass().getSimpleName() : message;
     }
 
     private static int iconResourceId() {

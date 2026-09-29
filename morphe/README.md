@@ -13,17 +13,19 @@ the pin.
 
 ## Status
 
-Phase 2 skeleton: the button exists, reads the tweet out of the action bar, and
-reports the tweet URL in a toast. It does not talk to the backend yet — a failure
-at this stage is a hooking failure and nothing else.
+Phase 3: the button saves into a collection. Tapping it reads the tweet out of
+the action bar, lists the backend's collections in a native bottom sheet, and
+posts the tweet to the chosen one; long-pressing it edits the backend address and
+token. The app's own bookmark state is still never read or written.
 
 | Step | State |
 |---|---|
-| Button appears in the action bar | not yet run on a device |
-| Tweet object read from the action bar | not yet run on a device |
-| Patch bundle builds, with the Android parts present | CI builds it on every change to the overlay |
-| Settings (base URL, token, test connection) | not written |
-| `POST /v1/bookmarks`, saved state, collections sheet | not written |
+| Button appears in the action bar | verified on a device (X `12.19.1-release.0`) |
+| Tweet object read from the action bar | verified on a device |
+| Patch bundle builds, with the Android parts present | CI builds it on every change to the overlay, and refuses to publish a bundle without `classes.dex` |
+| Settings (base URL, token, test connection) | written, not yet run on a device |
+| `GET /api/gallery/collections` + `POST /v1/bookmarks` + collection sheet | written, not yet run on a device |
+| Saved state from `GET /v1/index`, move/delete from the phone | not written (Phase 4) |
 
 ## Layout
 
@@ -39,7 +41,13 @@ morphe/
     ├── patches/src/main/resources/twitter/bookmarker/drawable/
     │   └── ic_twb_bookmark.xml
     └── extensions/twitter/src/main/java/app/morphe/extension/twitter/patches/bookmarker/
-        └── SaveButton.java                    runtime code injected into the app
+        ├── SaveButton.java                    the action-bar button and the tap flow
+        ├── BookmarkerSheets.java              the collection picker (Piko's own bottom sheet)
+        ├── BookmarkerSettingsDialog.java      backend URL, token, "Test"
+        ├── BookmarkerPrefs.java               where those two values live
+        ├── BookmarkerApi.java                 HTTP only: health, collections, save
+        ├── TweetDraft.java                    tweet object -> the backend's fields
+        └── Slug.java                          name -> slug, mirroring the browser extension
 ```
 
 ## How the hook works
@@ -63,28 +71,58 @@ button, which is the reason this is a small patch rather than research:
    distinct from the native bookmark it sits next to. If the lookup ever fails,
    the code falls back to an icon that is known to exist in the app and logs it.
 
-## What the next phase has to answer
+## Saving a tweet
 
-Two things are unknown until this runs on a device. Neither blocks the skeleton.
+1. **Tap** the button. With no backend set yet, the first tap is the one that
+   asks for one: it opens the settings dialog. Nothing is guessed and nothing is
+   sent.
+2. The tweet is turned into the backend's fields (`TweetDraft`): the link, the
+   profile name, the `@handle`, the text, the media URLs, and the date — see
+   below for where the date comes from.
+3. `GET /api/gallery/collections` fills a native bottom sheet, one row per
+   collection, plus **New collection…**. That row is not a nicety: collections
+   exist only once something has been saved into them, so without it a phone with
+   an empty database could never save anything. The name is slugged locally
+   (`Slug.java`, mirroring `extension/src/shared/slug.ts`) before it is sent.
+4. The chosen slug goes to `POST /v1/bookmarks`. A `201` toasts the collection, a
+   `409` says where the tweet already lives (the backend names the owning
+   collection, which may not be the one just picked), a `401` names the token, and
+   an unreachable backend says so and saves nothing.
 
-**The tweet date.** `POST /v1/bookmarks` requires `tweet_date` and requires it to
-be RFC3339 (`backend/internal/storage/store.go` rejects an empty or unparsable
-one), so the phone cannot leave it out the way it can leave out media. The
-entities expose id, username, profile name, user id, text and media — no
-timestamp — and the app's own model is obfuscated. The plan, in order:
+**Long-press** reopens the settings dialog. **Test** inside it checks `/health`
+for reachability and then `/v1/index` for the token, because those are two
+different failures: a tunnel that is up with a wrong token looks like a working
+setup until a save fails.
 
-1. Scan the tweet object at runtime for a `long`/`Long` accessor whose value is a
-   plausible epoch-millis. Snowflake ids are ~1.9e18 ms, which lands around the
-   year 62000, so an id cannot be mistaken for a timestamp — the range check
-   alone separates them. `Debug.getObject()` plus reflection makes this possible
-   with no name known at patch time.
-2. If no candidate survives, ask `https://api.fxtwitter.com/x/status/<id>` for
-   `created_at` — the endpoint Piko's own `TweetInfoAPI` already calls. This
-   costs a request per save and fails offline, so it is the fallback, not the
-   default.
+### Why the settings are not in Piko's settings screen
 
-Piko's "Log server response" setting and `Debug.describeFields()` /
-`describeMethods()` are the tools for confirming which one is needed.
+Piko's rows are built in Java in `ScreenBuilder` and gated by a static boolean
+that `enableSettings("…")` flips at app startup — there is no XML row to add and
+no preference registration call. Putting our two fields there would mean shipping
+modified copies of `ScreenBuilder.java`, `Settings.java`, `SettingsStatus.java`
+and `Pref.java`, and re-checking all four on every pin bump, for two text rows.
+The overlay therefore keeps its own preference file (`twb_settings`) and its own
+dialog, and stays additive as a result.
+
+## What the date needed, and how it was answered
+
+`POST /v1/bookmarks` requires `tweet_date` as RFC3339 (`backend/internal/storage/store.go`),
+and the app's own model is obfuscated: Piko's entities expose id, handle, profile
+name, user id, text and media, but no timestamp.
+
+The date comes from the **snowflake id**: X's status ids encode milliseconds
+since 2010-11-04 01:42:54.657 UTC in their top 41 bits, so
+`(id >> 22) + 1288834974657` *is* the tweet's posting time. That is exact, works
+offline, and costs no extra request — it replaced the earlier plan of scanning the
+tweet object for a plausible epoch-millis at runtime and falling back to
+fxtwitter's `created_at`.
+
+IDs below `4194304 × 1000` are refused rather than dated: pre-snowflake ids are
+sequential and small, and the formula would otherwise silently claim
+2010-11-04 for them. Such a tweet is reported as "the date this tweet was posted
+is not available for this tweet" and nothing is sent — the narrow gap left is
+tweets from before November 2010, where the fallback would be an fxtwitter lookup
+if it ever matters.
 
 **Plain HTTP, or not.** A LAN address means `http://<lan-ip>:43121`, and X ships a
 network security config that may refuse cleartext: if `HttpURLConnection` is
@@ -95,7 +133,8 @@ last resort. A Cloudflare or SSH tunnel sidesteps all of it by serving HTTPS, at
 the price of the client pointing at a URL that changes whenever a quick tunnel
 restarts — and of the backend being reachable by anyone who has that URL, since a
 tunnel on this machine connects from loopback and is exempt from the token (see
-the root README, "A tunnel is a third way in").
+the root README, "A tunnel is a third way in"). Neither path has been exercised
+from the phone yet.
 
 ## Building
 
@@ -146,8 +185,11 @@ Piko's own release as well would duplicate patch names. Select **Save to Twitter
 Bookmarker** when patching, and install the result:
 
 1. Patch `com.twitter.android` `12.19.1-release.0` and install the APK.
-2. Open a tweet: the button sits beside the native bookmark action. Tapping it
-   shows `Twitter Bookmarker: https://x.com/<user>/status/<id>`.
+2. Open a tweet: the button sits beside the native bookmark action. Tap it, fill
+   in the backend URL (and a token if the backend wants one), tap **Test**, then
+   **Save**.
+3. Tap the button again: a sheet lists the collections, with **New collection…**
+   at the bottom. Pick one; the toast names it.
 
 If the button does not appear, the hook did not land — check Morphe's patch log
 for the patch name rather than guessing from the UI.

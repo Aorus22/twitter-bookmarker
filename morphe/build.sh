@@ -125,8 +125,15 @@ fi
 note "building the patch bundle (this needs network the first time)"
 (
     cd "$WORK"
+    # Two steps on purpose. `buildAndroid` is what assembles the Android side of a
+    # bundle (the extension .mpe files and the classes.dex that lets Morphe Manager
+    # run a patch on a phone); `generatePatchesList` packages whatever exists, so
+    # calling it alone yields a bundle that looks complete but cannot be applied on
+    # Android. It is not a dependency of the packaging task, which is exactly why
+    # this has its own step.
+    ./gradlew --no-daemon --console=plain "${VERSION_ARG[@]+"${VERSION_ARG[@]}"}" clean buildAndroid
     ./gradlew --no-daemon --console=plain "${VERSION_ARG[@]+"${VERSION_ARG[@]}"}" \
-        clean :patches:checkStringResources :patches:generatePatchesList
+        :patches:checkStringResources :patches:generatePatchesList
 )
 
 mkdir -p "$OUT"
@@ -145,3 +152,26 @@ note "artifacts in $OUT"
 for artifact in "$OUT"/patches-*.mpp; do
     note "  $(basename "$artifact")  $(sha256sum "$artifact" | cut -d' ' -f1)"
 done
+
+# A bundle missing either of these still lists its patches and still patches fine
+# in a desktop CLI, so nothing else would notice: classes.dex is what lets Morphe
+# Manager apply a patch on a phone, and twitter.mpe is the extension code the
+# patch calls into. A silent miss would only surface as a crash after install.
+bundle="$(ls -1 "$OUT"/patches-*.mpp | head -1)"
+if command -v unzip >/dev/null 2>&1; then
+    entries="$(unzip -Z1 "$bundle")"
+elif command -v jar >/dev/null 2>&1; then
+    entries="$(jar tf "$bundle")"
+else
+    entries=""
+    note "warning: neither unzip nor jar is available; skipping the content check"
+fi
+
+if [ -n "$entries" ]; then
+    for required in classes.dex extensions/twitter.mpe; do
+        if ! grep -qx "$required" <<<"$entries"; then
+            die "$(basename "$bundle") has no $required; a patch manager cannot load it"
+        fi
+    done
+    note "bundle contains classes.dex and extensions/twitter.mpe"
+fi

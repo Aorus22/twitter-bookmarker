@@ -21,7 +21,7 @@ at this stage is a hooking failure and nothing else.
 |---|---|
 | Button appears in the action bar | not yet run on a device |
 | Tweet object read from the action bar | not yet run on a device |
-| Patch bundle compiles | built by CI (`.github/workflows/morphe-patch.yml`); that workflow has not run yet |
+| Patch bundle builds, with the Android parts present | CI builds it on every change to the overlay |
 | Settings (base URL, token, test connection) | not written |
 | `POST /v1/bookmarks`, saved state, collections sheet | not written |
 

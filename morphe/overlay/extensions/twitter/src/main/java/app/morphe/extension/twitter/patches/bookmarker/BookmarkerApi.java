@@ -267,7 +267,7 @@ public final class BookmarkerApi {
         return body.toString();
     }
 
-    private static void tweetPut(JSONObject tweet, String key, String value) {
+    private static void tweetPut(JSONObject tweet, String key, String value) throws JSONException {
         tweet.put(key, value == null ? "" : value);
     }
 

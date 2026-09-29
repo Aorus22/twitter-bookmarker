@@ -86,12 +86,16 @@ timestamp — and the app's own model is obfuscated. The plan, in order:
 Piko's "Log server response" setting and `Debug.describeFields()` /
 `describeMethods()` are the tools for confirming which one is needed.
 
-**Plain HTTP on the LAN.** The backend a phone can reach is `http://<lan-ip>:43121`,
-and X ships a network security config that may refuse cleartext. If
-`HttpURLConnection` is blocked, the fix is to ship a `network_security_config.xml`
-through the resource patch that is already here (or replace the app's
-`android:networkSecurityConfig` attribute), then a raw socket client, then an
-Intent to a companion app as the last resort.
+**Plain HTTP, or not.** A LAN address means `http://<lan-ip>:43121`, and X ships a
+network security config that may refuse cleartext: if `HttpURLConnection` is
+blocked, the fix is to ship a `network_security_config.xml` through the resource
+patch that is already here (or replace the app's `android:networkSecurityConfig`
+attribute), then a raw socket client, then an Intent to a companion app as the
+last resort. A Cloudflare or SSH tunnel sidesteps all of it by serving HTTPS, at
+the price of the client pointing at a URL that changes whenever a quick tunnel
+restarts — and of the backend being reachable by anyone who has that URL, since a
+tunnel on this machine connects from loopback and is exempt from the token (see
+the root README, "A tunnel is a third way in").
 
 ## Building
 

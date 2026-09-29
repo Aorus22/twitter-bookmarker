@@ -139,6 +139,23 @@ Two things the Makefile cannot do for you: open the port in the host firewall
 Debian), and give the machine a stable address. `make run` prints the resolved
 `==> listen:` line and a reminder whenever the bind is not loopback.
 
+### A tunnel is a third way in, and the token does not cover it
+
+An SSH forward or a Cloudflare tunnel keeps the default loopback bind and needs
+neither the address nor the firewall rule — and because `cloudflared` runs on
+this machine, it connects from `127.0.0.1`, so the server sees a loopback peer and
+**does not ask for the token**. The tunnel's URL is therefore the only thing
+between the internet and the whole bookmark database.
+
+That is a deliberate choice, not an oversight: the mobile client is still being
+built, and adding an auth step to the tunnel would mean another setting to keep in
+step with it. If it ever needs closing, the shape of the fix is known — treat a
+request carrying a proxy header as non-loopback (Cloudflare always sets
+`CF-Connecting-IP`), which makes such traffic require the bearer token while
+leaving direct local requests alone. Note that a named tunnel with a stable
+hostname also beats a quick `trycloudflare.com` URL, which changes on every
+restart and would have to be re-entered in the client each time.
+
 ---
 
 ## Requirements

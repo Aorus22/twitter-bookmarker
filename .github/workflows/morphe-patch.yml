@@ -21,12 +21,16 @@ on:
         type: string
   push:
     branches: [master]
+    # Only what ends up inside the bundle: a README-only change does not need a
+    # Gradle build, and a cold one is minutes of runner time.
     paths:
-      - "morphe/**"
+      - "morphe/overlay/**"
+      - "morphe/build.sh"
       - ".github/workflows/morphe-patch.yml"
   pull_request:
     paths:
-      - "morphe/**"
+      - "morphe/overlay/**"
+      - "morphe/build.sh"
       - ".github/workflows/morphe-patch.yml"
 
 permissions:
@@ -43,16 +47,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Resolve the version
         id: version
@@ -81,12 +85,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp morphe/out/patches-*.mpp "dist/patches-${{ steps.version.outputs.version }}.mpp"
+          # build.sh already drops the -sources and -javadoc variants; this is the
+          # guard that keeps a release from ever carrying more than one .mpp.
+          mapfile -t bundles < <(ls -1 morphe/out/patches-*.mpp)
+          if [ "${#bundles[@]}" -ne 1 ]; then
+            echo "expected exactly one bundle in morphe/out, found ${#bundles[@]}:" >&2
+            printf '  %s\n' "${bundles[@]}" >&2
+            exit 1
+          fi
+          cp "${bundles[0]}" "dist/patches-${{ steps.version.outputs.version }}.mpp"
           ls -l dist
           sha256sum dist/*.mpp | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: patches-${{ steps.version.outputs.version }}
           path: dist/*.mpp

@@ -131,7 +131,15 @@ note "building the patch bundle (this needs network the first time)"
 
 mkdir -p "$OUT"
 rm -f "$OUT"/patches-*.mpp
-cp "$WORK"/patches/build/libs/patches-*.mpp "$OUT/"
+# Gradle also emits -sources and -javadoc variants next to the real bundle. Only
+# the plain one is installable, and a release must carry exactly one .mpp: a
+# patch manager that finds three assets has three things to pick from.
+for artifact in "$WORK"/patches/build/libs/patches-*.mpp; do
+    case "$artifact" in
+        *-sources.mpp | *-javadoc.mpp) continue ;;
+    esac
+    cp "$artifact" "$OUT/"
+done
 
 note "artifacts in $OUT"
 for artifact in "$OUT"/patches-*.mpp; do

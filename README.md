@@ -294,6 +294,37 @@ crash, and `docker compose down` sends `SIGTERM`, which the server drains cleanl
 > with `:=` assignments, which is why the same path is configured in both places
 > when both are used.
 
+### The public URL
+
+<https://tw-bookmark-e41fc2b5.nadif.dev> is served by the `cloudflared.service`
+that was already running on this machine — nothing in this repository starts it,
+and nothing in it has to change for the address to keep working:
+
+| Piece | Value |
+|---|---|
+| Tunnel | `Laptop` (`4d98de66-…`), remotely managed |
+| Ingress rule | `tw-bookmark-e41fc2b5.nadif.dev` → `http://localhost:43121`, first in the list |
+| DNS | CNAME `tw-bookmark-e41fc2b5` → `4d98de66-….cfargotunnel.com`, proxied |
+
+The rule sits **at the top** of that tunnel's ingress deliberately: the tunnel also
+carries a `*.nadif.dev → http://localhost:444` wildcard, and cloudflared uses the
+first matching rule, so an entry placed below it would never be reached.
+
+Handy consequences: it is HTTPS, which removes the cleartext warning the phone
+patch has when you point it at a LAN address, so use this URL for both the
+extension's custom mode and the patch.
+
+The caveat is the same one as any loopback tunnel: the connector talks to
+`localhost`, the server sees a loopback peer, and no token is asked for. **The URL
+is public and unauthenticated** — whoever has it can read, move and delete
+bookmarks, and the random suffix is obscurity rather than a lock. Cloudflare Access
+is what this account already uses in front of `obsidian.nadif.dev`, but a browser
+can complete an Access login while the phone patch cannot, so locking this one down
+needs an Access service token plus two headers in the patch.
+
+To remove it: drop that one ingress rule from the `Laptop` tunnel and delete the
+DNS record. Both live in Cloudflare, not here.
+
 ### 3. Load the unpacked extension
 
 1. Open `chrome://extensions`

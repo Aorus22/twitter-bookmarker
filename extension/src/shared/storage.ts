@@ -12,6 +12,7 @@
  */
 
 import { normalizeBackendMode, normalizeBackendUrl } from "./backend-url.ts";
+import { normalizeBackendToken } from "./backend-token.ts";
 import {
   DEFAULT_CATEGORY_COLOR,
   DEFAULT_SETTINGS,
@@ -93,6 +94,9 @@ export function normalizeStore(raw: unknown): Store {
     // A v2 record has no custom URL at all; a malformed one falls back to the
     // loopback default rather than leaving the Custom field blank.
     backendUrl: normalizeBackendUrl(rawSettings.backendUrl) ?? DEFAULT_SETTINGS.backendUrl,
+    // Free-form, so it is only trimmed; a record that predates the field, or one
+    // holding rubbish, simply means "no credential".
+    backendToken: normalizeBackendToken(rawSettings.backendToken),
   };
 
   const rawCategories = Array.isArray(raw.categories) ? raw.categories : [];
@@ -280,6 +284,13 @@ export async function setSettings(partial: Partial<Settings>): Promise<Settings>
         partial.backendUrl === undefined
           ? store.settings.backendUrl
           : (normalizeBackendUrl(partial.backendUrl) ?? store.settings.backendUrl),
+      // A token is free-form, so it is only trimmed (and a pasted `Bearer `
+      // prefix dropped). An empty string is a valid value: it means "send no
+      // Authorization header".
+      backendToken:
+        partial.backendToken === undefined
+          ? store.settings.backendToken
+          : normalizeBackendToken(partial.backendToken),
     };
     return { store: { ...store, settings }, result: settings };
   });

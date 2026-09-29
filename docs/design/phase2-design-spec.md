@@ -189,6 +189,11 @@ primitives, so it introduces no new component and no new token. Its card is the 
 360 px frame instead of clipping; an invalid URL surfaces through the existing
 `.inline-error` (coral `--bad` on `--surface-warm`), never as a colour-only cue.
 
+The Custom panel's **Token** field (added with the bearer-token support) reuses the same
+`.field` / `.field-label` / `.field-hint` primitives, as a `type="password"` input so a
+credential is not readable over someone's shoulder; it adds no new component and no new
+token either. Both fields are saved by the panel's one **Save** button.
+
 ---
 
 ## 3. Layout specification

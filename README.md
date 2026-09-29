@@ -277,8 +277,9 @@ msg="Twitter Bookmarker server started" listening=127.0.0.1:43121 storage=/home/
 peer address, and trusts loopback. Publishing a port would destroy that: the
 connection is NAT'd, so the server sees the Docker bridge instead. Measured on
 this machine with a published port, the peer was `172.17.0.1` — meaning every
-client would need a token, *including the gallery in the browser*, which has no
-token field. `network_mode: host` keeps the address the server sees, so the rules
+client would need a token, *including the gallery in the browser* (a web page
+cannot be given one; only the extension's popup has a **Token** field).
+`network_mode: host` keeps the address the server sees, so the rules
 in [Where the server listens](#where-the-server-listens) and
 [A tunnel is a third way in](#a-tunnel-is-a-third-way-in-and-what-covers-it)
 apply verbatim. It also means the port keys below are real host ports, not
@@ -323,23 +324,24 @@ first matching rule, so an entry placed below it would never be reached.
 
 Handy consequences: it is HTTPS, which removes the cleartext warning the phone
 patch has when you point it at a LAN address, so use this URL for both the
-extension's custom mode and the patch.
+extension's custom mode and the patch — each needs the token, below.
 
 It asks for a password before serving anything. That is
 `TWITTER_BOOKMARKER_BASIC_AUTH` in `.env`, in `user:password` form, and the
 browser renders the prompt natively — no login page exists in this app and none is
-needed. Two credentials, deliberately:
+needed. The password only guards clients that arrive through the tunnel; a request
+from this machine's loopback is exempt. Two credentials, deliberately:
 
 | Client | Credential | Why |
 |---|---|---|
 | Browser at the public URL | the `user:password` value | it can show a dialog |
-| Phone patch, curl, scripts | `TWITTER_BOOKMARKER_TOKEN` | it cannot, so it sends `Authorization: Bearer` instead |
+| Phone patch, extension, curl, scripts | `TWITTER_BOOKMARKER_TOKEN` | they cannot, so they send `Authorization: Bearer` instead |
 | Browser or extension on this machine | none | no forwarding headers, so nothing is asked |
 
-The phone is therefore a configuration step, not a code change: paste the token
-into the patch's token field. The extension needs nothing as long as it points at
-`http://127.0.0.1:43121`; if you aim it at the public URL instead, it will get
-401s, because an extension cannot answer a Basic dialog either.
+Both are configuration steps, not code changes: paste the token into the patch's
+token field, and into the extension popup's **Custom** panel (**Token**) when it
+points at something other than loopback. Aimed at `http://127.0.0.1:43121` the
+extension sends no credential at all, because it does not need one.
 
 Leave either variable empty in `.env` and that credential stops existing — no
 password means the public URL is open to whoever has it. To remove the address
@@ -357,8 +359,9 @@ record. Both live in Cloudflare, not here.
 Open the extension popup and add e.g. `AI`, `Linux`, `Design`. Pick colours,
 drag to reorder, and choose **Popover** or **Inline**. Under **Backend URL**, keep
 **Localhost** for the default `http://127.0.0.1:43121`, or pick **Custom** and enter
-another base URL. Everything is saved to `chrome.storage.local` immediately and
-propagates to open X tabs without a reload.
+another base URL plus, if that backend asks for one, its **Token** — both are saved
+by the same **Save** button. Everything is saved to `chrome.storage.local`
+immediately and propagates to open X tabs without a reload.
 
 ### 5. Use it
 
@@ -549,12 +552,13 @@ and the service worker reach the API through their `host_permissions`, so a cust
 host needs no CORS change.
 
 One caveat follows from [Where the server listens](#where-the-server-listens): a
-base URL that resolves **off loopback** — another machine, or this machine's own
-LAN address — is a non-loopback peer, so that server must have a token and the
-request must carry it. The extension has no token field yet, so in practice it
-talks to a backend on the same machine, where loopback needs no token at all.
-Pointing it at a remote backend works only if that server binds loopback too
-(reachable over an SSH tunnel or similar).
+base URL that resolves **off loopback** — another machine, this machine's own LAN
+address, or the [public URL](#the-public-url) — is a challenged peer, so that
+server must have a token or basic auth and the request must carry the token. The
+popup's **Custom** panel therefore has a **Token** field: paste the backend's
+`TWITTER_BOOKMARKER_TOKEN` there and every request from the worker and the popup
+carries `Authorization: Bearer …`. Leave it empty (the default) for a loopback
+server, which is never challenged; it is ignored in **Localhost** mode.
 
 ### `GET /health`
 
@@ -866,8 +870,18 @@ lives in **[`docs/MANUAL-TEST-CHECKLIST.md`](docs/MANUAL-TEST-CHECKLIST.md)**.
 - Check the address printed under the status dot: it is exactly what is being
   probed (`/health` appended to it is the tooltip). If **Backend URL** is
   **Custom**, that address — not `127.0.0.1:43121` — is the one that must answer.
-- The extension probes `/health` with a ~1.5 s timeout, so a stopped backend
-  shows Disconnected without hanging.
+- The extension probes `/health` with a ~4 s timeout, so a stopped backend
+  shows Disconnected without hanging. The ceiling is that high because a custom
+  target behind a tunnel measures ~1–1.7 s per warm probe; on loopback a refused
+  connection still fails instantly, so this only waits when the server is silent.
+  The very first probe after a browser start pays DNS + TLS + tunnel setup and can
+  exceed even that, which is what **Retry** is for.
+- **Connected is not proof that the token is right.** `/health` stays open on
+  purpose (it answers with no bookmark data), so a custom target with a wrong or
+  missing **Token** still reads Connected — while every `/v1/*` call fails, which
+  shows up as the error toast and *Failed* on the tweet. Re-paste the token from
+  `TWITTER_BOOKMARKER_TOKEN` in `.env`, or `curl -s -H "Authorization: Bearer
+  $TOKEN" <base>/v1/index` to check it directly.
 - Nothing is lost: the tweet stays bookmarked and no bookmark row is written.
 
 ### Port already in use

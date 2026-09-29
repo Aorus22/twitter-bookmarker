@@ -206,7 +206,6 @@ async function verifySettingsWiring() {
   for (const needle of [
     "http://127.0.0.1:43121",
     "/health",
-    "1500",
     "AbortController",
     "unbookmarkAfterSave",
     "displayMode",
@@ -218,7 +217,18 @@ async function verifySettingsWiring() {
   ]) {
     assert.ok(popup.includes(needle), `built popup bundle is missing ${JSON.stringify(needle)}`);
   }
-  pass("built popup bundle contains the health URL/timeout, both settings, and the store subscription");
+  pass("built popup bundle contains the health URL, both settings, and the store subscription");
+
+  // The timeout value itself is asserted on the source, not on the bundle: the
+  // minifier is free to rewrite 4000 as 4e3, so pinning digits in `dist/` would
+  // be a check on esbuild's output rather than on the probe's ceiling.
+  const constants = await readFile(path.join(ROOT, "src/shared/constants.ts"), "utf8");
+  assert.match(
+    constants,
+    /HEALTH_TIMEOUT_MS = 4000;/,
+    "the health probe must keep its measured 4 s ceiling (a tunnel probe takes ~1-1.5 s)",
+  );
+  pass("the health probe keeps its 4 s ceiling in the source");
 
   assert.ok(popup.includes("onStoreChanged(render)"), "popup must rerender through onStoreChanged");
   assert.ok(popup.includes("window.confirm"), "delete must use a native confirmation");
@@ -242,23 +252,32 @@ async function verifyBackendTargetWiring() {
   pass("manifest allows fetching a custom backend host");
 
   const html = await readFile(path.join(DIST, "popup/popup.html"), "utf8");
-  for (const needle of ['data-backend="localhost"', 'data-backend="custom"', 'id="backend-url"']) {
+  for (const needle of [
+    'data-backend="localhost"',
+    'data-backend="custom"',
+    'id="backend-url"',
+    'id="backend-token"',
+    'type="password"',
+  ]) {
     assert.ok(html.includes(needle), `popup.html is missing ${needle}`);
   }
-  pass("popup markup offers the Localhost/Custom choice and a custom URL field");
+  pass("popup markup offers the Localhost/Custom choice, a custom URL field, and a token field");
 
   const popup = await readFile(path.join(DIST, "popup/popup.js"), "utf8");
-  for (const needle of ["backendMode", "localhost", "custom", "http://", "https:"]) {
+  for (const needle of ["backendMode", "backendToken", "localhost", "custom", "http://", "https:"]) {
     assert.ok(popup.includes(needle), `built popup bundle is missing ${JSON.stringify(needle)}`);
   }
   assert.ok(
     popup.includes("setSettings"),
     "the backend target must be persisted through the storage module",
   );
+  assert.ok(popup.includes("Bearer "), "the popup must be able to present the bearer token");
   pass("built popup bundle parses, persists, and resolves the backend target");
 
   const worker = await readFile(path.join(DIST, "background/service-worker.js"), "utf8");
   assert.ok(worker.includes("backendMode"), "the worker must resolve the backend from settings");
+  assert.ok(worker.includes("backendToken"), "the worker must resolve the token from settings");
+  assert.ok(worker.includes("Bearer "), "the worker must send the token as a bearer credential");
   assert.ok(worker.includes("storage.local"), "the worker must read chrome.storage.local");
   pass("service worker resolves the backend target from chrome.storage.local");
 }

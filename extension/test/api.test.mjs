@@ -105,6 +105,41 @@ test("every call targets the given base URL, base path included", async () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* the bearer token                                                           */
+/* -------------------------------------------------------------------------- */
+
+test("a token is sent as Authorization: Bearer on every endpoint", async () => {
+  const token = "s3cret-token";
+
+  const healthCalls = captureFetch(() => jsonResponse(200, HEALTH_OK));
+  await checkHealth("https://tw-bookmark.example", token);
+  assert.equal(healthCalls[0].init.headers.Authorization, `Bearer ${token}`);
+
+  const indexCalls = captureFetch(() => jsonResponse(200, { items: {} }));
+  await fetchSavedIndex("https://tw-bookmark.example", token);
+  assert.deepEqual(indexCalls[0].init.headers, { Authorization: `Bearer ${token}` });
+
+  const postCalls = captureFetch(() => jsonResponse(201, SAVED_BODY));
+  await postBookmark(SAMPLE_REQUEST, "https://tw-bookmark.example", token);
+  assert.equal(postCalls[0].init.headers.Authorization, `Bearer ${token}`);
+  assert.equal(
+    postCalls[0].init.headers["Content-Type"],
+    "application/json",
+    "the credential must not displace the content type",
+  );
+});
+
+test("no token means no Authorization header at all", async () => {
+  const calls = captureFetch(() => jsonResponse(200, HEALTH_OK));
+  await checkHealth("http://127.0.0.1:43121", "");
+  assert.equal("Authorization" in calls[0].init.headers, false, "an empty token must not be sent");
+
+  const postCalls = captureFetch(() => jsonResponse(201, SAVED_BODY));
+  await postBookmark(SAMPLE_REQUEST, "http://127.0.0.1:43121");
+  assert.deepEqual(postCalls[0].init.headers, { "Content-Type": "application/json" });
+});
+
+/* -------------------------------------------------------------------------- */
 /* POST /v1/bookmarks                                                         */
 /* -------------------------------------------------------------------------- */
 

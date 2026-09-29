@@ -14,6 +14,7 @@
  */
 
 import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
+import { resolveBackendToken } from "../shared/backend-token.ts";
 import { getStore, onStoreChanged } from "../shared/storage.ts";
 import type { Store } from "../shared/types.ts";
 import { initBackendSettings } from "./backend-settings.ts";
@@ -39,8 +40,12 @@ function bootstrap(): void {
     const backendSettings = initBackendSettings();
     const backend = initBackendStatus();
 
-    /** The address the last probe used; `null` until the first render. */
-    let probedBaseUrl: string | null = null;
+    /**
+     * The target the last probe used; `null` until the first render. The token is
+     * part of the key: saving a new one has to re-probe, or the status would keep
+     * showing the verdict of the credential that was just replaced.
+     */
+    let probedTarget: string | null = null;
 
     const render = (store: Store): void => {
       categories.render(store);
@@ -48,9 +53,9 @@ function bootstrap(): void {
       backendSettings.render(store);
       backend.render(store);
 
-      const baseUrl = resolveBackendBaseUrl(store.settings);
-      if (baseUrl === probedBaseUrl) return;
-      probedBaseUrl = baseUrl;
+      const target = `${resolveBackendBaseUrl(store.settings)}\u0000${resolveBackendToken(store.settings)}`;
+      if (target === probedTarget) return;
+      probedTarget = target;
       void backend.check();
     };
 

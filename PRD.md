@@ -1844,6 +1844,36 @@ http://127.0.0.1:43121
 
 ---
 
+## `backendToken`
+
+Type:
+
+```text
+string
+```
+
+Bearer token yang dikirim sebagai `Authorization: Bearer <token>` pada setiap
+request ke backend, dipakai saat `backendMode` = `custom`. Isinya sama dengan
+`TWITTER_BOOKMARKER_TOKEN` di sisi server. Diperlukan ketika target bukan
+loopback — LAN, atau URL publik lewat tunnel: backend menantang peer non-loopback
+dan extension tidak bisa menjawab dialog Basic bawaan browser, sedangkan patch
+HP/token bisa.
+
+Saat `backendMode` = `localhost` nilai ini diabaikan, karena request dari mesin
+ini memang tidak pernah ditantang. String kosong berarti tidak ada header
+`Authorization` yang dikirim. Nilai disimpan setelah di-trim, dan prefix
+`Bearer ` yang ikut ter-paste dibuang; selain itu tidak divalidasi, karena hanya
+server yang bisa menilainya (token yang salah muncul sebagai status
+Disconnected, bukan sebagai error saat menyimpan).
+
+Recommended default:
+
+```text
+(empty)
+```
+
+---
+
 # 51. Extension Storage Change Propagation
 
 Content script harus mendengarkan:
@@ -1888,7 +1918,8 @@ Tidak boleh expose server ke LAN secara default.
 
 Extension hanya boleh mengirim data ke base URL yang dikonfigurasi user di
 popup: alamat loopback default, atau `backendUrl` saat `backendMode` = `custom`
-(§50). Karena targetnya bisa berubah, `host_permissions` extension memuat
+(§50), dengan `backendToken` sebagai kredensialnya saat target itu bukan
+loopback. Karena targetnya bisa berubah, `host_permissions` extension memuat
 `http://*/*` dan `https://*/*`; tidak ada request ke host lain yang pernah
 dilakukan, dan user adalah satu-satunya pihak yang bisa mengubah targetnya.
 

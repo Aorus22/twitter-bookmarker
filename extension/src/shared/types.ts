@@ -46,6 +46,13 @@ export interface Settings {
    * unparseable value falls back to the loopback default.
    */
   backendUrl: string;
+  /**
+   * Bearer token sent with every request while `backendMode` is `custom`, e.g.
+   * the backend's `TWITTER_BOOKMARKER_TOKEN`. Empty means no `Authorization`
+   * header is sent, which is all the loopback default ever needs: a request from
+   * this machine is never challenged. It is ignored in `localhost` mode.
+   */
+  backendToken: string;
 }
 
 /** The whole `chrome.storage.local` payload, under a single documented key. */

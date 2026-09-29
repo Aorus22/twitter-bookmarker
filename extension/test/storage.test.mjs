@@ -27,6 +27,7 @@ test("normalizeStore returns PRD defaults for empty/missing input", () => {
       displayMode: "popover",
       backendMode: "localhost",
       backendUrl: "http://127.0.0.1:43121",
+      backendToken: "",
     });
     assert.deepEqual(store.categories, []);
   }
@@ -40,6 +41,7 @@ test("normalizeStore keeps valid values and rejects invalid ones", () => {
       displayMode: "inline",
       backendMode: "custom",
       backendUrl: "http://192.168.1.10:8080/",
+      backendToken: "  Bearer pasted-from-a-header  ",
     },
     categories: [
       { id: "a", name: "Linux", slug: "linux", color: "#ABCDEF", order: 0 },
@@ -55,7 +57,9 @@ test("normalizeStore keeps valid values and rejects invalid ones", () => {
     displayMode: "inline",
     backendMode: "custom",
     backendUrl: "http://192.168.1.10:8080",
-    // The trailing slash is dropped so endpoint paths never double up.
+    // The trailing slash is dropped so endpoint paths never double up, and the
+    // token is trimmed with its pasted `Bearer ` prefix removed.
+    backendToken: "pasted-from-a-header",
   });
 
   assert.deepEqual(
@@ -149,6 +153,7 @@ test("a v1 store whose categories carry `filename` migrates to `slug` losslessly
     displayMode: "inline",
     backendMode: "localhost",
     backendUrl: "http://127.0.0.1:43121",
+    backendToken: "",
   });
   for (const c of store.categories) {
     assert.equal(c.filename, undefined, "the old field is not carried over");
@@ -232,6 +237,7 @@ test("normalizeStore clamps the backend target to a usable address", () => {
     displayMode: "popover",
     backendMode: "custom",
     backendUrl: "http://localhost:8080",
+    backendToken: "",
   });
 
   assert.equal(backendOf({ backendMode: "bogus" }).backendMode, "localhost", "unknown mode -> localhost");

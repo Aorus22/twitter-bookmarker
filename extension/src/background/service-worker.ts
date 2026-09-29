@@ -20,6 +20,7 @@
 
 import { bgErrorFrom, checkHealth, fetchSavedIndex, postBookmark } from "../shared/api.ts";
 import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
+import { resolveBackendToken } from "../shared/backend-token.ts";
 import { isExtensionMessage } from "../shared/messages.ts";
 import type { ExtensionMessage, ExtensionResponse } from "../shared/messages.ts";
 import { getSettings } from "../shared/storage.ts";
@@ -29,32 +30,34 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 /**
- * The configured backend for this message. `getSettings` never rejects and
- * already applies the defaults, so a storage hiccup simply falls back to the
- * loopback address.
+ * The configured backend for this message: where to call, and what to present.
+ * `getSettings` never rejects and already applies the defaults, so a storage
+ * hiccup simply falls back to the loopback address with no credential — which is
+ * what that address needs anyway.
  */
-async function activeBaseUrl(): Promise<string> {
-  return resolveBackendBaseUrl(await getSettings());
+async function activeTarget(): Promise<{ baseUrl: string; token: string }> {
+  const settings = await getSettings();
+  return { baseUrl: resolveBackendBaseUrl(settings), token: resolveBackendToken(settings) };
 }
 
 /** Resolve one validated message to a response. Never rejects. */
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
-  const baseUrl = await activeBaseUrl();
+  const { baseUrl, token } = await activeTarget();
 
   switch (message.type) {
     case "HEALTH_CHECK":
-      return { ok: true, connected: await checkHealth(baseUrl) };
+      return { ok: true, connected: await checkHealth(baseUrl, token) };
 
     case "GET_SAVED_INDEX":
       try {
-        return { ok: true, index: await fetchSavedIndex(baseUrl) };
+        return { ok: true, index: await fetchSavedIndex(baseUrl, token) };
       } catch (error) {
         return { ok: false, index: null, error: bgErrorFrom(error) };
       }
 
     case "SAVE_TWEET":
       try {
-        const outcome = await postBookmark(message.payload, baseUrl);
+        const outcome = await postBookmark(message.payload, baseUrl, token);
         return outcome.kind === "saved"
           ? { ok: true, result: outcome.body }
           : { ok: true, duplicate: outcome.body };

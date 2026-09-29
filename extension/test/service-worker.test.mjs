@@ -122,6 +122,44 @@ test("every request follows the stored backend target (PRD §50)", async () => {
   assert.equal(fallbackCalls[0].url, "http://127.0.0.1:43121/health");
 });
 
+test("a stored token rides along on every message (PRD §50)", async () => {
+  // Custom target plus a token: the worker is the only place that talks to the
+  // backend, so this is where the credential has to appear.
+  await storeSettings({
+    backendMode: "custom",
+    backendUrl: "https://tw-bookmark.example",
+    backendToken: "  Bearer s3cret-token  ",
+  });
+
+  const healthCalls = captureFetch(() => jsonResponse(200, { status: "ok" }));
+  await dispatch({ type: "HEALTH_CHECK" }).response;
+  assert.equal(healthCalls[0].init.headers.Authorization, "Bearer s3cret-token");
+
+  const indexCalls = captureFetch(() => jsonResponse(200, { items: {} }));
+  await dispatch({ type: "GET_SAVED_INDEX" }).response;
+  assert.equal(indexCalls[0].init.headers.Authorization, "Bearer s3cret-token");
+
+  const saveCalls = captureFetch(
+    () => jsonResponse(201, { status: "saved", tweet_id: "1", url: "u", slug: "s", saved_at: "t" }),
+  );
+  await dispatch({
+    type: "SAVE_TWEET",
+    payload: {
+      slug: "s",
+      name: "S",
+      tweet: { url: "u", media: [], author: "a", username: "@a", tweet_date: "t", text: "" },
+    },
+  }).response;
+  assert.equal(saveCalls[0].init.headers.Authorization, "Bearer s3cret-token");
+
+  // Switching back to Localhost drops it: that target is never challenged, so
+  // sending a secret to it would be pointless traffic.
+  await storeSettings({ backendMode: "localhost" });
+  const backToLocal = captureFetch(() => jsonResponse(200, { status: "ok" }));
+  await dispatch({ type: "HEALTH_CHECK" }).response;
+  assert.equal("Authorization" in backToLocal[0].init.headers, false);
+});
+
 test("GET_SAVED_INDEX resolves the parsed index", async () => {
   const body = { items: { 123456: { url: "u", slug: "linux", saved_at: "t" } } };
   captureFetch(() => jsonResponse(200, body));

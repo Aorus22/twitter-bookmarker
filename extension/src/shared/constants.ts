@@ -35,8 +35,18 @@ export const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:43121";
 /** Path of the backend health endpoint. */
 export const HEALTH_PATH = "/health";
 
-/** AbortController timeout for the popup's health probe (PRD §44). */
-export const HEALTH_TIMEOUT_MS = 1500;
+/**
+ * AbortController timeout for the popup's health probe (PRD §44).
+ *
+ * 4 s rather than the 1.5 s this started with, because the probe is now expected
+ * to run against a custom target as well, and a tunnel adds real latency:
+ * measured through Cloudflare to the backend on this machine, a warm `GET /health`
+ * took 0.97–1.67 s, so a 1.5 s ceiling reported **Disconnected** for a backend
+ * that was answering fine. A *cold* first probe (DNS + TLS + tunnel handshake)
+ * measured over 4 s, which the popup's Retry covers; loopback is unaffected
+ * either way, since a refused connection fails immediately.
+ */
+export const HEALTH_TIMEOUT_MS = 4000;
 
 /** Default settings (PRD §50). */
 export const DEFAULT_SETTINGS: Settings = {
@@ -46,6 +56,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Pre-filled with the loopback address so switching to Custom starts from a
   // valid URL the user can just edit (typically the port).
   backendUrl: DEFAULT_BACKEND_BASE_URL,
+  // Empty by default: the loopback target is never challenged, so a fresh
+  // install sends no credential at all.
+  backendToken: "",
 };
 
 /**

@@ -17,6 +17,7 @@
 
 import { checkHealth } from "../shared/api.ts";
 import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
+import { resolveBackendToken } from "../shared/backend-token.ts";
 import { DEFAULT_BACKEND_BASE_URL, HEALTH_PATH } from "../shared/constants.ts";
 import type { Store } from "../shared/types.ts";
 
@@ -46,6 +47,7 @@ export function initBackendStatus(): BackendStatusPanel {
 
   /** The target the last `render` selected; `check` always probes this one. */
   let baseUrl = DEFAULT_BACKEND_BASE_URL;
+  let token = "";
   let checking = false;
 
   function setState(state: "checking" | "connected" | "disconnected"): void {
@@ -71,7 +73,7 @@ export function initBackendStatus(): BackendStatusPanel {
 
     // `checkHealth` already swallows fetch failures; this catch is belt-and-braces
     // so a health probe can never surface as an unhandled rejection.
-    const connected = await checkHealth(baseUrl).catch(() => false);
+    const connected = await checkHealth(baseUrl, token).catch(() => false);
 
     checking = false;
     setState(connected ? "connected" : "disconnected");
@@ -83,6 +85,7 @@ export function initBackendStatus(): BackendStatusPanel {
 
   function render(store: Store): void {
     baseUrl = resolveBackendBaseUrl(store.settings);
+    token = resolveBackendToken(store.settings);
     renderTarget();
   }
 

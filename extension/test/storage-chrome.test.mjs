@@ -80,6 +80,7 @@ test("first run yields PRD defaults under the single storage key", async () => {
     displayMode: "popover",
     backendMode: "localhost",
     backendUrl: "http://127.0.0.1:43121",
+    backendToken: "",
   });
   assert.deepEqual(store.categories, []);
   assert.deepEqual(await storage.getSettings(), {
@@ -87,6 +88,7 @@ test("first run yields PRD defaults under the single storage key", async () => {
     displayMode: "popover",
     backendMode: "localhost",
     backendUrl: "http://127.0.0.1:43121",
+    backendToken: "",
   });
   assert.deepEqual(await storage.getCategories(), []);
   assert.equal(stored(), undefined, "reads never write");
@@ -227,6 +229,7 @@ const PRD_DEFAULT_SETTINGS = {
   displayMode: "popover",
   backendMode: "localhost",
   backendUrl: "http://127.0.0.1:43121",
+  backendToken: "",
 };
 
 test("setSettings merges partial updates over the defaults", async () => {
@@ -272,6 +275,25 @@ test("setSettings stores a normalized custom backend URL", async () => {
   // An unusable URL keeps the previous value rather than clearing it.
   assert.equal((await storage.setSettings({ backendUrl: "ftp://nope" })).backendUrl, "http://192.168.1.10:8080");
   assert.equal((await storage.setSettings({ backendMode: "nonsense" })).backendMode, "localhost");
+});
+
+test("setSettings stores a trimmed backend token", async () => {
+  resetStorage();
+
+  const settings = await storage.setSettings({
+    backendMode: "custom",
+    backendUrl: "https://tw-bookmark.example",
+    backendToken: "  Bearer paste-from-a-header  ",
+  });
+  assert.equal(settings.backendToken, "paste-from-a-header", "trimmed, with the pasted prefix dropped");
+  assert.deepEqual(await storage.getSettings(), settings, "the write is persisted, not just returned");
+
+  // A partial update that says nothing about the token keeps the saved one.
+  const urlOnly = await storage.setSettings({ backendUrl: "https://other.example" });
+  assert.equal(urlOnly.backendToken, "paste-from-a-header");
+
+  // An empty string is a real value: it means "send no Authorization header".
+  assert.equal((await storage.setSettings({ backendToken: "   " })).backendToken, "");
 });
 
 test("getStore tolerates malformed storage instead of throwing", async () => {

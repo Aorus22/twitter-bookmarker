@@ -6,9 +6,11 @@
  * service worker calls these functions, and the popup reuses {@link checkHealth}
  * for its status probe.
  *
- * Every function takes the base URL to call. Callers resolve it from settings
- * through `shared/backend-url.ts`; the default keeps the loopback address for
- * callers (and tests) that do not care about the custom-URL setting.
+ * Every function takes the base URL to call, and the token to present. Callers
+ * resolve both from settings — `shared/backend-url.ts` and
+ * `shared/backend-token.ts` respectively — and the defaults keep the loopback
+ * address with no credential for callers (and tests) that do not care about the
+ * custom-target settings.
  *
  * Every failure is normalized onto the {@link BgError} union so the service
  * worker can answer with the documented response shapes and never throw:
@@ -19,6 +21,7 @@
  */
 
 import { DEFAULT_BACKEND_BASE_URL, HEALTH_PATH, HEALTH_TIMEOUT_MS } from "./constants.ts";
+import { authHeaders } from "./backend-token.ts";
 import type { BgError } from "./messages.ts";
 import type {
   DuplicateResult,
@@ -94,17 +97,27 @@ async function readJson(response: Response): Promise<unknown> {
 /**
  * One fetch with a hard timeout. Any transport-level failure — including the
  * abort this function itself raises — becomes {@link BackendUnavailableError}.
+ *
+ * The token travels as `Authorization: Bearer …`, and only when there is one, so
+ * the default loopback target sends no credential at all. Callers pass a plain
+ * object for `init.headers` (a JSON content type, when there is a body), so the
+ * credential is merged in that same shape.
  */
 async function request(
   baseUrl: string,
+  token: string,
   path: string,
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const headers = {
+    ...(init.headers as Record<string, string> | undefined),
+    ...authHeaders(token),
+  };
   try {
-    return await fetch(`${baseUrl}${path}`, { ...init, signal: controller.signal });
+    return await fetch(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
   } catch (error) {
     throw new BackendUnavailableError("backend_unavailable", { cause: error });
   } finally {
@@ -152,10 +165,14 @@ function isDuplicateResult(value: unknown): value is DuplicateResult {
  * "connected" is a status, not an error. The response is never cached, so a
  * Retry always re-probes the backend.
  */
-export async function checkHealth(baseUrl: string = DEFAULT_BACKEND_BASE_URL): Promise<boolean> {
+export async function checkHealth(
+  baseUrl: string = DEFAULT_BACKEND_BASE_URL,
+  token = "",
+): Promise<boolean> {
   try {
     const response = await request(
       baseUrl,
+      token,
       HEALTH_PATH,
       { method: "GET", cache: "no-store" },
       HEALTH_TIMEOUT_MS,
@@ -172,8 +189,11 @@ export async function checkHealth(baseUrl: string = DEFAULT_BACKEND_BASE_URL): P
  * Fetch the global saved index (`GET /v1/index`, PRD §18, §34). Callers take
  * `Object.keys(index.items)` as the O(1) saved-tweet Set.
  */
-export async function fetchSavedIndex(baseUrl: string = DEFAULT_BACKEND_BASE_URL): Promise<SavedIndex> {
-  const response = await request(baseUrl, INDEX_PATH, { method: "GET" }, REQUEST_TIMEOUT_MS);
+export async function fetchSavedIndex(
+  baseUrl: string = DEFAULT_BACKEND_BASE_URL,
+  token = "",
+): Promise<SavedIndex> {
+  const response = await request(baseUrl, token, INDEX_PATH, { method: "GET" }, REQUEST_TIMEOUT_MS);
   if (!response.ok) throw errorFor(response);
   const body = await readJson(response);
   if (!isSavedIndex(body)) throw new BackendRequestError("internal", response.status, "malformed_index");
@@ -195,9 +215,11 @@ export type PostBookmarkOutcome =
 export async function postBookmark(
   payload: SaveRequest,
   baseUrl: string = DEFAULT_BACKEND_BASE_URL,
+  token = "",
 ): Promise<PostBookmarkOutcome> {
   const response = await request(
     baseUrl,
+    token,
     BOOKMARKS_PATH,
     {
       method: "POST",

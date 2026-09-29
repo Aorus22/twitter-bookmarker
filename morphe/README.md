@@ -1,0 +1,112 @@
+# Twitter Bookmarker — Morphe patch for X
+
+Adds a **Save to Twitter Bookmarker** button to X's tweet action bar, next to the
+native bookmark action. This is the phone-side client of the backend the browser
+extension already talks to: the tweet is read *inside* the app, and the app's own
+bookmark state is never touched, so X's bookmark and a Twitter Bookmarker
+collection stay independent of each other.
+
+This directory is an **additive overlay** on [Piko](https://github.com/crimera/piko),
+not a fork. `build.sh` checks out Piko at a pinned commit and copies `overlay/`
+on top of it, so upstream stays untouched and upgrading is a one-line change to
+the pin.
+
+## Status
+
+Phase 2 skeleton: the button exists, reads the tweet out of the action bar, and
+reports the tweet URL in a toast. It does not talk to the backend yet — a failure
+at this stage is a hooking failure and nothing else.
+
+| Step | State |
+|---|---|
+| Button appears in the action bar | not yet run on a device |
+| Tweet object read from the action bar | not yet run on a device |
+| Patch bundle compiles | **not yet built**: needs a `read:packages` token, see below |
+| Settings (base URL, token, test connection) | not written |
+| `POST /v1/bookmarks`, saved state, collections sheet | not written |
+
+## Layout
+
+```text
+morphe/
+├── build.sh                 fetch the pin, apply overlay/, build the .mpp
+├── LICENSE                  GPLv3 (Piko's, which this overlay is under)
+├── NOTICE                   Piko's NOTICE, kept per GPLv3 §7(b)
+└── overlay/                 copied verbatim onto the pinned checkout
+    ├── patches/src/main/kotlin/app/crimera/patches/twitter/bookmarker/
+    │   ├── SaveToBookmarkerPatch.kt           the bytecode patch
+    │   └── SaveToBookmarkerResourcePatch.kt   ships the button icon
+    ├── patches/src/main/resources/twitter/bookmarker/drawable/
+    │   └── ic_twb_bookmark.xml
+    └── extensions/twitter/src/main/java/app/morphe/extension/twitter/patches/bookmarker/
+        └── SaveButton.java                    runtime code injected into the app
+```
+
+## How the hook works
+
+Everything here follows the pattern Piko already uses for its inline Download
+button, which is the reason this is a small patch rather than research:
+
+1. **`InlineActionBar.onFinishInflate` is hooked.** The patch inserts
+   `invoke-static { p0 }, …SaveButton->onFinishInflate(ViewGroup;)V` right before
+   the method returns, so every tweet's action bar is handed to our code.
+2. **The tweet is read by reflection, from a name the patch learns at patch
+   time.** `SaveButton.getTweetFieldName()` returns the literal `"mTweet"`; the
+   patch finds the field the app really writes the tweet into and rewrites that
+   literal inside the compiled extension class. No obfuscated name is hardcoded.
+3. **The button is a sibling, not a replacement.** The bar is wrapped in a
+   horizontal `LinearLayout` with our `ImageView` after it, and the styling
+   (padding, scale type, tint, layout params) is copied from the last visible
+   action so it matches whichever theme and tweet layout is on screen.
+4. **The icon is our own resource.** `copyResources` puts
+   `ic_twb_bookmark.xml` into the app's drawable table, so our button is visually
+   distinct from the native bookmark it sits next to. If the lookup ever fails,
+   the code falls back to an icon that is known to exist in the app and logs it.
+
+## Building
+
+```bash
+gh auth refresh -h github.com -s read:packages   # once, for the active account
+GITHUB_TOKEN="$(gh auth token)" morphe/build.sh
+```
+
+The artifact lands in `morphe/out/patches-<version>.mpp`.
+
+Prerequisites, and why each one is real:
+
+| Requirement | Why |
+|---|---|
+| GitHub token with **`read:packages`** | Morphe publishes its patch library to GitHub Packages (`maven.pkg.github.com/MorpheApp/registry`), which refuses anonymous reads. The build fails in `settings.gradle.kts` without it. `gpr.user`/`gpr.key` in `~/.gradle/gradle.properties` work too. |
+| **JDK 17** (21 probably fine) | Upstream CI uses Temurin 17; the Android Gradle plugin rejects newer JDKs. The wrapper needs Gradle 9.6.1 and will download it. |
+| **Android SDK** at `$ANDROID_HOME` (or `~/Android/Sdk`) | The `extensions/*` modules are Android libraries. Only build tools and one platform are needed; no emulator. |
+| Network | Gradle, the wrapper distribution, the Morphe plugin. First build is slow. |
+
+`build.sh --refresh` re-fetches upstream before building. The pin itself is the
+`UPSTREAM_COMMIT` variable at the top of the script.
+
+### If the token is the blocker
+
+Grant the scope (`gh auth refresh -s read:packages`, interactive), or build in CI
+the way Piko itself does: a GitHub Actions run gets the registry access without a
+personal token. Nothing else in this directory depends on which of the two you
+choose.
+
+## Installing on the phone
+
+1. Morphe Manager → add this repository as a patch source (its releases carry the
+   `.mpp`). One source is enough: our bundle contains every Piko patch plus ours,
+   so adding Piko's own release as well would duplicate patch names.
+2. Patch the X APK (`com.twitter.android`, `12.19.1-release.0`) and install it.
+3. Open a tweet: the button sits beside the native bookmark action. Tapping it
+   shows `Twitter Bookmarker: https://x.com/<user>/status/<id>`.
+
+If the button does not appear, the hook did not land — check Morphe's patch log
+for the patch name rather than guessing from the UI.
+
+## Licence
+
+The overlay is a derivative work of Piko, so it is **GPLv3**: `LICENSE` is Piko's
+verbatim, `NOTICE` carries its GPLv3 §7(b) attribution requirement and must stay
+in place in every distribution, and each overlay source file keeps Piko's
+copyright header. This covers `morphe/` only; the extension, backend and web app
+in the rest of this repository are separate programs that do not link against it.

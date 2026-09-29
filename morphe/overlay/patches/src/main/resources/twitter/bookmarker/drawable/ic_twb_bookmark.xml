@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The save button's own glyph: a bookmark, deliberately the outline weight so it
+  reads as "save into my collection" next to the app's filled native bookmark.
+  Copyright (C) 2026 piko <https://github.com/crimera/piko>
+  See morphe/NOTICE for GPLv3 §7(b) terms.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M17,3H7C5.9,3 5.01,3.9 5.01,5L5,21l7,-3 7,3V5c0,-1.1 -0.9,-2 -2,-2zM17,18l-5,-2.18L7,18V5h10v13z" />
+</vector>

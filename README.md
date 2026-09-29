@@ -44,8 +44,10 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
                                           the only file the server owns ← source of truth
 ```
 
-- The backend binds **loopback only** (`127.0.0.1:43121`) and never stores
-  categories or settings — those live in `chrome.storage.local`.
+- The backend binds **loopback only** (`127.0.0.1:43121`) by default. It can be
+  moved onto the LAN for a phone client, and a non-loopback bind then requires a
+  bearer token — see [Where the server listens](#where-the-server-listens). It
+  never stores categories or settings — those live in `chrome.storage.local`.
 - The content script never calls the backend directly; every HTTP request goes
   through the service worker (PRD §53).
 - One `MutationObserver` per page entry, one index fetch per page entry, O(1)
@@ -82,6 +84,53 @@ inside a git working tree: the server opens exactly one file,
 `<storage dir>/tw-bookmarker.db` (`config.DBName`), and never reads or writes
 anything else there. A `backup/` folder left by a completed CSV→SQLite migration,
 a stray CSV, or a stray `index.json` are all inert to the server.
+
+### Where the server listens
+
+The default is `127.0.0.1:43121`, which only this machine can reach. That is the
+right default: the API is the whole bookmark database, and nothing else on the
+network should be able to read or write it.
+
+A client on another device — a phone on the same Wi-Fi, for instance — needs the
+server to listen on an address that device can route to. Two variables do that,
+and `make run` passes both from the same gitignored `.env.local`:
+
+```make
+# .env.local
+TWITTER_BOOKMARKER_ADDR := 192.168.1.13:43121
+TWITTER_BOOKMARKER_TOKEN := <a long random string>
+```
+
+Both are required together. The server **refuses to start** on a non-loopback
+address when no token is set, so a mistyped interface can never publish the
+database unauthenticated:
+
+```text
+twitter-bookmarker-server: refusing to listen on 0.0.0.0:43121 without a token: set TWITTER_BOOKMARKER_TOKEN, or bind 127.0.0.1:43121 so the API is never reachable without authentication
+```
+
+With both set, the rule is about the *peer*, not the request:
+
+- Requests from **loopback** need no token. The desktop extension and a browser
+  on this machine keep working with no configuration, exactly as before.
+- Requests from **any other address** must send `Authorization: Bearer <token>`
+  on `/v1/*` and `/api/*`, and get `401` without it. `/health` and the built web
+  app stay open, because neither answers with bookmark data.
+
+```bash
+# from another device on the network
+curl -s -H "Authorization: Bearer $TOKEN" http://192.168.1.13:43121/v1/index
+```
+
+The address must be `host:port` with an explicit host: `:43121` is rejected
+because `net.Listen` reads it as every interface. `0.0.0.0:43121` is accepted,
+since asking for every interface is a deliberate thing to type. A relative or
+malformed value is reported by name, and `-h` prints the resolved address.
+
+Two things the Makefile cannot do for you: open the port in the host firewall
+(`sudo firewall-cmd --add-port=43121/tcp` on Fedora, `ufw allow 43121/tcp` on
+Debian), and give the machine a stable address. `make run` prints the resolved
+`==> listen:` line and a reminder whenever the bind is not loopback.
 
 ---
 
@@ -353,11 +402,18 @@ directory still contains CSVs. It opens
 
 Base URL: `http://127.0.0.1:43121` by default. The extension popup's **Backend URL**
 setting can point the same API at a custom base URL (`192.168.1.10:8080`, or
-`https://server.example/tw-bookmarker`); the server itself always binds loopback
-(§52), so a custom target means a server the user runs or exposes themselves. CORS is
-granted only to extension origins (`chrome-extension://…`); arbitrary web origins are
-never allowed. Extension pages and the service worker reach the API through their
-`host_permissions`, so a custom host needs no CORS change.
+`https://server.example/tw-bookmarker`). CORS is granted only to extension origins
+(`chrome-extension://…`); arbitrary web origins are never allowed. Extension pages
+and the service worker reach the API through their `host_permissions`, so a custom
+host needs no CORS change.
+
+One caveat follows from [Where the server listens](#where-the-server-listens): a
+base URL that resolves **off loopback** — another machine, or this machine's own
+LAN address — is a non-loopback peer, so that server must have a token and the
+request must carry it. The extension has no token field yet, so in practice it
+talks to a backend on the same machine, where loopback needs no token at all.
+Pointing it at a remote backend works only if that server binds loopback too
+(reachable over an SSH tunnel or similar).
 
 ### `GET /health`
 

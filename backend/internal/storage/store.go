@@ -121,10 +121,19 @@ func (s *Store) Save(req model.SaveRequest) (model.SaveResponse, error) {
 	// Dedupe is global, across every collection: one tweet may only ever be
 	// saved once. bookmarks.tweet_id is the primary key, so this check and the
 	// insert below cannot disagree.
-	var existing string
-	switch err := tx.QueryRow(`SELECT tweet_id FROM bookmarks WHERE tweet_id = ?`, tweetID).Scan(&existing); {
+	//
+	// The lookup reads the owning collection's slug along with the id, in the same
+	// statement: a client told "duplicate" needs to know *where* it already lives,
+	// and looking that up separately afterwards could disagree with this answer.
+	var existing, existingSlug string
+	switch err := tx.QueryRow(
+		`SELECT b.tweet_id, c.slug
+		   FROM bookmarks b
+		   JOIN collections c ON c.id = b.collection_id
+		  WHERE b.tweet_id = ?`, tweetID,
+	).Scan(&existing, &existingSlug); {
 	case err == nil:
-		return resp, &DuplicateError{TweetID: tweetID}
+		return resp, &DuplicateError{TweetID: tweetID, Slug: existingSlug}
 	case !errors.Is(err, sql.ErrNoRows):
 		return resp, fmt.Errorf("look up tweet %s: %w", tweetID, err)
 	}

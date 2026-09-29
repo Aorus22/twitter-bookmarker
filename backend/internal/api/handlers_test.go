@@ -26,6 +26,11 @@ const validBody = `{"slug":"linux","tweet":{"url":"https://x.com/foo/status/123?
 // construction path as cmd/server; only the persisted rows are made per test.
 func newTestServer(t *testing.T) (http.Handler, string) {
 	t.Helper()
+	// NewServer reads the token from the environment, and these tests exercise
+	// the loopback path with no authentication. Clearing the variable keeps a
+	// developer's exported $TWITTER_BOOKMARKER_TOKEN from turning every case
+	// here into a 401.
+	t.Setenv(config.EnvToken, "")
 	dir := t.TempDir()
 	store, err := storage.NewStore(dir, logging.Discard())
 	if err != nil {
@@ -241,12 +246,18 @@ func TestSaveDuplicateReturns409(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &keys); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(keys) != 2 {
-		t.Fatalf("duplicate response keys = %v, want exactly status+tweet_id", keys)
+	if len(keys) != 3 {
+		t.Fatalf("duplicate response keys = %v, want exactly status+tweet_id+slug", keys)
 	}
 	dup := decode[model.DuplicateResponse](t, rec)
 	if dup.Status != "duplicate" || dup.TweetID != "123" {
 		t.Fatalf("duplicate response = %+v, want status=duplicate tweet_id=123", dup)
+	}
+	// The slug names where the tweet already lives — the first save's collection,
+	// not the one this second request asked for, so a client can say "already in
+	// Linux" instead of silently retrying into "ai".
+	if dup.Slug != "linux" {
+		t.Fatalf("duplicate response slug = %q, want the owning collection linux", dup.Slug)
 	}
 
 	conn := openRO(t, dir)

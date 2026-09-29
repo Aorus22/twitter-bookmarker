@@ -46,6 +46,14 @@ func (lg *Logger) Startup(name, addr, storageDir string, collections, bookmarks 
 	)
 }
 
+// TokenRequired reports that every request from another host must present a
+// bearer token. It is emitted once at startup, and only when that is actually
+// true: a token configured on a loopback bind guards nothing, so silence is the
+// honest report there. The token itself is never logged.
+func (lg *Logger) TokenRequired(env string) {
+	lg.Slog().Info("the API requires a bearer token from other hosts", "env", env)
+}
+
 // WebAssets reports the directory the built single-page app is served from
 // (PRD-2 §11).
 func (lg *Logger) WebAssets(dir string) {

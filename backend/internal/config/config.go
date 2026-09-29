@@ -1,5 +1,6 @@
-// Package config holds the backend settings: the loopback bind address and the
-// storage directory (overridable through the environment).
+// Package config holds the backend settings: the listen address, the bearer
+// token that guards a non-loopback bind, and the storage directory. Each one is
+// overridable through the environment.
 package config
 
 import (
@@ -12,11 +13,12 @@ import (
 )
 
 const (
-	// Port is the single source of truth for the backend port. It is not
-	// configurable from the extension UI in the MVP.
+	// Port is the default backend port, used when $TWITTER_BOOKMARKER_ADDR does
+	// not name another one.
 	Port = 43121
 
-	// Host binds the server to loopback only. Never 0.0.0.0.
+	// Host is the default host: loopback only. A bind other machines can reach
+	// has to be asked for explicitly, and it then requires a token (Validate).
 	Host = "127.0.0.1"
 
 	// DirName is the storage directory name inside the user's home directory.
@@ -32,6 +34,23 @@ const (
 	// existing installs are unaffected. The data-cleaning scripts in the data
 	// repository read the same variable.
 	EnvDir = "TWITTER_BOOKMARKER_DIR"
+
+	// EnvAddr names the environment variable that moves the listen address off
+	// loopback, e.g.
+	//
+	//	TWITTER_BOOKMARKER_ADDR=192.168.1.20:43121
+	//
+	// The value must be host:port with an explicit host: ":43121" is rejected
+	// because net.Listen reads it as every interface, which is exactly the
+	// accident this variable must not make easy. An empty or unset value keeps
+	// the historical 127.0.0.1:43121, so existing installs are unaffected.
+	EnvAddr = "TWITTER_BOOKMARKER_ADDR"
+
+	// EnvToken names the environment variable holding the bearer token that
+	// every non-loopback peer must present once the server listens on anything
+	// other than loopback. It is mandatory in that case — Validate refuses to
+	// start without it — so an exposed port is never an unauthenticated one.
+	EnvToken = "TWITTER_BOOKMARKER_TOKEN"
 
 	// DBName is the SQLite database inside the storage directory. It is the one
 	// durable file the backend owns; the gallery serves nothing but what it
@@ -65,9 +84,78 @@ const (
 	EnvWebDir = "TWITTER_BOOKMARKER_WEB_DIR"
 )
 
-// Addr returns the loopback listen address, e.g. "127.0.0.1:43121".
-func Addr() string {
+// DefaultAddr returns the loopback address used when $TWITTER_BOOKMARKER_ADDR
+// is unset, e.g. "127.0.0.1:43121".
+func DefaultAddr() string {
 	return net.JoinHostPort(Host, strconv.Itoa(Port))
+}
+
+// Addr resolves the listen address from $TWITTER_BOOKMARKER_ADDR.
+//
+// An empty or unset value yields DefaultAddr. Anything else must be host:port
+// with an explicit host and a port in 1-65535; every error names the variable,
+// so a typo is reported where it was made rather than as a bind failure later.
+func Addr() (string, error) {
+	return resolveAddr(os.Getenv(EnvAddr))
+}
+
+// resolveAddr is Addr's pure core, so the accepted shapes can be tested without
+// touching the process environment.
+func resolveAddr(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return DefaultAddr(), nil
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", fmt.Errorf("%s must be host:port (got %q)", EnvAddr, raw)
+	}
+	if host == "" {
+		return "", fmt.Errorf(
+			"%s must name a host explicitly: %q would listen on every interface (write 0.0.0.0:%s to mean that on purpose)",
+			EnvAddr, raw, port)
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return "", fmt.Errorf("%s has an invalid port %q", EnvAddr, port)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(number)), nil
+}
+
+// Token returns the configured bearer token, or "" when none is set.
+func Token() string { return strings.TrimSpace(os.Getenv(EnvToken)) }
+
+// IsLoopback reports whether addr can only be reached from this machine.
+//
+// It fails closed: an address it cannot parse is not loopback. Callers use this
+// both to decide whether a request may skip authentication and whether a bind
+// may skip the token requirement, so an unrecognised shape must never be
+// treated as trusted.
+func IsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Validate refuses a configuration that would expose the API unauthenticated.
+//
+// The rule is the whole security model of the network surface: loopback needs no
+// token, because only this machine can reach it and that is how the server has
+// always worked; any other bind needs one. It is checked before the socket is
+// opened, so there is no window in which the port is reachable without it.
+func Validate(addr, token string) error {
+	if IsLoopback(addr) || token != "" {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to listen on %s without a token: set %s, or bind %s so the API is never reachable without authentication",
+		addr, EnvToken, DefaultAddr())
 }
 
 // StorageDir resolves the storage directory without creating it.

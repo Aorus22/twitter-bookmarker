@@ -1,8 +1,10 @@
-// Package api exposes the loopback-only HTTP contract over the persistence
-// layer.
+// Package api exposes the HTTP contract over the persistence layer. It is
+// loopback-only by default; when it is moved onto another interface, every
+// request from a peer that is not this machine must carry a bearer token.
 package api
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -95,11 +97,80 @@ func NewServer(store BookmarkStore, log *logging.Logger) http.Handler {
 	// index.html fallback for a client route (PROD-01, PROD-03).
 	mux.HandleFunc("/", s.handleStatic)
 
-	return withExtensionCORS(mux)
+	return withExtensionCORS(withToken(mux, config.Token()))
+}
+
+// protectedPathPrefixes are the API surfaces a token covers when one is
+// configured. /health and the built web app stay open: neither answers with
+// bookmark data, and /health is how a client checks reachability before it has
+// proved anything. This list is deliberately written from the routes registered
+// above rather than from a wildcard, so a new route has to be added knowingly.
+func isProtectedPath(path string) bool {
+	for _, prefix := range []string{"/v1", "/api"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// withToken requires a bearer token from peers that are not on this machine.
+//
+// Loopback is exempt, and that is the whole point: the desktop extension and a
+// browser on the same host keep working with no configuration, exactly as
+// before, while moving the listener onto the LAN stops being a way to publish
+// the bookmarks to the network. The exemption is decided from the connection's
+// own RemoteAddr and never from X-Forwarded-For, so it cannot be forged by a
+// remote caller; running this server behind a reverse proxy would therefore put
+// every request behind the token, which is the safe direction.
+func withToken(next http.Handler, token string) http.Handler {
+	if token == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isProtectedPath(r.URL.Path) || config.IsLoopback(r.RemoteAddr) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !bearerMatches(token, r.Header.Get("Authorization")) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="twitter-bookmarker"`)
+			writeJSON(w, http.StatusUnauthorized, model.ErrorResponse{
+				Status: "error",
+				Reason: "unauthorized",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// bearerMatches compares the Authorization header against the configured token
+// in constant time, so a wrong token cannot be recovered by timing.
+//
+// An empty expected token matches nothing. withToken already returns early in
+// that case, but the guard lives here too: a future caller that forgets the
+// early return must not end up accepting an empty credential.
+func bearerMatches(expected, header string) bool {
+	const scheme = "Bearer "
+	if expected == "" {
+		return false
+	}
+	if len(header) < len(scheme) || !strings.EqualFold(header[:len(scheme)], scheme) {
+		return false
+	}
+	presented := strings.TrimSpace(header[len(scheme):])
+	// ConstantTimeCompare returns 0 for different lengths as well, so the length
+	// check is folded in rather than branched on.
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(expected)) == 1
 }
 
 // withExtensionCORS echoes an extension origin only. Arbitrary web origins are
 // never granted access, and "*" is never returned.
+//
+// It wraps the token check rather than sitting inside it, because a browser never
+// sends Authorization on a preflight: an OPTIONS request has to be answered here,
+// with the headers that let the real request follow, before any authentication
+// happens.
 func withExtensionCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -107,7 +178,7 @@ func withExtensionCORS(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		}
 		if r.Method == http.MethodOptions {
 			if isExtensionOrigin(origin) {

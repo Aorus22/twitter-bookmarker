@@ -16,8 +16,133 @@ func TestFixedLoopbackAddress(t *testing.T) {
 	if config.Port != 43121 {
 		t.Fatalf("Port = %d, want 43121", config.Port)
 	}
-	if got := config.Addr(); got != "127.0.0.1:43121" {
-		t.Fatalf("Addr() = %q, want 127.0.0.1:43121", got)
+	if got := config.DefaultAddr(); got != "127.0.0.1:43121" {
+		t.Fatalf("DefaultAddr() = %q, want 127.0.0.1:43121", got)
+	}
+}
+
+func TestAddrEnvCases(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    string
+		wantErr bool
+	}{
+		{name: "unset falls back to loopback", value: "", want: "127.0.0.1:43121"},
+		{name: "whitespace only falls back to loopback", value: "   ", want: "127.0.0.1:43121"},
+		{name: "explicit wildcard is allowed", value: "0.0.0.0:43121", want: "0.0.0.0:43121"},
+		{name: "lan address is allowed", value: "192.168.1.20:9000", want: "192.168.1.20:9000"},
+		{name: "hostname is allowed", value: "localhost:43121", want: "localhost:43121"},
+		{name: "ipv6 loopback is allowed", value: "[::1]:43121", want: "[::1]:43121"},
+		{name: "surrounding space trimmed", value: "  10.0.0.5:43121  ", want: "10.0.0.5:43121"},
+		{name: "port is normalised", value: "10.0.0.5:043121", want: "10.0.0.5:43121"},
+		{name: "missing port rejected", value: "127.0.0.1", wantErr: true},
+		{name: "empty host rejected", value: ":43121", wantErr: true},
+		{name: "non numeric port rejected", value: "127.0.0.1:http", wantErr: true},
+		{name: "zero port rejected", value: "127.0.0.1:0", wantErr: true},
+		{name: "too large port rejected", value: "127.0.0.1:70000", wantErr: true},
+		{name: "negative port rejected", value: "127.0.0.1:-1", wantErr: true},
+		{name: "garbage rejected", value: "not an address", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvAddr, tc.value)
+			got, err := config.Addr()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Addr() = %q, want an error", got)
+				}
+				if !strings.Contains(err.Error(), config.EnvAddr) {
+					t.Fatalf("error %q should name %s", err, config.EnvAddr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Addr() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("Addr() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsLoopback(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{addr: "127.0.0.1:43121", want: true},
+		{addr: "127.0.0.5:43121", want: true},
+		{addr: "[::1]:43121", want: true},
+		{addr: "localhost:43121", want: true},
+		{addr: "LOCALHOST:43121", want: true},
+		{addr: "0.0.0.0:43121", want: false},
+		{addr: "[::]:43121", want: false},
+		{addr: "192.168.1.20:43121", want: false},
+		{addr: "10.0.0.5:43121", want: false},
+		{addr: "example.com:43121", want: false},
+		// Fail closed: an address that cannot be parsed is never trusted.
+		{addr: "", want: false},
+		{addr: "127.0.0.1", want: false},
+		{addr: "nonsense", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.addr, func(t *testing.T) {
+			if got := config.IsLoopback(tc.addr); got != tc.want {
+				t.Fatalf("IsLoopback(%q) = %v, want %v", tc.addr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesExposedBindWithoutToken(t *testing.T) {
+	cases := []struct {
+		name    string
+		addr    string
+		token   string
+		wantErr bool
+	}{
+		{name: "loopback without token", addr: "127.0.0.1:43121", wantErr: false},
+		{name: "loopback with token", addr: "127.0.0.1:43121", token: "s3cret", wantErr: false},
+		{name: "wildcard with token", addr: "0.0.0.0:43121", token: "s3cret", wantErr: false},
+		{name: "lan with token", addr: "192.168.1.20:43121", token: "s3cret", wantErr: false},
+		{name: "wildcard without token", addr: "0.0.0.0:43121", wantErr: true},
+		{name: "lan without token", addr: "192.168.1.20:43121", wantErr: true},
+		// An address that cannot be parsed is not loopback, so it needs a token.
+		{name: "unparseable without token", addr: "nonsense", wantErr: true},
+		{name: "unparseable with token", addr: "nonsense", token: "s3cret", wantErr: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := config.Validate(tc.addr, tc.token)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Validate(%q, %q) = nil, want an error", tc.addr, tc.token)
+				}
+				if !strings.Contains(err.Error(), config.EnvToken) {
+					t.Fatalf("error %q should name %s", err, config.EnvToken)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Validate(%q, %q) error = %v", tc.addr, tc.token, err)
+			}
+		})
+	}
+}
+
+func TestTokenFollowsEnv(t *testing.T) {
+	t.Setenv(config.EnvToken, "")
+	if got := config.Token(); got != "" {
+		t.Fatalf("Token() = %q, want empty", got)
+	}
+	t.Setenv(config.EnvToken, "  hunter2  ")
+	if got := config.Token(); got != "hunter2" {
+		t.Fatalf("Token() = %q, want the trimmed value", got)
 	}
 }
 

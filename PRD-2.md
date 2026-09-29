@@ -1929,6 +1929,15 @@ Tidak masuk Phase 2.
 
 # 70. Security
 
+> **Amended (mobile ingest).** The bind is still loopback by default and
+> `0.0.0.0` is still what nobody should type by accident. It is now *possible* to
+> move the listener elsewhere, because a phone on the same network cannot reach
+> `127.0.0.1`, and that is gated: a non-loopback bind is refused at startup unless
+> `TWITTER_BOOKMARKER_TOKEN` is set, and every request from a peer that is not
+> loopback must then send `Authorization: Bearer <token>`. Loopback peers are
+> exempt, so nothing on this machine changes. See `README.md` →
+> "Where the server listens".
+
 Backend tetap:
 
 ```text

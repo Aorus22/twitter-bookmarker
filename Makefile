@@ -38,6 +38,21 @@
 # internal/config.WebDir). A missing web/dist is not fatal: the API keeps
 # working and "/" explains how to build it.
 #
+# Where the server listens: the default is 127.0.0.1:43121, so nothing but this
+# machine can reach it. `make run` resolves TWITTER_BOOKMARKER_ADDR the same way
+# as the storage directory — command line, then `.env.local`, then the default:
+#
+#          TWITTER_BOOKMARKER_ADDR := 192.168.1.20:43121
+#          TWITTER_BOOKMARKER_TOKEN := <a long random string>
+#
+# A non-loopback address is refused unless TWITTER_BOOKMARKER_TOKEN is also set:
+# the port would otherwise be an unauthenticated copy of the bookmark database on
+# the LAN. With both set, the host is reachable from a phone on the same network
+# — and then every request from that phone must send
+# `Authorization: Bearer <token>`, while loopback clients (the extension, this
+# machine's browser) keep working with no token at all. The port must also be
+# opened in the host firewall, which is outside what a Makefile can do.
+#
 # `make dev-web` + `make dev-backend` are meant to run together in two shells:
 # Vite serves the SPA with HMR on its own port and proxies /api to 43121, so the
 # Go server does not need a SPA build at all in development.
@@ -55,6 +70,7 @@ SHELL := /bin/bash
 BACKEND_BIN := backend/bin/twitter-bookmarker-server
 STORAGE_DIR := $(if $(TWITTER_BOOKMARKER_DIR),$(TWITTER_BOOKMARKER_DIR),$(HOME)/.twitter-bookmarker)
 WEB_DIR := $(CURDIR)/web/dist
+LISTEN_ADDR := $(if $(TWITTER_BOOKMARKER_ADDR),$(TWITTER_BOOKMARKER_ADDR),127.0.0.1:43121)
 
 .DEFAULT_GOAL := build
 
@@ -100,7 +116,10 @@ dev-web: ## Run the Vite dev server for the SPA (proxies /api to 127.0.0.1:43121
 dev-backend: ## Run the Go server from source (API + web/dist; pair with `make dev-web`).
 	@echo "==> storage: $(STORAGE_DIR)"
 	@echo "==> web:     $(WEB_DIR)"
-	cd backend && TWITTER_BOOKMARKER_DIR="$(STORAGE_DIR)" TWITTER_BOOKMARKER_WEB_DIR="$(WEB_DIR)" go run ./cmd/server
+	@echo "==> listen:  $(LISTEN_ADDR)"
+	cd backend && TWITTER_BOOKMARKER_DIR="$(STORAGE_DIR)" TWITTER_BOOKMARKER_WEB_DIR="$(WEB_DIR)" \
+		TWITTER_BOOKMARKER_ADDR="$(LISTEN_ADDR)" TWITTER_BOOKMARKER_TOKEN="$(TWITTER_BOOKMARKER_TOKEN)" \
+		go run ./cmd/server
 
 run: ## Run the built server (build it first with `make build`).
 	@if [ ! -x "$(BACKEND_BIN)" ]; then \
@@ -109,7 +128,15 @@ run: ## Run the built server (build it first with `make build`).
 	fi
 	@echo "==> storage: $(STORAGE_DIR)"
 	@echo "==> web:     $(WEB_DIR)"
-	TWITTER_BOOKMARKER_DIR="$(STORAGE_DIR)" TWITTER_BOOKMARKER_WEB_DIR="$(WEB_DIR)" ./$(BACKEND_BIN)
+	@echo "==> listen:  $(LISTEN_ADDR)"
+	@case "$(LISTEN_ADDR)" in \
+		127.0.0.1:*|localhost:*|"[::1]:"*) ;; \
+		*) echo "==> note:    non-loopback bind — set TWITTER_BOOKMARKER_TOKEN, and open the port in the firewall"; \
+		   echo "             (without a token the server refuses to start, by design)";; \
+	esac
+	TWITTER_BOOKMARKER_DIR="$(STORAGE_DIR)" TWITTER_BOOKMARKER_WEB_DIR="$(WEB_DIR)" \
+		TWITTER_BOOKMARKER_ADDR="$(LISTEN_ADDR)" TWITTER_BOOKMARKER_TOKEN="$(TWITTER_BOOKMARKER_TOKEN)" \
+		./$(BACKEND_BIN)
 
 fmt: ## Format the backend sources in place.
 	gofmt -w backend

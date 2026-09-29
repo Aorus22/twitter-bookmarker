@@ -44,9 +44,14 @@ type SaveResponse struct {
 }
 
 // DuplicateResponse is the 409 response body.
+//
+// Slug names the collection the tweet is already saved in, so a client can say
+// where it lives instead of offering a save that cannot succeed. It is additive:
+// a client that ignores it still gets the same status and tweet_id as before.
 type DuplicateResponse struct {
 	Status  string `json:"status"`
 	TweetID string `json:"tweet_id"`
+	Slug    string `json:"slug"`
 }
 
 // IndexResponse is the GET /v1/index response body.

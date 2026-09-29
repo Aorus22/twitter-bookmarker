@@ -101,6 +101,7 @@ func (s *server) handleSave(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, model.DuplicateResponse{
 				Status:  "duplicate",
 				TweetID: dup.TweetID,
+				Slug:    dup.Slug,
 			})
 		case errors.As(err, &invalid):
 			s.log.InvalidRequest(invalid.Reason)

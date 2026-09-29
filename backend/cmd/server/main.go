@@ -1,8 +1,10 @@
 // Command server runs the local Twitter Bookmarker backend.
 //
-// It binds 127.0.0.1 only, creates the storage directory (0700) when missing,
-// opens tw-bookmarker.db there — creating it on first run — and serves the HTTP
-// API plus the built web app.
+// It binds 127.0.0.1 only unless $TWITTER_BOOKMARKER_ADDR moves it elsewhere —
+// and a bind other hosts can reach is refused unless $TWITTER_BOOKMARKER_TOKEN is
+// set, so the API is never exposed unauthenticated. It creates the storage
+// directory (0700) when missing, opens tw-bookmarker.db there — creating it on
+// first run — and serves the HTTP API plus the built web app.
 //
 // The database is the whole of the server's persistence. There is no other file
 // format it reads or writes, and no import mode: anything that ever needs to
@@ -52,6 +54,18 @@ func run(args []string, stdout io.Writer) error {
 
 	log := logging.New(os.Stderr)
 
+	// The address and the token are resolved together, and checked before the
+	// storage directory is touched: a configuration that would expose the API
+	// without authentication must fail immediately and change nothing on disk.
+	addr, err := config.Addr()
+	if err != nil {
+		return err
+	}
+	token := config.Token()
+	if err := config.Validate(addr, token); err != nil {
+		return err
+	}
+
 	dir, err := config.EnsureStorageDir()
 	if err != nil {
 		return fmt.Errorf("storage directory: %w", err)
@@ -74,21 +88,24 @@ func run(args []string, stdout io.Writer) error {
 	handler := api.NewServer(store, log)
 
 	// Listen explicitly first so a port clash is reported before serving.
-	ln, err := net.Listen("tcp", config.Addr())
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		if errors.Is(err, syscall.EADDRINUSE) {
-			return fmt.Errorf("port %d is already in use (%s)", config.Port, config.Addr())
+			return fmt.Errorf("port %d is already in use (%s)", config.Port, addr)
 		}
-		return fmt.Errorf("listen on %s: %w", config.Addr(), err)
+		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
 	srv := &http.Server{
-		Addr:              config.Addr(),
+		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Startup(serverName, config.Addr(), dir, stats.Collections, stats.Posts)
+	log.Startup(serverName, addr, dir, stats.Collections, stats.Posts)
+	if token != "" && !config.IsLoopback(addr) {
+		log.TokenRequired(config.EnvToken)
+	}
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -116,11 +133,22 @@ func run(args []string, stdout io.Writer) error {
 }
 
 func printUsage(w io.Writer) {
+	// The help text must still print when the environment is unusable, and it is
+	// read before startup validates anything, so an invalid address falls back to
+	// the default here instead of turning -h into an error.
+	addr, err := config.Addr()
+	if err != nil {
+		addr = config.DefaultAddr()
+	}
 	fmt.Fprintf(w,
 		"Usage: %s\n\n"+
 			"Starts the local Twitter Bookmarker backend on %s.\n"+
+			"Listen address: $%s, or %s when that is unset. A non-loopback address\n"+
+			"also requires $%s: other hosts can reach it, so it is never served\n"+
+			"without a bearer token.\n"+
 			"Storage directory: $%s, or ~/%s when that is unset.\n"+
 			"The database is %s inside it, and it is the only file the server owns.\n\n"+
 			"  -h, --help  show this help and exit\n",
-		serverName, config.Addr(), config.EnvDir, config.DirName, config.DBName)
+		serverName, addr, config.EnvAddr, config.DefaultAddr(), config.EnvToken,
+		config.EnvDir, config.DirName, config.DBName)
 }

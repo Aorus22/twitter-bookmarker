@@ -94,8 +94,8 @@ func TestProcessLiveServer(t *testing.T) {
 	if !strings.Contains(logOut, "Twitter Bookmarker server started") {
 		t.Errorf("startup log missing server-started message:\n%s", logOut)
 	}
-	if !strings.Contains(logOut, config.Addr()) {
-		t.Errorf("startup log missing loopback address %s:\n%s", config.Addr(), logOut)
+	if !strings.Contains(logOut, config.DefaultAddr()) {
+		t.Errorf("startup log missing loopback address %s:\n%s", config.DefaultAddr(), logOut)
 	}
 	if strings.Contains(logOut, "0.0.0.0") {
 		t.Errorf("startup log suggests a non-loopback bind:\n%s", logOut)
@@ -186,16 +186,16 @@ func TestProcessGracefulShutdownSignals(t *testing.T) {
 // TestProcessPortInUseExitsNonZero proves PRD §57: if the port is already in
 // use the process exits non-zero with a clear message.
 func TestProcessPortInUseExitsNonZero(t *testing.T) {
-	ln, err := net.Listen("tcp", config.Addr())
+	ln, err := net.Listen("tcp", config.DefaultAddr())
 	if err != nil {
-		t.Skipf("default port %s is unavailable so it cannot be reserved for this test: %v", config.Addr(), err)
+		t.Skipf("default port %s is unavailable so it cannot be reserved for this test: %v", config.DefaultAddr(), err)
 	}
 	defer ln.Close()
 
 	p := startServer(t, t.TempDir())
 	err = p.waitExit(t, procFailureExitLimit)
 	if err == nil {
-		t.Fatalf("expected non-zero exit when %s is in use, got exit code 0; output:\n%s", config.Addr(), p.out.String())
+		t.Fatalf("expected non-zero exit when %s is in use, got exit code 0; output:\n%s", config.DefaultAddr(), p.out.String())
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
@@ -257,8 +257,12 @@ func TestProcessDatabaseLifecycle(t *testing.T) {
 			t.Fatalf("%s was not created on startup: %v", config.DBName, err)
 		}
 		conn := openDBReadOnly(t, dir)
-		if got := dbtest.Tables(t, conn); len(got) != 2 || got[0] != "bookmarks" || got[1] != "collections" {
-			t.Fatalf("tables = %v, want [bookmarks collections]", got)
+		// The real schema is version 2, whose third table is the trash that makes
+		// a delete recoverable. The list is written out rather than derived so a
+		// change to the schema has to be acknowledged here.
+		if got := dbtest.Tables(t, conn); len(got) != 3 ||
+			got[0] != "bookmarks" || got[1] != "collections" || got[2] != "deleted_bookmarks" {
+			t.Fatalf("tables = %v, want [bookmarks collections deleted_bookmarks]", got)
 		}
 		if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 0 {
 			t.Fatalf("fresh database holds %d bookmarks, want 0", got)
@@ -430,7 +434,7 @@ func TestProcessHelpFlag(t *testing.T) {
 			}
 
 			usage := out.String()
-			for _, want := range []string{"Usage:", serverName, config.Addr(), config.DBName, config.EnvDir, config.DirName} {
+			for _, want := range []string{"Usage:", serverName, config.DefaultAddr(), config.DBName, config.EnvDir, config.DirName} {
 				if !strings.Contains(usage, want) {
 					t.Errorf("usage text missing %q:\n%s", want, usage)
 				}
@@ -605,17 +609,30 @@ func (p *serverProc) exitErr() error {
 }
 
 // envForServer returns the parent environment with HOME replaced and the
-// storage-directory override removed, so a developer's real
-// $TWITTER_BOOKMARKER_DIR can never leak into (or be written by) a test.
+// storage-directory, listen-address and token overrides removed, so a
+// developer's real $TWITTER_BOOKMARKER_DIR, $TWITTER_BOOKMARKER_ADDR or
+// $TWITTER_BOOKMARKER_TOKEN can never leak into (or be written by) a test. A
+// stray address would move the child server off the loopback port every test
+// asserts on, and a stray token would make it require one.
 func envForServer(home string) []string {
+	stripped := []string{"HOME=", config.EnvDir + "=", config.EnvAddr + "=", config.EnvToken + "="}
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, config.EnvDir+"=") {
+		if hasAnyPrefix(kv, stripped) {
 			continue
 		}
 		env = append(env, kv)
 	}
 	return append(env, "HOME="+home)
+}
+
+func hasAnyPrefix(value string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // openDBReadOnly opens the storage directory's database without ever creating
@@ -634,9 +651,9 @@ func openDBReadOnly(t *testing.T, dir string) *sql.DB {
 // be reserved in this environment (e.g. a real backend is already running).
 func requireDefaultPortFree(t *testing.T) {
 	t.Helper()
-	ln, err := net.Listen("tcp", config.Addr())
+	ln, err := net.Listen("tcp", config.DefaultAddr())
 	if err != nil {
-		t.Skipf("production port %s is unavailable in this environment: %v", config.Addr(), err)
+		t.Skipf("production port %s is unavailable in this environment: %v", config.DefaultAddr(), err)
 	}
 	_ = ln.Close()
 }
@@ -680,7 +697,7 @@ func httpRequest(method, path, body string, timeout time.Duration) (int, []byte,
 	if body != "" {
 		reader = strings.NewReader(body)
 	}
-	req, err := http.NewRequest(method, "http://"+config.Addr()+path, reader)
+	req, err := http.NewRequest(method, "http://"+config.DefaultAddr()+path, reader)
 	if err != nil {
 		return 0, nil, err
 	}

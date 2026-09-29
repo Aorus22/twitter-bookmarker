@@ -1863,6 +1863,15 @@ Tidak perlu reload tab manual.
 
 # 52. Security Requirements
 
+> **Amended (mobile ingest).** Loopback remains the default and the rule for
+> everything on this machine. A phone on the same network cannot reach
+> `127.0.0.1`, so the listener can now be moved with
+> `TWITTER_BOOKMARKER_ADDR` — and that is refused at startup unless
+> `TWITTER_BOOKMARKER_TOKEN` is also set, with `Authorization: Bearer <token>`
+> then required from every non-loopback peer. `0.0.0.0` is no longer forbidden
+> outright, but it is no longer silent either: it cannot be reached without the
+> token. See `README.md` → "Where the server listens".
+
 Backend wajib bind hanya ke:
 
 ```text

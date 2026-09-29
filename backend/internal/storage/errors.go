@@ -10,8 +10,12 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Reason }
 
 // DuplicateError marks a globally duplicate Tweet Status ID (HTTP 409).
+//
+// Slug is the collection the tweet is already saved in, so the caller can offer
+// to move it there instead of having to guess or ask again.
 type DuplicateError struct {
 	TweetID string
+	Slug    string
 }
 
 func (e *DuplicateError) Error() string {

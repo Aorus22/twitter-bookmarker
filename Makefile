@@ -74,7 +74,7 @@ LISTEN_ADDR := $(if $(TWITTER_BOOKMARKER_ADDR),$(TWITTER_BOOKMARKER_ADDR),127.0.
 
 .DEFAULT_GOAL := build
 
-.PHONY: build backend extension web test dev-web dev-backend run fmt lint clean clean-storage
+.PHONY: build backend extension web test dev-web dev-backend run fmt lint clean clean-storage docker-build docker-up docker-down docker-logs
 
 build: backend extension web ## Build the server binary, the loadable extension and the web SPA.
 
@@ -137,6 +137,24 @@ run: ## Run the built server (build it first with `make build`).
 	TWITTER_BOOKMARKER_DIR="$(STORAGE_DIR)" TWITTER_BOOKMARKER_WEB_DIR="$(WEB_DIR)" \
 		TWITTER_BOOKMARKER_ADDR="$(LISTEN_ADDR)" TWITTER_BOOKMARKER_TOKEN="$(TWITTER_BOOKMARKER_TOKEN)" \
 		./$(BACKEND_BIN)
+
+docker-build: ## Build the image (server + built SPA).
+	docker compose build
+
+docker-up: ## Start the container (reads .env; see .env.example).
+	@if [ ! -f .env ]; then \
+		echo "error: .env not found; copy .env.example and set TWITTER_BOOKMARKER_DATA_DIR" >&2; \
+		exit 1; \
+	fi
+	docker compose up -d --build
+	@echo "==> web:   http://$$(sed -n 's/^TWITTER_BOOKMARKER_ADDR=//p' .env | tail -1)/"
+	@echo "==> check: docker compose ps"
+
+docker-down: ## Stop and remove the container (the database is untouched).
+	docker compose down
+
+docker-logs: ## Follow the container log.
+	docker compose logs -f --tail=50
 
 fmt: ## Format the backend sources in place.
 	gofmt -w backend

@@ -23,3 +23,7 @@ artifacts/
 
 # Local, machine-specific make overrides (e.g. TWITTER_BOOKMARKER_DIR)
 .env.local
+
+# Local, machine-specific compose settings (absolute path, uid/gid). The keys are
+# documented in the committed .env.example.
+.env

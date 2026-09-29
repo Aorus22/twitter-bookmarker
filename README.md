@@ -234,6 +234,66 @@ are synchronous per request and the commit is fsynced.
 > The server honours `$HOME`, so `HOME=$(mktemp -d) ./backend/bin/twitter-bookmarker-server`
 > gives you a throwaway storage directory.
 
+### Or run it in Docker
+
+One container, because one process serves everything: the Go server answers the
+API *and* serves the built SPA out of `TWITTER_BOOKMARKER_WEB_DIR`. There is no
+second web container and no proxy to keep in step.
+
+```bash
+cp .env.example .env   # then set TWITTER_BOOKMARKER_DATA_DIR
+make docker-up         # docker compose up -d --build
+```
+
+The app is then on <http://127.0.0.1:43121/> — the same address as `make run`, so
+the extension, the phone patch and a tunnel keep working unchanged.
+
+`.env` holds the absolute path of the data directory, and **the container mounts
+it at that same path**, so one variable is the whole mapping:
+
+```dotenv
+TWITTER_BOOKMARKER_DATA_DIR=/home/you/Personal/twitter-bookmarker
+```
+
+A startup line shows both halves agreeing on one file:
+
+```text
+msg="serving built web app" web_dist=/app/web
+msg="Twitter Bookmarker server started" listening=127.0.0.1:43121 storage=/home/you/Personal/twitter-bookmarker collections=9 bookmarks=3191
+```
+
+**Why host networking.** The server decides whether to demand a token from the
+peer address, and trusts loopback. Publishing a port would destroy that: the
+connection is NAT'd, so the server sees the Docker bridge instead. Measured on
+this machine with a published port, the peer was `172.17.0.1` — meaning every
+client would need a token, *including the gallery in the browser*, which has no
+token field. `network_mode: host` keeps the address the server sees, so the rules
+in [Where the server listens](#where-the-server-listens) and
+[A tunnel is a third way in](#a-tunnel-is-a-third-way-in-and-the-token-does-not-cover-it)
+apply verbatim. It also means the port keys below are real host ports, not
+mappings.
+
+**Why the uid matters.** The storage directory is mode `0700` and owned by you, so
+the container runs as that uid (`TWB_UID`/`TWB_GID` in `.env`, defaulting to
+`1000:1000`). A mismatch is not subtle in the logs: the server cannot open the
+database.
+
+| Command | What it does |
+|---|---|
+| `make docker-up` | Build and start the container (reads `.env`) |
+| `make docker-logs` | Follow the log |
+| `make docker-down` | Stop and remove the container; the database is untouched |
+| `make docker-build` | Rebuild the image only |
+
+To update: `git pull && make docker-up`. The image build runs `pnpm install` and
+`vite build`, so the first build needs network and a few minutes; later ones reuse
+the layer cache. `restart: unless-stopped` brings it back after a reboot or a
+crash, and `docker compose down` sends `SIGTERM`, which the server drains cleanly.
+
+> `.env` is Compose's file, with `KEY=value` lines. `.env.local` is the Makefile's,
+> with `:=` assignments, which is why the same path is configured in both places
+> when both are used.
+
 ### 3. Load the unpacked extension
 
 1. Open `chrome://extensions`

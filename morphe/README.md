@@ -14,18 +14,21 @@ the pin.
 ## Status
 
 Phase 3: the button saves into a collection. Tapping it reads the tweet out of
-the action bar, lists the backend's collections in a native bottom sheet, and
-posts the tweet to the chosen one; long-pressing it edits the backend address and
-token. The app's own bookmark state is still never read or written.
+the action bar, opens the collection picker from cache, and posts the tweet to the
+chosen one; long-pressing it edits the backend address and token. A tweet that is
+already in the archive is marked, and tapping it says which collection holds it.
+The app's own bookmark state is still never read or written.
 
 | Step | State |
 |---|---|
 | Button appears in the action bar | verified on a device (X `12.19.1-release.0`) |
 | Tweet object read from the action bar | verified on a device |
-| Patch bundle builds, with the Android parts present | CI builds it on every change to the overlay, and refuses to publish a bundle without `classes.dex` |
+| Patch bundle builds, with the Android parts present | CI builds it on every change to the overlay, and refuses to publish a bundle without `classes.dex` or the two button icons |
 | Settings (base URL, token, test connection) | written, not yet run on a device |
 | `GET /api/gallery/collections` + `POST /v1/bookmarks` + collection sheet | written, not yet run on a device |
-| Saved state from `GET /v1/index`, move/delete from the phone | not written (Phase 4) |
+| 48 dp touch target, gap, and its own two glyphs | written, not yet run on a device |
+| Saved state from `GET /v1/index` + the "already saved" sheet | written, not yet run on a device |
+| Move/delete from the phone | not written (Phase 4) |
 
 ## Layout
 
@@ -37,15 +40,17 @@ morphe/
 └── overlay/                 copied verbatim onto the pinned checkout
     ├── patches/src/main/kotlin/app/crimera/patches/twitter/bookmarker/
     │   ├── SaveToBookmarkerPatch.kt           the bytecode patch
-    │   └── SaveToBookmarkerResourcePatch.kt   ships the button icon
+    │   └── SaveToBookmarkerResourcePatch.kt   ships the button icons
     ├── patches/src/main/resources/twitter/bookmarker/drawable/
-    │   └── ic_twb_bookmark.xml
+    │   ├── ic_twb_bookmark.xml                outlined bookmark + plus (not saved)
+    │   └── ic_twb_bookmark_saved.xml          filled bookmark + tick (saved)
     └── extensions/twitter/src/main/java/app/morphe/extension/twitter/patches/bookmarker/
         ├── SaveButton.java                    the action-bar button and the tap flow
-        ├── BookmarkerSheets.java              the collection picker (Piko's own bottom sheet)
+        ├── BookmarkerCache.java               collections + saved index, in memory
+        ├── BookmarkerSheets.java              the collection picker and the saved notice
         ├── BookmarkerSettingsDialog.java      backend URL, token, "Test"
-        ├── BookmarkerPrefs.java               where those two values live
-        ├── BookmarkerApi.java                 HTTP only: health, collections, save
+        ├── BookmarkerPrefs.java               those two values, plus the cached collections
+        ├── BookmarkerApi.java                 HTTP only: health, collections, index, save
         ├── TweetDraft.java                    tweet object -> the backend's fields
         └── Slug.java                          name -> slug, mirroring the browser extension
 ```
@@ -63,13 +68,17 @@ button, which is the reason this is a small patch rather than research:
    patch finds the field the app really writes the tweet into and rewrites that
    literal inside the compiled extension class. No obfuscated name is hardcoded.
 3. **The button is a sibling, not a replacement.** The bar is wrapped in a
-   horizontal `LinearLayout` with our `ImageView` after it, and the styling
-   (padding, scale type, tint, layout params) is copied from the last visible
-   action so it matches whichever theme and tweet layout is on screen.
-4. **The icon is our own resource.** `copyResources` puts
-   `ic_twb_bookmark.xml` into the app's drawable table, so our button is visually
-   distinct from the native bookmark it sits next to. If the lookup ever fails,
-   the code falls back to an icon that is known to exist in the app and logs it.
+   horizontal `LinearLayout` with our button after it: the styling that must agree
+   with the row (padding, scale type, layout params) is copied from the last
+   visible action so it matches whichever theme and tweet layout is on screen,
+   while the two things that must *not* agree are ours alone — a 48 dp clickable
+   box with an 8 dp gap, and the tint that marks a saved tweet.
+4. **The icons are our own resources.** `copyResources` puts both
+   `ic_twb_bookmark.xml` (not saved) and `ic_twb_bookmark_saved.xml` (saved) into
+   the app's drawable table, so the button is visually distinct from the native
+   bookmark it sits next to, and its own two states are distinct from each other.
+   If either lookup fails the code falls back to its unsaved glyph, then to an
+   icon that is known to exist in the app, and logs it.
 
 ## Saving a tweet
 
@@ -79,20 +88,60 @@ button, which is the reason this is a small patch rather than research:
 2. The tweet is turned into the backend's fields (`TweetDraft`): the link, the
    profile name, the `@handle`, the text, the media URLs, and the date — see
    below for where the date comes from.
-3. `GET /api/gallery/collections` fills a native bottom sheet, one row per
-   collection, plus **New collection…**. That row is not a nicety: collections
-   exist only once something has been saved into them, so without it a phone with
-   an empty database could never save anything. The name is slugged locally
-   (`Slug.java`, mirroring `extension/src/shared/slug.ts`) before it is sent.
-4. The chosen slug goes to `POST /v1/bookmarks`. A `201` toasts the collection, a
-   `409` says where the tweet already lives (the backend names the owning
-   collection, which may not be the one just picked), a `401` names the token, and
-   an unreachable backend says so and saves nothing.
+3. The collection picker is a native bottom sheet, one row per collection, plus
+   **New collection…** — drawn from `BookmarkerCache`, not from a request, so it
+   appears in the same frame as the tap. The **New collection…** row is not a
+   nicety: collections exist only once something has been saved into them, so
+   without it a phone with an empty database could never save anything. The name
+   is slugged locally (`Slug.java`, mirroring `extension/src/shared/slug.ts`)
+   before it is sent.
+4. The chosen slug goes to `POST /v1/bookmarks`. A `201` toasts the collection and
+   marks the tweet, a `409` says where the tweet already lives (the backend names
+   the owning collection, which may not be the one just picked), a `401` names the
+   token, and an unreachable backend says so and saves nothing.
 
 **Long-press** reopens the settings dialog. **Test** inside it checks `/health`
 for reachability and then `/v1/index` for the token, because those are two
 different failures: a tunnel that is up with a wrong token looks like a working
 setup until a save fails.
+
+### The button, and why it looks like that
+
+The first version of this button was too easy to hit by accident: an icon the size
+of its neighbours, flush against the native bookmark on one side and Piko's
+download button on the other. Three things are deliberate now.
+
+- **A 48 dp touch target with an 8 dp gap.** The glyph still matches the actions
+  around it — the clickable box does not, which is the size that matters for a
+  thumb.
+- **Its own two glyphs**, shipped by `SaveToBookmarkerResourcePatch`: an outlined
+  bookmark with a plus (`ic_twb_bookmark`) when the tweet is not in the archive,
+  and a filled bookmark with a tick cut out of it (`ic_twb_bookmark_saved`) when
+  it is. Both are tinted as a whole at runtime, which is why the tick is a hole
+  rather than a second colour.
+- **The mark comes from the archive, not from guesswork** — see below.
+
+### Already saved
+
+A tweet that is already in one of the collections is marked, and tapping it says
+where instead of offering a save the backend would reject with `409`.
+
+`GET /v1/index` is the source: it returns every saved tweet id at once, so one
+request answers for every tweet that scrolls past, and a mark costs a map lookup.
+The trade-off, stated because it is a real one:
+
+| | |
+|---|---|
+| Trusted for | 10 minutes (`TTL_MS`), or until the app is reopened |
+| Refreshed by | a tweet scrolling into view once that TTL has passed |
+| Attempts spaced by | 30 s (`MIN_ATTEMPT_GAP_MS`), so a wrong token or a stopped backend cannot turn a scroll into a request storm |
+| Cost | one ~430 KB body per refresh (3.2k tweets today), zero while idle |
+| Immediate | a save made on this phone marks itself from the response, with no refetch |
+| On disk | only the collection list is persisted (`twb_settings`), tagged with the backend that wrote it — another archive's slugs are never offered as save targets. The saved index is refetched |
+
+A failed refresh is silent by design: it happens while the user is scrolling, and
+the failures worth reporting (unreachable, wrong token) already have a place to be
+reported — the settings dialog's **Test**, or the save the user asked for.
 
 ### Why the settings are not in Piko's settings screen
 
@@ -190,7 +239,12 @@ Bookmarker** when patching, and install the result:
    in the backend URL (and a token if the backend wants one), tap **Test**, then
    **Save**.
 3. Tap the button again: a sheet lists the collections, with **New collection…**
-   at the bottom. Pick one; the toast names it.
+   at the bottom. Pick one; the toast names it. The sheet opens straight from the
+   cached list, so it appears in the same frame as the tap — the first tap after a
+   fresh install is the one that has to fetch, and it says so.
+4. The saved tweet is now marked (filled bookmark, blue). Tapping a marked tweet
+   opens a sheet naming the collection that holds it instead of saving again;
+   **long-press** reopens the settings dialog at any time.
 
 If the button does not appear, the hook did not land — check Morphe's patch log
 for the patch name rather than guessing from the UI.

@@ -14,7 +14,8 @@ import android.content.SharedPreferences;
 import app.morphe.extension.shared.Utils;
 
 /**
- * Where the phone keeps the backend address and the token.
+ * Where the phone keeps the backend address, the token, and the last collection
+ * list it saw.
  *
  * <p>These live in the overlay's own preference file rather than in Piko's
  * {@code piko_settings}. Piko's rows are built in Java inside its
@@ -28,6 +29,9 @@ public final class BookmarkerPrefs {
     private static final String FILE_NAME = "twb_settings";
     private static final String KEY_BACKEND_URL = "backend_url";
     private static final String KEY_BACKEND_TOKEN = "backend_token";
+    private static final String KEY_COLLECTIONS_JSON = "collections_json";
+    private static final String KEY_COLLECTIONS_AT = "collections_at";
+    private static final String KEY_COLLECTIONS_URL = "collections_url";
 
     private BookmarkerPrefs() {}
 
@@ -53,6 +57,44 @@ public final class BookmarkerPrefs {
      */
     public static boolean isConfigured() {
         return !backendUrl().isEmpty();
+    }
+
+    /**
+     * The collection list from the last successful fetch, as JSON, or "".
+     *
+     * <p>Kept so the picker can be drawn from disk on a cold app start instead of
+     * waiting for a request; {@link #cachedCollectionsAt()} is its age, and the
+     * cache refreshes once it is older than its TTL. It is only usable for the
+     * backend that wrote it — see {@link #cachedCollectionsUrl()}.
+     */
+    public static String cachedCollectionsJson() {
+        String json = prefs().getString(KEY_COLLECTIONS_JSON, "");
+        return json == null ? "" : json;
+    }
+
+    /** When {@link #cachedCollectionsJson()} was written, or 0 if never. */
+    public static long cachedCollectionsAt() {
+        return prefs().getLong(KEY_COLLECTIONS_AT, 0L);
+    }
+
+    /**
+     * The backend the cached list came from.
+     *
+     * <p>Stored because a collection is identified by its slug, and slugs are only
+     * meaningful inside one archive: offering the previous backend's slugs as save
+     * targets would quietly create those collections in the new one.
+     */
+    public static String cachedCollectionsUrl() {
+        String url = prefs().getString(KEY_COLLECTIONS_URL, "");
+        return url == null ? "" : url;
+    }
+
+    public static void saveCachedCollections(String json, String backendUrl) {
+        prefs().edit()
+                .putString(KEY_COLLECTIONS_JSON, json == null ? "" : json)
+                .putString(KEY_COLLECTIONS_URL, backendUrl == null ? "" : backendUrl)
+                .putLong(KEY_COLLECTIONS_AT, System.currentTimeMillis())
+                .apply();
     }
 
     public static void save(String backendUrl, String token) {

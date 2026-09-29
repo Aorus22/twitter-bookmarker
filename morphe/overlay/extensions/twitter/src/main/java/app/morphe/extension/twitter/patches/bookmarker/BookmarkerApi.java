@@ -22,7 +22,10 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import app.morphe.extension.shared.Logger;
 
@@ -159,6 +162,48 @@ public final class BookmarkerApi {
         } catch (Exception e) {
             return new Result(false, false, null, "cannot reach " + base + ": " + shortReason(e));
         }
+    }
+
+    /**
+     * Which tweet is in which collection, for the whole archive
+     * ({@code GET /v1/index}).
+     *
+     * <p>One request answers for every tweet that will scroll past, which is why
+     * this is fetched whole rather than asked per tweet: the body is the backend's
+     * own index, and the alternative — a request per tweet — would be slower per
+     * tweet and would wake the radio hundreds of times per scroll.
+     */
+    public static Map<String, String> savedIndex(String baseUrl, String token) throws IOException {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) throw new IOException("no backend URL set");
+
+        Response response = request(base, "/v1/index", token, "GET", null);
+        if (response.status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            throw new IOException("the token was rejected (401)");
+        }
+        if (response.status != HttpURLConnection.HTTP_OK) {
+            throw new IOException("the backend returned " + response.status);
+        }
+
+        Map<String, String> out = new HashMap<>();
+        try {
+            JSONObject items = new JSONObject(response.body).optJSONObject("items");
+            if (items == null) return out;
+
+            for (Iterator<String> keys = items.keys(); keys.hasNext(); ) {
+                String tweetId = keys.next();
+                JSONObject item = items.optJSONObject(tweetId);
+                if (item == null) continue;
+                String slug = item.optString("slug", "");
+                if (tweetId.isEmpty() || slug.isEmpty()) continue;
+                out.put(tweetId, slug);
+            }
+        } catch (Exception e) {
+            // A body that is not the JSON we expect is a failed call, not an empty
+            // archive: reporting "nothing saved" would silently unmark every tweet.
+            throw new IOException("could not read the saved index: " + e);
+        }
+        return out;
     }
 
     /** The collections a tweet can be saved into, in the backend's order. */

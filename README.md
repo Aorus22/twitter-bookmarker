@@ -56,8 +56,11 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 The phone is a second client of the same API rather than a second backend: X has
 no hook for this, so the app is patched with Morphe, and the patch adds a save
 button beside the native bookmark action. It sends the same payload the extension
-does, which is why nothing in `backend/` changed for it. Sources, build and the
-device runbook live in [morphe/](morphe/README.md), and the LAN bind it needs is
+does, which is why nothing in `backend/` changed for it. The button is a 48 dp
+target with a gap so it is not hit by accident, and a tweet that is already in a
+collection is marked — see [Already saved](morphe/README.md#already-saved) for how
+that mark is kept fresh. Sources, build and the device runbook live in
+[morphe/](morphe/README.md), and the LAN bind it needs is
 [Where the server listens](#where-the-server-listens).
 
 ### Where the database lives

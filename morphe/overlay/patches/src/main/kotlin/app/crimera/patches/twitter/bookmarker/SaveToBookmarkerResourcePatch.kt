@@ -13,11 +13,12 @@ import app.morphe.util.ResourceGroup
 import app.morphe.util.copyResources
 
 /**
- * Ships the save button's own icon.
+ * Ships the save button's own icons.
  *
- * The button uses a drawable of ours rather than a name from the app: the native
+ * The button uses drawables of ours rather than names from the app: the native
  * bookmark icon is a different action, so reusing its artwork would make the two
- * buttons indistinguishable. The resource name is what
+ * buttons indistinguishable. Two of them, because the button shows whether the
+ * tweet is already in the archive. The resource names are what
  * `ResourceUtils.getIdentifier` looks up at runtime.
  */
 @Suppress("unused")
@@ -29,6 +30,7 @@ val saveToBookmarkerResourcePatch =
                 ResourceGroup(
                     "drawable",
                     "ic_twb_bookmark.xml",
+                    "ic_twb_bookmark_saved.xml",
                 ),
             )
         }

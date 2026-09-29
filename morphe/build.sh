@@ -157,10 +157,12 @@ for artifact in "$OUT"/patches-*.mpp; do
     note "  $(basename "$artifact")  $(sha256sum "$artifact" | cut -d' ' -f1)"
 done
 
-# A bundle missing either of these still lists its patches and still patches fine
+# A bundle missing any of these still lists its patches and still patches fine
 # in a desktop CLI, so nothing else would notice: classes.dex is what lets Morphe
-# Manager apply a patch on a phone, and twitter.mpe is the extension code the
-# patch calls into. A silent miss would only surface as a crash after install.
+# Manager apply a patch on a phone, twitter.mpe is the extension code the patch
+# calls into, and the two drawables are the button's own icons (without them the
+# button silently borrows an app icon, which is how it became indistinguishable
+# from the native bookmark). A silent miss would only surface after install.
 bundle="$(ls -1 "$OUT"/patches-*.mpp | head -1)"
 if command -v unzip >/dev/null 2>&1; then
     entries="$(unzip -Z1 "$bundle")"
@@ -176,8 +178,14 @@ if [ -n "$entries" ]; then
     for required in classes.dex extensions/twitter.mpe; do
         grep -qx "$required" <<<"$entries" || missing+=("$required")
     done
+    # The icons are matched by name rather than by full path: the container layout
+    # inside the bundle is the patch library's business, not ours. Both a root
+    # entry and a nested one count.
+    for required in ic_twb_bookmark.xml ic_twb_bookmark_saved.xml; do
+        grep -qx "$required" <<<"$entries" || grep -q "/$required\$" <<<"$entries" || missing+=("$required")
+    done
     if [ "${#missing[@]}" -gt 0 ]; then
         die "$(basename "$bundle") is missing ${missing[*]}; a patch manager cannot load it"
     fi
-    note "bundle contains classes.dex and extensions/twitter.mpe"
+    note "bundle contains classes.dex, extensions/twitter.mpe and both button icons"
 fi

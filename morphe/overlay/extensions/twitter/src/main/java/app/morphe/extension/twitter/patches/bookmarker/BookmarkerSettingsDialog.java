@@ -94,6 +94,10 @@ public final class BookmarkerSettingsDialog {
                 BookmarkerPrefs.save(
                         urlInput.getText().toString(),
                         tokenInput.getText().toString());
+                // The cache holds answers from the backend that was configured
+                // until now; this one line makes the marks and the picker belong to
+                // the address that was just saved.
+                BookmarkerCache.refreshNow();
                 Utils.showToastShort("Twitter Bookmarker: settings saved");
                 dialog.dismiss();
                 if (onSaved != null) onSaved.run();

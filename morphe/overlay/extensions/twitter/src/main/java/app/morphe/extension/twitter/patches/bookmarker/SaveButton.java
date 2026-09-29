@@ -21,14 +21,17 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.ResourceType;
 import app.morphe.extension.shared.ResourceUtils;
 import app.morphe.extension.shared.Utils;
+import app.morphe.extension.twitter.entity.Tweet;
 
 /**
  * The save button on the tweet inline action bar: a sibling of the native
@@ -38,18 +41,62 @@ import app.morphe.extension.shared.Utils;
  * long press edits the backend address and token. The app's own bookmark state
  * is never read and never written — the two bookmarks are independent by design,
  * so nothing here can damage the account's real bookmarks.
+ *
+ * <p>Three things about the button are deliberate, because the first version of
+ * it got them wrong on a real phone:
+ *
+ * <ul>
+ *   <li><b>It is a 48 dp touch target with a gap.</b> The icon matches its
+ *       neighbours, but the clickable box around it does not: at icon size it sat
+ *       flush against the native bookmark on one side and Piko's download button
+ *       on the other, and taps landed on the wrong control.</li>
+ *   <li><b>The sheet opens from {@link BookmarkerCache}, not from the network.</b>
+ *       Fetching the collection list before showing anything cost a round trip on
+ *       every tap.</li>
+ *   <li><b>An already-saved tweet is marked, and says where.</b> The mark comes
+ *       from the same cache, and the tap then explains itself instead of offering
+ *       a save the backend would reject with 409.</li>
+ * </ul>
  */
 @SuppressWarnings("unused")
 public class SaveButton {
 
     private static final String WRAPPER_TAG = "twb_save_wrapper";
     private static final String ICON_NAME = "ic_twb_bookmark";
+    private static final String SAVED_ICON_NAME = "ic_twb_bookmark_saved";
 
     /** Last-resort icon, borrowed from the app, if our own resource is missing. */
     private static final String FALLBACK_ICON_NAME = "ic_vector_incoming";
 
     /** Neutral grey that reads on both X themes, used when no sibling tint is found. */
     private static final int FALLBACK_TINT = 0xFF536471;
+
+    /**
+     * The saved state's tint: the app's own accent blue, so "already in my
+     * archive" reads as an active state rather than as another grey action.
+     */
+    private static final int SAVED_TINT = 0xFF1D9BF0;
+
+    /**
+     * Minimum size of the clickable box. The Android accessibility guideline is
+     * 48 dp; the glyph inside stays the size of its neighbours.
+     */
+    private static final int TOUCH_TARGET_DP = 48;
+
+    /** Space between our box and the action bar, so the two are not one target. */
+    private static final int BUTTON_GAP_DP = 8;
+
+    /**
+     * Our live buttons, keyed by the container we added, valued by the tint the
+     * unsaved state uses.
+     *
+     * <p>Weak keys and a value that cannot reach its key: the value is a colour,
+     * so a recycled row is collected instead of pinning its view. Only the main
+     * thread touches this map.
+     */
+    private static final Map<View, ColorStateList> LIVE_BUTTONS = new WeakHashMap<>();
+
+    private static boolean listeningForCache = false;
 
     private static final Map<Class<?>, Field> FIELD_CACHE = new ConcurrentHashMap<>();
 
@@ -79,10 +126,18 @@ public class SaveButton {
     }
 
     private static void addSaveButton(ViewGroup inlineActionBar) {
+        // One action bar scrolling in is one reason to check whether what we know
+        // about the backend is still fresh: this is the only clock the overlay has,
+        // and it returns immediately unless the cache is missing or past its TTL.
+        BookmarkerCache.warmUp();
+
         ViewParent currentParent = inlineActionBar.getParent();
         if (currentParent instanceof LinearLayout
                 && WRAPPER_TAG.equals(((LinearLayout) currentParent).getTag())) {
-            // The bar is recycled by the list; it is already ours.
+            // The bar is recycled by the list; the button is already ours, but the
+            // tweet behind it may be a different one, so repaint for whatever this
+            // row now holds.
+            repaint((ViewGroup) currentParent);
             return;
         }
         if (!(currentParent instanceof ViewGroup)) return;
@@ -115,6 +170,10 @@ public class SaveButton {
         container.setLongClickable(true);
         container.setFocusable(true);
         container.setContentDescription("Save to Twitter Bookmarker");
+
+        int touchTarget = dp(context, TOUCH_TARGET_DP);
+        container.setMinimumWidth(touchTarget);
+        container.setMinimumHeight(touchTarget);
         container.addView(
                 icon,
                 new FrameLayout.LayoutParams(
@@ -129,23 +188,32 @@ public class SaveButton {
             return true;
         });
 
-        wrapper.addView(
-                container,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout.LayoutParams containerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        containerParams.setMarginStart(dp(context, BUTTON_GAP_DP));
+        wrapper.addView(container, containerParams);
 
         parent.addView(wrapper, index, originalLayoutParams);
 
         // Copy the look of the action next to us once the bar has real children,
-        // so the button is not a differently sized odd one out.
-        wrapper.post(() -> syncFromNeighbour(inlineActionBar, container, icon));
+        // so the button is not a differently sized odd one out — then paint the
+        // saved state, which is the one thing that may differ from that action.
+        wrapper.post(() -> {
+            ColorStateList neutralTint = styleFromNeighbour(inlineActionBar, container, icon);
+            trackButton(container, neutralTint);
+            paintSavedState(container, inlineActionBar, neutralTint);
+            repaintWhenReattached(container);
+        });
     }
 
     /**
-     * One tap, one save: read the tweet, list the collections, ask which one,
-     * then post. Each step can fail on its own and says so — a tap that silently
-     * does nothing is indistinguishable from a patch that did not apply.
+     * Saves the tweet the tapped bar belongs to.
+     *
+     * <p>When it is already in the archive, the tap explains where instead of
+     * offering a save that cannot succeed (the backend answers 409). Otherwise the
+     * picker is drawn from {@link BookmarkerCache}, so nothing here waits on the
+     * network except the very first tap of a fresh install.
      */
     private static void onSaveClicked(ViewGroup inlineActionBar) {
         Object rawTweet;
@@ -153,41 +221,61 @@ public class SaveButton {
             rawTweet = readField(inlineActionBar, getTweetFieldName());
         } catch (Exception e) {
             Logger.printException(() -> "twb: could not read the tweet", e);
-            Utils.showToastShort("Twitter Bookmarker: could not read the tweet");
+            toast("Twitter Bookmarker: could not read the tweet");
             return;
         }
 
         if (rawTweet == null) {
-            Utils.showToastShort("Twitter Bookmarker: no tweet data");
+            toast("Twitter Bookmarker: no tweet data");
             return;
         }
 
         Context context = inlineActionBar.getContext();
         if (!BookmarkerPrefs.isConfigured()) {
             // Nothing to save into yet, so the first tap is the one that asks.
-            Utils.showToastShort("Twitter Bookmarker: set the backend URL to start saving");
+            toast("Twitter Bookmarker: set the backend URL to start saving");
             BookmarkerSettingsDialog.show(context, null);
             return;
         }
 
+        String tweetId = tweetIdOf(rawTweet);
+        String savedSlug = BookmarkerCache.savedSlug(tweetId);
+        if (savedSlug != null) {
+            Logger.printInfo(() -> "twb: tapped an already saved tweet (" + savedSlug + ")");
+            BookmarkerSheets.showSavedInfo(context, BookmarkerCache.nameFor(savedSlug), savedSlug);
+            return;
+        }
+
+        BookmarkerApi.Draft draft;
+        try {
+            draft = TweetDraft.from(rawTweet);
+        } catch (Exception e) {
+            Logger.printException(() -> "twb: could not read the tweet", e);
+            toast("Twitter Bookmarker: could not read the tweet");
+            return;
+        }
+
+        String missing = TweetDraft.missingField(draft);
+        if (missing != null) {
+            toast("Twitter Bookmarker: " + missing + " is not available for this tweet");
+            return;
+        }
+
+        List<BookmarkerApi.Collection> cached = BookmarkerCache.collectionsOrNull();
+        if (cached != null) {
+            showPicker(context, tweetId, draft, cached);
+            return;
+        }
+
+        // A fresh install has nothing cached, so this one fetch is unavoidable —
+        // but it is announced, because a tap that does nothing for a second is
+        // indistinguishable from a patch that did not apply.
+        Utils.showToastShort("Twitter Bookmarker: loading collections\u2026");
         Utils.runOnBackgroundThread(() -> {
             try {
-                BookmarkerApi.Draft draft = TweetDraft.from(rawTweet);
-                String missing = TweetDraft.missingField(draft);
-                if (missing != null) {
-                    toast("Twitter Bookmarker: " + missing + " is not available for this tweet");
-                    return;
-                }
-
-                List<BookmarkerApi.Collection> collections = BookmarkerApi.collections(
+                List<BookmarkerApi.Collection> fetched = BookmarkerApi.collections(
                         BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken());
-
-                Utils.runOnMainThread(() -> {
-                    Logger.printInfo(() -> "twb: tapped " + draft.url);
-                    BookmarkerSheets.showCollectionPicker(
-                            context, draft, collections,
-                            (slug, name) -> save(draft, slug, name));
-                });
+                Utils.runOnMainThread(() -> showPicker(context, tweetId, draft, fetched));
             } catch (Exception e) {
                 Logger.printException(() -> "twb: could not list collections", e);
                 toast("Twitter Bookmarker: " + reason(e));
@@ -195,17 +283,169 @@ public class SaveButton {
         });
     }
 
+    private static void showPicker(Context context, String tweetId, BookmarkerApi.Draft draft,
+                                   List<BookmarkerApi.Collection> collections) {
+        Logger.printInfo(() -> "twb: tapped " + draft.url);
+        BookmarkerSheets.showCollectionPicker(
+                context, draft, collections,
+                (slug, name) -> save(tweetId, draft, slug, name));
+    }
+
     /**
      * The save itself, off the main thread. A 409 is reported in the backend's
      * own words ("already saved in …"), because the tweet may well be in a
-     * different collection than the one just picked.
+     * different collection than the one just picked — and either way the mark is
+     * now correct, with no refetch.
      */
-    private static void save(BookmarkerApi.Draft draft, String slug, String name) {
+    private static void save(String tweetId, BookmarkerApi.Draft draft, String slug, String name) {
         Utils.runOnBackgroundThread(() -> {
             BookmarkerApi.Result result = BookmarkerApi.save(
                     BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(), slug, name, draft);
+
+            if (result.ok) {
+                BookmarkerCache.remember(tweetId, slug, name);
+            } else if (result.duplicate && result.slug != null) {
+                // It is in the archive after all: mark it, and only claim a name for
+                // the collection we know the name of.
+                BookmarkerCache.remember(tweetId, result.slug, result.slug.equals(slug) ? name : "");
+            }
+
             toast("Twitter Bookmarker: " + result.message);
         });
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* the saved mark                                                         */
+    /* ---------------------------------------------------------------------- */
+
+    /** Register a container so a cache change repaints it, and start listening. */
+    private static void trackButton(View container, ColorStateList neutralTint) {
+        LIVE_BUTTONS.put(container, neutralTint);
+        if (listeningForCache) return;
+
+        listeningForCache = true;
+        BookmarkerCache.addListener(SaveButton::repaintAll);
+    }
+
+    /** Repaint every live button; the cache runs this on the main thread. */
+    private static void repaintAll() {
+        for (Map.Entry<View, ColorStateList> entry : new ArrayList<>(LIVE_BUTTONS.entrySet())) {
+            repaint(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /** Repaint one wrapper's button, for whatever tweet its bar now holds. */
+    private static void repaint(ViewGroup wrapper) {
+        View container = ourContainerIn(wrapper);
+        if (container == null) return;
+
+        ColorStateList neutralTint = LIVE_BUTTONS.get(container);
+        repaint(container, neutralTint);
+    }
+
+    private static void repaint(View container, ColorStateList neutralTint) {
+        ViewGroup bar = barOf(container);
+        if (bar == null) return;
+        paintSavedState(container, bar, neutralTint);
+    }
+
+    /**
+     * The two looks of the button, chosen by whether the tweet is in the archive.
+     *
+     * <p>Both the glyph and the tint change, because either alone is easy to miss
+     * on a 24 dp icon in a row of other icons; the description changes too, so the
+     * state is not carried by colour alone.
+     */
+    private static void paintSavedState(View container, ViewGroup bar, ColorStateList neutralTint) {
+        ImageView icon = findIcon(container);
+        if (icon == null) return;
+
+        ColorStateList unsavedTint = neutralTint != null ? neutralTint : ColorStateList.valueOf(FALLBACK_TINT);
+        String tweetId = tweetIdOfBar(bar);
+        String slug = BookmarkerCache.savedSlug(tweetId);
+        if (slug == null) {
+            icon.setImageResource(iconResourceId());
+            icon.setImageTintList(unsavedTint);
+            container.setContentDescription("Save to Twitter Bookmarker");
+            return;
+        }
+
+        icon.setImageResource(savedIconResourceId());
+        icon.setImageTintList(ColorStateList.valueOf(SAVED_TINT));
+        container.setContentDescription("Already saved in " + BookmarkerCache.nameFor(slug));
+    }
+
+    /**
+     * The list reuses rows, and a reused row is a different tweet in the same
+     * view: repainting when the row comes back on screen is what keeps the mark
+     * from describing the tweet that used to be there.
+     */
+    private static void repaintWhenReattached(View container) {
+        container.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View view) {
+                repaint(view, LIVE_BUTTONS.get(view));
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View view) {
+                // Nothing to do: the detach is what makes the repaint above happen.
+            }
+        });
+    }
+
+    /**
+     * Our container inside a wrapper. Identified by identity rather than by type:
+     * the bar it sits next to may itself be a FrameLayout, and repainting the
+     * app's own icons would be a visible bug.
+     */
+    private static View ourContainerIn(ViewGroup wrapper) {
+        for (int i = 0; i < wrapper.getChildCount(); i++) {
+            View child = wrapper.getChildAt(i);
+            if (LIVE_BUTTONS.containsKey(child)) return child;
+        }
+        return null;
+    }
+
+    /** The action bar inside a wrapper: the first child we added. */
+    private static ViewGroup barOf(View container) {
+        ViewParent parent = container.getParent();
+        if (!(parent instanceof ViewGroup)) return null;
+
+        ViewGroup wrapper = (ViewGroup) parent;
+        if (wrapper.getChildCount() == 0) return null;
+        View bar = wrapper.getChildAt(0);
+        return bar instanceof ViewGroup ? (ViewGroup) bar : null;
+    }
+
+    /** The status id of the tweet a bar holds, or null when it holds none yet. */
+    private static String tweetIdOfBar(ViewGroup bar) {
+        try {
+            return tweetIdOf(readField(bar, getTweetFieldName()));
+        } catch (Exception e) {
+            Logger.printInfo(() -> "twb: could not read the tweet id: " + e);
+            return null;
+        }
+    }
+
+    /** The status id as the backend keys it, or null when the app has none. */
+    private static String tweetIdOf(Object rawTweet) {
+        if (rawTweet == null) return null;
+        try {
+            Long statusId = new Tweet(rawTweet).getTweetId();
+            return statusId == null ? null : String.valueOf(statusId);
+        } catch (Exception e) {
+            Logger.printInfo(() -> "twb: could not read the tweet id: " + e);
+            return null;
+        }
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* view plumbing                                                          */
+    /* ---------------------------------------------------------------------- */
+
+    private static int dp(Context context, int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
     /** Toasts from wherever the work happened; Android wants a looper thread. */
@@ -226,6 +466,12 @@ public class SaveButton {
         return ResourceUtils.getIdentifier(ResourceType.DRAWABLE, FALLBACK_ICON_NAME);
     }
 
+    /** The filled glyph; without it the tint alone still marks a saved tweet. */
+    private static int savedIconResourceId() {
+        int id = ResourceUtils.getIdentifier(ResourceType.DRAWABLE, SAVED_ICON_NAME);
+        return id != 0 ? id : iconResourceId();
+    }
+
     private static int visibleActionCount(ViewGroup inlineActionBar) {
         int count = 0;
         for (int i = 0; i < inlineActionBar.getChildCount(); i++) {
@@ -239,12 +485,16 @@ public class SaveButton {
     /**
      * Matches the button to the last visible action, using only public view APIs:
      * the obfuscated colour field the sibling uses is not needed for a valid icon.
+     *
+     * @return the tint that means "not saved", so a later repaint can restore it
+     *         without asking the neighbour again.
      */
-    private static void syncFromNeighbour(ViewGroup inlineActionBar, FrameLayout container, ImageView icon) {
+    private static ColorStateList styleFromNeighbour(ViewGroup inlineActionBar, FrameLayout container, ImageView icon) {
+        ColorStateList fallback = ColorStateList.valueOf(FALLBACK_TINT);
         View referenceAction = lastVisibleAction(inlineActionBar);
         if (referenceAction == null) {
-            icon.setImageTintList(ColorStateList.valueOf(FALLBACK_TINT));
-            return;
+            icon.setImageTintList(fallback);
+            return fallback;
         }
 
         if (referenceAction instanceof ViewGroup) {
@@ -258,14 +508,14 @@ public class SaveButton {
 
         ImageView referenceIcon = findIcon(referenceAction);
         if (referenceIcon == null) {
-            icon.setImageTintList(ColorStateList.valueOf(FALLBACK_TINT));
-            return;
+            icon.setImageTintList(fallback);
+            return fallback;
         }
 
         icon.setScaleType(referenceIcon.getScaleType());
 
         ColorStateList tint = referenceIcon.getImageTintList();
-        icon.setImageTintList(tint != null ? tint : ColorStateList.valueOf(FALLBACK_TINT));
+        icon.setImageTintList(tint != null ? tint : fallback);
 
         ViewGroup.LayoutParams referenceParams = referenceIcon.getLayoutParams();
         if (referenceParams != null) {
@@ -275,6 +525,8 @@ public class SaveButton {
                             referenceParams.height,
                             Gravity.CENTER));
         }
+
+        return tint != null ? tint : fallback;
     }
 
     private static View lastVisibleAction(ViewGroup inlineActionBar) {

@@ -70,6 +70,30 @@ public final class BookmarkerSheets {
     }
 
     /**
+     * What a tap means once the tweet is already in the archive.
+     *
+     * <p>One row, and no collection rows: the tweet is in exactly one collection,
+     * and offering to save it again would only produce a 409. Moving a tweet
+     * between collections needs the backend's move endpoint, which does not exist
+     * yet — see the Phase 4 row in {@code morphe/README.md}.
+     */
+    public static void showSavedInfo(Context context, String name, String slug) {
+        if (context == null) return;
+        String where = name == null || name.isEmpty() ? slug : name;
+        if (where == null || where.isEmpty()) return;
+
+        // The bound item is a String here rather than a Draft: this sheet only has
+        // to say where the tweet lives, and its row needs no tweet data at all.
+        List<BottomSheetAction<String>> actions = new ArrayList<>();
+        actions.add(new BottomSheetAction<>(
+                COLLECTION_ICON,
+                "Already saved in " + where,
+                ignored -> {}));
+
+        BottomSheetHelper.show(context, where, "Twitter Bookmarker", actions, null);
+    }
+
+    /**
      * Asks for a name and turns it into a slug. A name that slugs down to nothing
      * is refused here rather than sent: the backend would answer 400, and the
      * user would be left wondering which character was the problem.

@@ -15,11 +15,6 @@ import (
 	"twitter-bookmarker/internal/model"
 )
 
-// maxCollectionNameLen bounds the stored display name. The extension's own name
-// input is capped far lower (60 characters), so this only ever rejects something
-// that did not come from the UI.
-const maxCollectionNameLen = 255
-
 // Store reads and writes the bookmark database.
 //
 // The whole save critical section runs under one mutex and each save is a single
@@ -138,13 +133,19 @@ func (s *Store) Save(req model.SaveRequest) (model.SaveResponse, error) {
 		return resp, fmt.Errorf("look up tweet %s: %w", tweetID, err)
 	}
 
-	savedAt := time.Now().UTC().Format(time.RFC3339)
+	savedAt := nowUTC()
 
 	// Create the collection on first save and refresh its display name on every
 	// later one, so the gallery always shows the name the user last used for a
-	// given slug. created_at is deliberately left alone by the update.
+	// given slug. created_at is deliberately left alone by the update, and so is
+	// sort_order: a save into an existing category must not move it to the end of
+	// a list the user arranged.
+	//
+	// A category created here is appended, exactly like POST /v1/collections, so
+	// a save is never a reason for the list to reorder itself.
 	if _, err := tx.Exec(
-		`INSERT INTO collections(slug, name, created_at) VALUES(?, ?, ?)
+		`INSERT INTO collections(slug, name, created_at, sort_order)
+		 VALUES(?, ?, ?, (SELECT coalesce(max(sort_order), -1) + 1 FROM collections))
 		 ON CONFLICT(slug) DO UPDATE SET name = excluded.name`,
 		req.Slug, name, savedAt,
 	); err != nil {
@@ -214,7 +215,7 @@ func (s *Store) Delete(tweetID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	deletedAt := time.Now().UTC().Format(time.RFC3339)
+	deletedAt := nowUTC()
 
 	// The archive INSERT doubles as the existence check: RowsAffected is 0 only
 	// when the SELECT matched nothing, so there is no window where the two
@@ -382,15 +383,15 @@ func (s *Store) Stats() (Stats, error) {
 
 // collectionName resolves the display name to store for a collection.
 //
-// A name the extension supplied wins (it is what the user actually typed, with
-// its own spacing and capitalisation); anything else falls back to a name derived
-// from the slug, which is what an older extension that sends no name gets.
+// A name the caller supplied wins (it is what the user actually typed, with its
+// own spacing and capitalisation); anything else falls back to a name derived
+// from the slug, which is what an older client that sends no name gets.
 func collectionName(slug, raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
 		return model.DeriveName(slug), nil
 	}
-	if len([]rune(name)) > maxCollectionNameLen {
+	if len([]rune(name)) > model.MaxCollectionNameLen {
 		return "", &ValidationError{Reason: "name is too long"}
 	}
 	return name, nil

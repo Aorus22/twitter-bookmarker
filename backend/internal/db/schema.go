@@ -34,7 +34,42 @@ CREATE INDEX deleted_bookmarks_by_tweet
   ON deleted_bookmarks(tweet_id, deleted_at DESC);
 `
 
-// schema is the whole database, version 2. It is one CREATE batch executed in a
+// collectionsSchema is the `collections` table definition as of version 3. It is
+// kept in its own constant because two callers need exactly this text: the fresh
+// schema below and the in-place upgrade from version 2 (upgradeV2toV3), where the
+// columns are added with ALTER TABLE. Keeping one copy is what stops the two
+// paths from drifting into different shapes.
+//
+// `color` and `sort_order` are part of the collection resource itself rather than
+// client state: the backend owns categories now, and both the browser extension
+// and the phone read the same colour and the same order (see README, "Categories
+// live in the backend"). An empty `color` means "no colour chosen yet" and every
+// client falls back to its own default constant, so a row written before this
+// column existed renders exactly as it did before.
+//
+// `sort_order` is dense and client-assigned (PUT /v1/collections/order renumbers
+// it to 0..n-1), and the slug is the deterministic tie-break.
+//
+// `collections.slug` is the public key: it is what the extension sends, what the
+// gallery URL carries, and what a reader sees. It is unique because two
+// categories whose names collapse to the same slug are the same collection.
+// Renaming recomputes it; a bookmark follows its collection because the foreign
+// key is `collection_id`, never the slug.
+const collectionsSchema = `
+CREATE TABLE collections (
+  id         INTEGER PRIMARY KEY,
+  slug       TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  color      TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX collections_by_order
+  ON collections(sort_order, slug);
+`
+
+// schema is the whole database, version 3. It is one CREATE batch executed in a
 // single transaction by applySchema.
 //
 // Design notes:
@@ -47,6 +82,8 @@ CREATE INDEX deleted_bookmarks_by_tweet
 //   - `collections.name` is stored rather than derived: the extension knows what
 //     the user actually typed ("Chibi Art", not "Chibi-Art"), and keeping it means
 //     the database is readable without the application.
+//   - `collections.color` and `collections.sort_order` are part of the resource,
+//     not of any one client — see collectionsSchema above.
 //   - `bookmarks.tweet_id` is the primary key, which is what makes the global
 //     "one tweet may only be saved once" invariant a database constraint instead
 //     of application bookkeeping.
@@ -60,14 +97,7 @@ CREATE INDEX deleted_bookmarks_by_tweet
 // `deleted_bookmarks` rather than flagged in place, so every read path —
 // the reader, the index, the counts, the covers, the cursors — stays correct
 // without a `deleted_at IS NULL` filter that a future query could forget.
-const schema = `
-CREATE TABLE collections (
-  id         INTEGER PRIMARY KEY,
-  slug       TEXT NOT NULL UNIQUE,
-  name       TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-
+const schema = collectionsSchema + `
 CREATE TABLE bookmarks (
   tweet_id      TEXT PRIMARY KEY,
   collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
@@ -97,4 +127,12 @@ var v1Tables = []string{"bookmarks", "collections"}
 // expectedTables is what verifySchema insists on finding. The indexes are not
 // listed: they are a performance detail, and a database missing one still returns
 // correct answers.
-var expectedTables = []string{"collections", "bookmarks", "deleted_bookmarks"}
+//
+// Ordered by name, like v1Tables: ensureSchema compares it element-wise against
+// the result of `ORDER BY name` to recognise a version-2 file.
+var expectedTables = []string{"bookmarks", "collections", "deleted_bookmarks"}
+
+// expectedCollectionColumns are the columns version 3 added. A version-2 file
+// that kept its stamp but lost an ALTER would otherwise read as current and fail
+// at the first collection query instead of at startup.
+var expectedCollectionColumns = []string{"color", "sort_order"}

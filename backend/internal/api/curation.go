@@ -33,6 +33,7 @@ import (
 func (s *server) writeCurationError(w http.ResponseWriter, err error, op string) bool {
 	var missing *storage.NotFoundError
 	var noCollection *storage.CollectionNotFoundError
+	var duplicate *storage.CollectionExistsError
 	var invalid *storage.ValidationError
 
 	switch {
@@ -45,6 +46,14 @@ func (s *server) writeCurationError(w http.ResponseWriter, err error, op string)
 		writeJSON(w, http.StatusNotFound, model.ErrorResponse{
 			Status: "error",
 			Reason: "collection does not exist",
+		})
+	case errors.As(err, &duplicate):
+		// 409 rather than 400: the request was well-formed, it just collides with
+		// a category that already exists. The slug is the conflict, so the client
+		// can name the collection that was in the way.
+		writeJSON(w, http.StatusConflict, model.ErrorResponse{
+			Status: "error",
+			Reason: "collection already exists",
 		})
 	case errors.As(err, &invalid):
 		s.log.InvalidRequest(invalid.Reason)

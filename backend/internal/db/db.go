@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"twitter-bookmarker/internal/config"
@@ -34,9 +35,11 @@ import (
 // old file instead of guessing at its shape.
 //
 // Version 2 moved a deleted bookmark out of `bookmarks` into `deleted_bookmarks`
-// (see trashSchema). A version-1 file is upgraded in place, which only ever adds
-// a table — no existing row is read, rewritten or dropped.
-const Version = 2
+// (see trashSchema). Version 3 gave `collections` the two columns that make a
+// category a resource the backend owns rather than a client's local setting:
+// `color` and `sort_order`. Both upgrades only ever add: no existing row is read,
+// rewritten or dropped.
+const Version = 3
 
 // ErrNoDatabase reports that the database file does not exist. Callers use it to
 // tell "this storage directory has no data yet" apart from a real failure.
@@ -160,17 +163,17 @@ func dsn(path string, pragmas []string) string {
 
 // ensureSchema makes the database usable, or explains why it refuses to be.
 //
-// Five cases, and only the first two write:
+// Five cases, and only the first three write:
 //
 //	fresh         no tables, version 0        -> create the schema
 //	current       version == Version           -> verify the tables exist
-//	upgradable    version 1, exactly v1Tables  -> add the version-2 table
+//	upgradable    version 1 or 2, exact tables -> extend it in place
 //	foreign       tables but version 0         -> refuse (unrecognised file)
 //	other version version != Version           -> refuse (never migrate silently)
 //
 // The upgrade case exists because refusing every older file would strand the
-// archive the moment the schema grows. It is narrow on purpose: only the one
-// version this build knows how to extend, and only when the file really has that
+// archive the moment the schema grows. It is narrow on purpose: only the versions
+// this build knows how to extend, and only when the file really has that
 // version's exact table set.
 func ensureSchema(conn *sql.DB) error {
 	version, err := userVersion(conn)
@@ -188,7 +191,9 @@ func ensureSchema(conn *sql.DB) error {
 	case version == Version:
 		return verifySchema(conn)
 	case version == 1 && equalStrings(tables, v1Tables):
-		return upgradeV1toV2(conn)
+		return upgradeV1toV3(conn)
+	case version == 2 && equalStrings(tables, expectedTables):
+		return upgradeV2toV3(conn)
 	case version == 0:
 		return fmt.Errorf(
 			"database holds %d table(s) but declares no schema version; refusing to use an unrecognised file",
@@ -274,25 +279,35 @@ func applySchema(conn *sql.DB) error {
 	return nil
 }
 
-// upgradeV1toV2 extends a version-1 file with the version-2 trash table.
+// upgradeV2toV3 gives `collections` the two columns version 3 added and
+// backfills `sort_order`, so the homepage shows the collections in exactly the
+// order it showed them before the upgrade.
 //
-// It only ever adds. Nothing reads, rewrites or drops a bookmark, so the upgrade
-// is safe on the live archive and cannot lose a row — the whole reason it is
-// allowed to touch an existing file at all. The stamp goes in the same
-// transaction as the DDL, so a crash leaves a version-1 file that the next
+// It only ever adds. No bookmark is read, rewritten or dropped, and no slug or
+// name changes, so the upgrade is safe on the live archive.
+//
+// The backfill reproduces the read layer's old `last_saved_at DESC` ordering
+// (collections with no valid row last, ties broken by slug) and stores it as
+// dense 0..n-1 ranks. That matters because ordering is now data rather than a
+// query: without the backfill every collection would carry the same default 0 and
+// the grid would fall back to an arbitrary order. The stamp goes in the same
+// transaction as the DDL, so a crash leaves a version-2 file that the next
 // startup simply tries again.
 //
-// The caller has already checked that the file declares version 1 and holds
-// exactly v1Tables, so an unrecognised file is refused rather than altered.
-func upgradeV1toV2(conn *sql.DB) error {
+// The caller has already checked that the file declares version 2 and holds the
+// expected tables, so an unrecognised file is refused rather than altered.
+func upgradeV2toV3(conn *sql.DB) error {
 	tx, err := conn.Begin()
 	if err != nil {
 		return fmt.Errorf("begin upgrade transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec(trashSchema); err != nil {
+	if _, err := tx.Exec(v3CollectionsDDL); err != nil {
 		return fmt.Errorf("upgrade schema to version %d: %w", Version, err)
+	}
+	if err := backfillCollectionOrder(tx); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", Version)); err != nil {
 		return fmt.Errorf("stamp upgraded schema version: %w", err)
@@ -303,9 +318,127 @@ func upgradeV1toV2(conn *sql.DB) error {
 	return nil
 }
 
+// upgradeV1toV3 walks a version-1 file all the way to the current schema: the
+// version-2 trash table, then the version-3 collection columns.
+//
+// The two steps are separate statements rather than one, so each keeps the shape
+// its own version defined and a future version-4 upgrade can reuse
+// upgradeV2toV3 unchanged.
+func upgradeV1toV3(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return fmt.Errorf("begin upgrade transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(trashSchema); err != nil {
+		return fmt.Errorf("add the version-2 trash table: %w", err)
+	}
+	if _, err := tx.Exec(v3CollectionsDDL); err != nil {
+		return fmt.Errorf("upgrade collections to version %d: %w", Version, err)
+	}
+	if err := backfillCollectionOrder(tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", Version)); err != nil {
+		return fmt.Errorf("stamp upgraded schema version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit upgrade: %w", err)
+	}
+	return nil
+}
+
+// v3CollectionsDDL is the exact DDL version 3 applies to an existing version-2
+// `collections` table. The column definitions repeat collectionsSchema on
+// purpose: ALTER TABLE ADD COLUMN cannot be expressed as a CREATE, and the two
+// are asserted to agree by db_test.go.
+const v3CollectionsDDL = `
+ALTER TABLE collections ADD COLUMN color TEXT NOT NULL DEFAULT '';
+ALTER TABLE collections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX collections_by_order
+  ON collections(sort_order, slug);
+`
+
+// backfillCollectionOrder writes the pre-version-3 ordering into the new
+// `sort_order` column, so an upgraded archive is listed exactly where it was
+// listed before.
+//
+// Ordering is data now, not a query: without this every row would carry the same
+// default 0 and the grid would fall back to whatever SQLite happened to return.
+// The rule reproduced here is the read layer's old one — collections with no
+// valid `saved_at` last, everything else by `max(saved_at)` descending, ties
+// broken by slug — stored as dense 0..n-1 ranks.
+//
+// It is done in Go rather than in one clever UPDATE because the ordering depends
+// on a correlated max() per collection and a three-key comparison; expressing
+// that in SQL would be harder to read than the loop that replaces it, and it
+// would have to be re-derived every time the rule changed.
+func backfillCollectionOrder(tx *sql.Tx) error {
+	rows, err := tx.Query(
+		`SELECT c.slug, coalesce((SELECT max(b.saved_at) FROM bookmarks b
+		                           WHERE b.collection_id = c.id), '')
+		   FROM collections c`,
+	)
+	if err != nil {
+		return fmt.Errorf("backfill collection order: read collections: %w", err)
+	}
+
+	type rank struct {
+		slug      string
+		lastSaved string
+		hasSaved  bool
+	}
+	ranks := make([]rank, 0, 16)
+	for rows.Next() {
+		var entry rank
+		if err := rows.Scan(&entry.slug, &entry.lastSaved); err != nil {
+			rows.Close()
+			return fmt.Errorf("backfill collection order: read collection: %w", err)
+		}
+		entry.hasSaved = entry.lastSaved != ""
+		ranks = append(ranks, entry)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("backfill collection order: read collections: %w", err)
+	}
+	// The handle must be closed before the UPDATEs below: the pool is limited to
+	// a single connection, so an open rows cursor would deadlock the writes.
+	rows.Close()
+
+	sort.SliceStable(ranks, func(i, j int) bool {
+		a, b := ranks[i], ranks[j]
+		switch {
+		case !a.hasSaved && !b.hasSaved:
+			return a.slug < b.slug
+		case !a.hasSaved:
+			return false
+		case !b.hasSaved:
+			return true
+		}
+		if a.lastSaved == b.lastSaved {
+			return a.slug < b.slug
+		}
+		return a.lastSaved > b.lastSaved
+	})
+
+	for index, entry := range ranks {
+		if _, err := tx.Exec(
+			`UPDATE collections SET sort_order = ? WHERE slug = ?`, index, entry.slug,
+		); err != nil {
+			return fmt.Errorf("backfill collection order for %s: %w", entry.slug, err)
+		}
+	}
+	return nil
+}
+
 // verifySchema confirms that a database claiming to be Version actually has the
-// tables this build queries. A version stamp alone is not evidence: a truncated
-// or hand-edited file can keep its user_version while losing a table.
+// tables and the collection columns this build queries. A version stamp alone is
+// not evidence: a truncated or hand-edited file can keep its user_version while
+// losing a table, and a file copied from an older build can hold the right table
+// with the wrong shape.
 func verifySchema(conn *sql.DB) error {
 	for _, table := range expectedTables {
 		var name string
@@ -317,6 +450,16 @@ func verifySchema(conn *sql.DB) error {
 		}
 		if err != nil {
 			return fmt.Errorf("inspect table %s: %w", table, err)
+		}
+	}
+	for _, column := range expectedCollectionColumns {
+		var name string
+		err := conn.QueryRow(`SELECT name FROM pragma_table_info('collections') WHERE name = ?`, column).Scan(&name)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("database declares version %d but collections is missing column %q", Version, column)
+		}
+		if err != nil {
+			return fmt.Errorf("inspect collections.%s: %w", column, err)
 		}
 	}
 	return nil

@@ -734,6 +734,12 @@ rather than a page offset. The phone sorts and filters through the same four
 `sort` values and the same inclusive date bounds, so neither client has to
 implement ordering of its own.
 
+What the phone does with a row is its own business: it takes the tweet id from this
+answer and draws the live post from Twitter itself
+(`morphe/README.md#where-a-rows-content-comes-from`), so the archive's stored
+`text`, `media` and `author` are the fallback and the web gallery stays the only
+client that renders them as the truth.
+
 `scripts/check-gallery-acceptance.sh` re-asserts the guarantee *after* curation
 has run — `POST`, `PUT` and `DELETE` against a gallery path all answer `405`, and
 the data is byte-for-byte unchanged afterwards. Curation was deliberately put on

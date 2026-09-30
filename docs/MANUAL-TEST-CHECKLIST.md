@@ -1021,7 +1021,13 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
 4. Change **Posted date** / **Newest** / **Oldest**, then pick a **range** with
    both date pickers, then **Clear range**.
 5. While a page is loading, tap another sort immediately.
-6. Tap a card.
+6. Tap a row.
+7. Watch the rows fill in: the avatar appears, and for a post saved without media
+   the text and the media come from Twitter rather than from the archive.
+8. Scroll to a post you know is **deleted** on X, and to one from a **private**
+   account (or turn the phone's network off and scroll a fresh collection).
+9. Open a collection containing a post with **four photos**, one with a **video**,
+   one that **quotes** another post, and one with a **poll**.
 
 **Expected**
 - The folder order is the backend's, and each row's bar is that collection's
@@ -1032,8 +1038,23 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
   dropped rather than appended (the list does not jump back).
 - A picked day bounds the range inclusively at both ends, in the **phone's**
   timezone, against whichever date basis is selected.
-- Tapping a card opens the tweet in X; if the Activity name is wrong for this X
+- Tapping a row opens the tweet in X; if the Activity name is wrong for this X
   build, it opens the system browser instead and logs one line.
+- Rows carry Twitter's own content: an avatar, the name and handle, a relative age
+  (`5m`, `3h`, `12 Mar`), the text, and a counts line. A verified account shows a
+  badge only if this X build has a drawable named `ic_vector_verified` — the header
+  is correct either way.
+- A post with four photos renders as a 2×2 grid, one with three as two and then a
+  full-width cell, one video as a poster frame with `Video · 0:25` under it, and
+  more than four as the first four plus `+N more`.
+- A quoted post renders as an outlined block with its author and text; a poll
+  renders as `label — 42%` rows. Nothing in a row is a button: the whole row is one
+  tap target.
+- A deleted post reads `This post is no longer on X, so this is the copy saved in
+  the archive.`, a private one says the same about privacy, and with no network at
+  all the rows still show the archive's copy with no message.
+- The sort and the filters are unaffected by rows filling in: a late answer changes
+  what one row shows, never its place in the list.
 - Back goes to the folders when a collection is open, and closes the screen when
   the folders are already showing.
 - The screen's own light/dark colours follow the app: with X in **Lights out**
@@ -1044,7 +1065,11 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
 - `adb logcat | grep -i "twb:"` — the patch logs its failures rather than
   toasting them, and the gallery's HTTP failures (`401`, unreachable) land there.
 - Memory over a long list: the thumbnail cache is `LruCache` at heap/8 with
-  `inSampleSize`, which has never been measured on a real archive.
+  `inSampleSize`, which has never been measured on a real archive — and circular
+  avatars are a second entry per URL, so a long scroll holds both.
+- One request per visible post goes to `api.fxtwitter.com`; a burst of
+  `twb: could not read post …` lines in logcat means that service is refusing or
+  unreachable, which is a fallback rather than a bug.
 
 ---
 

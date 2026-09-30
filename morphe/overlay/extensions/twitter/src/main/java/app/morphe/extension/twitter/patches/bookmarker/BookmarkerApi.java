@@ -337,6 +337,19 @@ public final class BookmarkerApi {
         public final String text;
         public final List<String> media;
 
+        /**
+         * The post as Twitter describes it today, filled in after the row is drawn.
+         *
+         * <p>The one field here that changes. A saved tweet is a snapshot: the
+         * {@code text} and {@code media} above are what the tweet said when it was
+         * saved, and a row would rather show the live post. The gallery fetches that
+         * lazily for the rows the user actually scrolls to ({@link FxTweet}), so this
+         * starts null and stays null for a post Twitter will not hand back — private,
+         * deleted, or a service that is down. Mutable on purpose: the answer has to
+         * reach the row that asked, without a second table keyed by id.
+         */
+        FxTweet.Row fxRow;
+
         Post(String tweetId, String url, String author, String username, String tweetDate,
              String savedAt, String text, List<String> media) {
             this.tweetId = tweetId;
@@ -347,6 +360,18 @@ public final class BookmarkerApi {
             this.savedAt = savedAt;
             this.text = text;
             this.media = media == null ? Collections.emptyList() : media;
+        }
+
+        /**
+         * Where to open this post: the stored link, or one built from the id.
+         *
+         * <p>One of the two is always there, and a row that cannot be opened is worse
+         * than one whose link was reconstructed.
+         */
+        public String link() {
+            if (url != null && !url.isEmpty()) return url;
+            if (tweetId == null || tweetId.isEmpty()) return "";
+            return "https://x.com/i/status/" + tweetId;
         }
     }
 

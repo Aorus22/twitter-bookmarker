@@ -78,7 +78,30 @@ public final class BookmarkerGalleryActivity extends Activity {
     private static final int COLOR_MUTED_DARK = 0xFF71767B;
     private static final int COLOR_CARD_LIGHT = 0xFFF7F9F9;
     private static final int COLOR_CARD_DARK = 0xFF1E2732;
+    private static final int COLOR_BORDER_LIGHT = 0xFFEFF3F4;
+    private static final int COLOR_BORDER_DARK = 0xFF2F3336;
     private static final int COLOR_ACCENT = 0xFF1D9BF0;
+
+    /**
+     * How long a post Twitter would not describe is left alone before asking again.
+     *
+     * <p>A private or deleted post answers with a code and is remembered for the
+     * session; this is only for the failures that might be transient — no network,
+     * a timeout, the service having a bad minute — so that scrolling a long
+     * collection cannot turn into a request storm against a third party.
+     */
+    private static final long ENRICH_RETRY_GAP_MS = 60 * 1000L;
+
+    /**
+     * Tweet ids being fetched right now, and when a failed one was last tried.
+     *
+     * <p>Process-wide and touched only from the main thread: a bind starts a fetch,
+     * and the answer comes back through {@code runOnMainThread}. Two rows for the
+     * same tweet — the same bookmark can appear twice after a re-save — must not
+     * produce two requests.
+     */
+    private static final java.util.Set<String> ENRICH_IN_FLIGHT = new java.util.HashSet<>();
+    private static final java.util.Map<String, Long> ENRICH_FAILED_AT = new java.util.HashMap<>();
 
     /** Opens the gallery; usable from any context the sheet or dialog holds. */
     public static void open(android.content.Context context) {
@@ -138,9 +161,11 @@ public final class BookmarkerGalleryActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(dark ? 0xFF000000 : 0xFFFFFFFF);
-        int padding = dp(12);
-        root.setPadding(padding, dp(8), padding, 0);
+        root.setBackgroundColor(backgroundColor());
+        // No side padding here: the list draws rows the way X does — edge to edge,
+        // separated by a hairline — so the header and the chips carry the inset
+        // themselves instead.
+        root.setPadding(0, dp(8), 0, 0);
 
         root.addView(buildHeader());
         controls = buildControls();
@@ -154,8 +179,11 @@ public final class BookmarkerGalleryActivity extends Activity {
         root.addView(statusView);
 
         listView = new ListView(this);
-        listView.setDivider(null);
-        listView.setDividerHeight(0);
+        // X separates posts with a hairline rather than a gap, and the list can draw
+        // that itself: a divider between every pair of rows costs no view and no
+        // margin, which matters because a ListView child cannot carry margins.
+        listView.setDivider(new android.graphics.drawable.ColorDrawable(borderColor()));
+        listView.setDividerHeight(Math.max(1, (int) (getResources().getDisplayMetrics().density / 2f)));
         listView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         listView.setOnItemClickListener((parent, view, position, id) -> onRowTapped(position));
@@ -187,7 +215,7 @@ public final class BookmarkerGalleryActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, dp(4), 0, dp(8));
+        header.setPadding(dp(12), dp(4), dp(12), dp(8));
 
         backView = chip("Close");
         backView.setOnClickListener(v -> onBackPressed());
@@ -271,6 +299,7 @@ public final class BookmarkerGalleryActivity extends Activity {
 
         LinearLayout holder = new LinearLayout(this);
         holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setPadding(dp(12), 0, dp(12), 0);
         holder.addView(scroller);
         scroller.addView(row);
         return holder;
@@ -497,13 +526,61 @@ public final class BookmarkerGalleryActivity extends Activity {
             return;
         }
         BookmarkerApi.Post post = posts.get(position);
-        if (post.url.isEmpty()) {
+        String link = post.link();
+        if (link.isEmpty()) {
             Utils.showToastShort("Twitter Bookmarker: this bookmark has no URL");
             return;
         }
         // Opening the tweet is the one thing a gallery row should do beyond showing
         // itself: the archive is a copy, and the original is where the replies are.
-        openInApp(post.url);
+        openInApp(link);
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* Enriching a row with the live post                                     */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Asks Twitter what this post says today, and hands the answer back on the main
+     * thread.
+     *
+     * <p>Only ever called from a row's bind, so the work follows the user's scroll:
+     * a collection of a thousand bookmarks costs nothing until the rows are seen.
+     * The row is already drawn from the archive at that point, so this is an upgrade
+     * rather than a load — which is also why every failure ends in silence.
+     *
+     * @param onLanded run on the main thread once the post is known; the row that
+     *                 asked rebinds itself then.
+     */
+    void enrich(final BookmarkerApi.Post post, final Runnable onLanded) {
+        if (post == null || post.fxRow != null) return;
+        final String id = post.tweetId;
+        if (id == null || id.isEmpty()) return;
+        if (ENRICH_IN_FLIGHT.contains(id)) return;
+
+        Long failedAt = ENRICH_FAILED_AT.get(id);
+        if (failedAt != null && System.currentTimeMillis() - failedAt < ENRICH_RETRY_GAP_MS) return;
+
+        ENRICH_IN_FLIGHT.add(id);
+        Utils.runOnBackgroundThread(() -> {
+            FxTweet.Row row = null;
+            try {
+                row = FxTweet.fetch(id);
+            } catch (Exception e) {
+                Logger.printInfo(() -> "twb: could not read post " + id + " from Twitter: " + e);
+            }
+
+            final FxTweet.Row fetched = row;
+            Utils.runOnMainThread(() -> {
+                ENRICH_IN_FLIGHT.remove(id);
+                if (fetched == null) {
+                    ENRICH_FAILED_AT.put(id, System.currentTimeMillis());
+                    return;
+                }
+                post.fxRow = fetched;
+                onLanded.run();
+            });
+        });
     }
 
     /**
@@ -587,6 +664,16 @@ public final class BookmarkerGalleryActivity extends Activity {
     /** The card and body colour, for the rows that draw their own background. */
     int cardColor() {
         return dark ? COLOR_CARD_DARK : COLOR_CARD_LIGHT;
+    }
+
+    /** The window's own background: X is white or black, not a card. */
+    int backgroundColor() {
+        return dark ? 0xFF000000 : 0xFFFFFFFF;
+    }
+
+    /** The hairline between two posts, and the outline of a quoted one. */
+    int borderColor() {
+        return dark ? COLOR_BORDER_DARK : COLOR_BORDER_LIGHT;
     }
 
     /** The body text colour, so a row can match the screen it sits on. */

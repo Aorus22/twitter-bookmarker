@@ -129,10 +129,12 @@ implies and a second Activity would need a second manifest entry for no gain.
   each row carrying the collection's own colour bar. The colour comes from the
   stored `color`; an empty one is painted as the shared default `#bf3f2e`. Tapping
   a row opens it.
-- **Cards.** One collection's bookmarks, as a card each: author and handle, the
-  posted date, the text, the first media thumbnail, and when the archive saved it.
-  Tapping a card opens the tweet in X (`com.twitter.android.UrlInterpreterActivity`,
-  falling back to the system's viewer if that class is ever not the handler).
+- **Posts.** One collection's bookmarks, drawn the way X draws a post: the author's
+  avatar, the name and handle line with the post's age, the text, up to four media
+  items, a quoted post and a poll, then the reply/repost/like/view counts — and,
+  in the archive's own voice, the line saying when it was saved. Tapping anywhere in
+  a row opens the tweet in X (`com.twitter.android.UrlInterpreterActivity`, falling
+  back to the system's viewer if that class is ever not the handler).
 
 The filter and the sort sit in one row of chips, and both work off the same **date
 basis**, because a bookmark has two dates and mixing them would mean filtering by
@@ -159,6 +161,54 @@ additive and ships no `res/` of its own, so the views are built in code and ther
 is no resource id for the patcher to allocate. `BookmarkerGalleryResourcePatch.kt`
 adds exactly one thing to the app: the `<activity>` entry, in `finalize`, the same
 way Piko registers Instagram's settings screen.
+
+### Where a row's content comes from
+
+A bookmark row is not a rendering of the database. The row draws the **post**, and
+the post comes from Twitter, fetched by tweet id from the FxEmbed status API
+(`https://api.fxtwitter.com/status/<id>`) — the same host Piko's own tweet-info
+feature already calls, and one that needs no token, no login and nothing but the
+id. `FxTweet` is the whole of that: it fetches, parses, and knows the three answers
+that matter — `200` with the post, `401` for a private one, `404` for one that is
+gone.
+
+That ordering is deliberate. The id is the only field about a bookmark that cannot
+go stale: an archive's `text`, `media` and `author` columns are what the tweet said
+when it was saved, and the API may also know an avatar, a quoted post, a poll and
+view counts that this database never stored. So the row is painted **first** from
+the archive — the list never waits on a third party — and then upgraded in place
+when the answer lands. Only the rows the user actually scrolls to are fetched, one
+request per post, with results kept in memory and a 60-second backoff after a
+failure, because the API's own documentation asks callers not to flood it and the
+gallery identifies itself with a `User-Agent` saying so.
+
+The archive is still what the row falls back to, and the fallback is a normal state,
+not an error: a private post says so in one muted line, a deleted one says so, and a
+network failure says nothing at all — a message the user cannot act on is not worth
+a line of the screen. Nothing here depends on our stored `media` or `text`, and
+nothing in the sort or the filters changed: which posts are in the list, and in what
+order, is still the backend's answer alone.
+
+**On tests.** Piko ships no JVM test infrastructure, so there is no automated test
+for `FxTweet` — it is the only part of the phone patch that could have one, being
+plain Java. It was instead written and checked against real payloads: a plain post,
+one with photos, one with a video, and one that is gone, plus the documented
+quote/poll shape. Every field is read through an `opt*` accessor with a default, so
+a payload whose shape changes degrades into a row drawn from the archive rather than
+into an exception out of a `ListView` bind.
+
+**What this is not.** It is not X's own post cell. That cell is a Dagger-built
+`ViewDelegateBinder` under `com.twitter.tweetview.*`, driven by a `urt` model parsed
+from a timeline response the app fetches itself; Piko's only seam at that layer,
+`TimelineEntry.checkEntry`, can drop an entry but cannot supply one, and nothing in
+Piko or its extension library ever constructs an X view. Reusing the real component
+would take one of two things this patch does not do: an official embed inside a
+WebView (real X rendering, but the user asked for native), or writing the archive
+into an X bookmark folder so X's own timeline renders it (which mutates the account
+and needs rotating internal GraphQL ids). What a row is, then, is our views carrying
+Twitter's data, which is why the counts are text rather than buttons: liking or
+reposting from here would be a lie, while tapping through to the post is exactly
+what X's own screen is for.
 
 ### Where the screen is reached from — and where it is not
 
@@ -338,6 +388,9 @@ out from the source:
 | Thumbnail memory over a long list | `LruCache` at heap/8 with `inSampleSize`, never measured | slow scrolling, or an OOM on a collection of thousands |
 | The date pickers in a dark theme | `DatePickerDialog` is the platform's, not the app's | a light dialog on a dark screen |
 | The chips row on a narrow screen | it scrolls horizontally, but nothing was measured | the last chip is hard to reach |
+| The verified badge's drawable name | `ic_vector_verified` is a name this overlay guessed; Piko never names that glyph | verified accounts show no badge (the header still has the name) |
+| The media grid's proportions | one photo uses the API's aspect ratio, a grid uses fixed 150dp cells | a tall photo that squashes the row, or a grid that clips |
+| Avatar and media memory together | the circular avatars are a second cache entry per URL | an OOM on a long collection, or blank avatars after a scroll |
 
 ### Without Manager
 

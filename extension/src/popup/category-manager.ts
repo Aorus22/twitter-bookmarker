@@ -1,21 +1,24 @@
 /**
- * Popup — Categories section (PRD §43, §45–§49, §62).
+ * Popup — Categories section.
  *
- * Rendering plus handlers for add, inline rename, colour, delete, and
- * drag-and-drop reorder. Every mutation goes through `shared/storage.ts`, which
- * only writes `chrome.storage.local`: no category operation ever performs a
- * backend request. Removing a category here only removes it from the popup's
- * list; the bookmarks it grouped stay in the database untouched.
+ * Categories live in the backend now, so this section is a *client* of
+ * `/v1/collections`: it lists what the cache holds, and every change is one
+ * message to the service worker, which performs the HTTP request and refreshes the
+ * cache. There is no delete, by design: a collection holds bookmarks that would
+ * have to go somewhere, and the resource is easier to explain without a second
+ * destructive verb.
+ *
+ * The list itself is never assembled here. After a successful change the worker
+ * writes the new list to `chrome.storage.local`, which fires a store change and
+ * re-renders from the authoritative answer — so a rename that changed a slug, or a
+ * reorder that renumbered everything, cannot leave the popup showing a list the
+ * backend does not have.
  */
 
 import { CATEGORY_COLOR_PALETTE, DEFAULT_CATEGORY_COLOR } from "../shared/constants.ts";
-import {
-  addCategory,
-  deleteCategory,
-  reorderCategories,
-  updateCategoryColor,
-  updateCategoryName,
-} from "../shared/storage.ts";
+import { collectionsErrorMessage, displayColor, moveSlug, reorderCategories } from "../shared/collections.ts";
+import { sendExtensionMessage } from "../shared/messages.ts";
+import type { CollectionsResponse } from "../shared/messages.ts";
 import type { Category, Store } from "../shared/types.ts";
 
 export interface CategoryManager {
@@ -23,19 +26,10 @@ export interface CategoryManager {
   render(store: Store): void;
 }
 
-/** Exact delete confirmation copy required by PRD §48. */
-export function deleteConfirmationText(name: string): string {
-  return `Delete category "${name}"?\n\nExisting bookmarks will not be deleted.`;
-}
-
 function requireEl<T extends Element>(id: string): T {
   const element = document.getElementById(id);
   if (element === null) throw new Error(`popup markup is missing #${id}`);
   return element as unknown as T;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error && error.message.length > 0 ? error.message : "Something went wrong";
 }
 
 export function initCategoryManager(): CategoryManager {
@@ -54,8 +48,12 @@ export function initCategoryManager(): CategoryManager {
   let activeRenameId: string | null = null;
   /** The row currently being dragged, if any. */
   let draggingRow: HTMLLIElement | null = null;
-  /** Last rendered store order, used to skip no-op reorder writes. */
+  /** Last rendered order, used to skip no-op reorder writes. */
   let lastOrder: string[] = [];
+  /** The rows currently rendered, so an up/down nudge has the order to work from. */
+  let rendered: Category[] = [];
+  /** True while a request is in flight; a second change would race the first. */
+  let busy = false;
 
   function showError(message: string): void {
     errorEl.textContent = message;
@@ -65,6 +63,44 @@ export function initCategoryManager(): CategoryManager {
   function clearError(): void {
     errorEl.textContent = "";
     errorEl.hidden = true;
+  }
+
+  /**
+   * Send one collection message and report its outcome.
+   *
+   * Success is deliberately quiet: the worker has already written the new list to
+   * storage, so the re-render arrives on its own. Only the two cases that render
+   * nothing — a refused change, and an applied change whose refresh failed — leave
+   * a message behind.
+   */
+  async function apply(
+    message:
+      | { type: "CREATE_COLLECTION"; name: string; color?: string }
+      | { type: "UPDATE_COLLECTION"; slug: string; name?: string; color?: string; order?: number }
+      | { type: "REORDER_COLLECTIONS"; slugs: string[] },
+  ): Promise<void> {
+    if (busy) return;
+    busy = true;
+    try {
+      const response = await sendExtensionMessage<CollectionsResponse>(message);
+      if (!response.ok) {
+        showError(collectionsErrorMessage(response.error));
+        return;
+      }
+      if (response.collections === null) {
+        showError("Saved, but the category list could not be refreshed — reopen the popup");
+        return;
+      }
+      clearError();
+      // Render from the answer immediately as well as waiting for the storage
+      // event: the two are interchangeable, and rendering here means the popup is
+      // correct even if the listener is removed in a future refactor.
+      renderRows(response.collections);
+    } catch {
+      showError(collectionsErrorMessage("backend_unavailable"));
+    } finally {
+      busy = false;
+    }
   }
 
   function openAddForm(): void {
@@ -105,9 +141,7 @@ export function initCategoryManager(): CategoryManager {
       const value = inputEl.value.trim();
       if (!commit || value.length === 0 || value === category.name) return;
 
-      void updateCategoryName(category.id, value)
-        .then(() => clearError())
-        .catch((error: unknown) => showError(messageOf(error)));
+      void apply({ type: "UPDATE_COLLECTION", slug: category.slug, name: value });
     };
 
     inputEl.addEventListener("keydown", (event) => {
@@ -122,11 +156,24 @@ export function initCategoryManager(): CategoryManager {
     inputEl.addEventListener("blur", () => finish(true), { once: true });
   }
 
-  function renderRow(category: Category): HTMLLIElement {
+  /** Persist the order the DOM currently shows (no-op when unchanged). */
+  function persistOrderFromDom(): void {
+    const slugs = Array.from(list.querySelectorAll<HTMLLIElement>(".category-row"))
+      .map((row) => row.dataset.categorySlug ?? "")
+      .filter((slug) => slug.length > 0);
+
+    if (slugs.length !== lastOrder.length) return;
+    if (slugs.join("\u0000") === lastOrder.join("\u0000")) return;
+
+    void apply({ type: "REORDER_COLLECTIONS", slugs });
+  }
+
+  function renderRow(category: Category, index: number, total: number): HTMLLIElement {
     const fragment = template.content.cloneNode(true) as DocumentFragment;
     const row = fragment.firstElementChild as HTMLLIElement | null;
     if (row === null) throw new Error("category row template is empty");
 
+    row.dataset.categorySlug = category.slug;
     row.dataset.categoryId = category.id;
     row.draggable = true;
     row.classList.add("category-row");
@@ -135,15 +182,14 @@ export function initCategoryManager(): CategoryManager {
     const nameEl = row.querySelector<HTMLSpanElement>(".category-name");
     const slugEl = row.querySelector<HTMLSpanElement>(".category-slug");
     const renameButton = row.querySelector<HTMLButtonElement>(".category-rename");
-    const deleteButton = row.querySelector<HTMLButtonElement>(".category-delete");
+    const upButton = row.querySelector<HTMLButtonElement>(".category-up");
+    const downButton = row.querySelector<HTMLButtonElement>(".category-down");
 
     if (colorEl) {
-      colorEl.value = category.color;
+      colorEl.value = displayColor(category.color);
       colorEl.setAttribute("aria-label", `Color for ${category.name}`);
       colorEl.addEventListener("change", () => {
-        void updateCategoryColor(category.id, colorEl.value)
-          .then(() => clearError())
-          .catch((error: unknown) => showError(messageOf(error)));
+        void apply({ type: "UPDATE_COLLECTION", slug: category.slug, color: colorEl.value });
       });
     }
 
@@ -158,20 +204,28 @@ export function initCategoryManager(): CategoryManager {
       renameButton.addEventListener("click", () => startRename(row, category));
     }
 
-    if (deleteButton) {
-      deleteButton.setAttribute("aria-label", `Delete ${category.name}`);
-      deleteButton.addEventListener("click", () => {
-        if (!window.confirm(deleteConfirmationText(category.name))) return;
-        void deleteCategory(category.id)
-          .then(() => clearError())
-          .catch((error: unknown) => showError(messageOf(error)));
+    // Explicit nudges beside drag-and-drop: dragging inside a popup is fiddly, and
+    // the order is a backend value both clients have to honour, so it needs a
+    // control that cannot mis-drop.
+    if (upButton) {
+      upButton.disabled = index === 0;
+      upButton.setAttribute("aria-label", `Move ${category.name} up`);
+      upButton.addEventListener("click", () => {
+        void apply({ type: "REORDER_COLLECTIONS", slugs: moveSlug(rendered, category.slug, -1) });
+      });
+    }
+    if (downButton) {
+      downButton.disabled = index === total - 1;
+      downButton.setAttribute("aria-label", `Move ${category.name} down`);
+      downButton.addEventListener("click", () => {
+        void apply({ type: "REORDER_COLLECTIONS", slugs: moveSlug(rendered, category.slug, 1) });
       });
     }
 
     row.addEventListener("dragstart", (event) => {
       draggingRow = row;
       row.classList.add("dragging");
-      event.dataTransfer?.setData("text/plain", category.id);
+      event.dataTransfer?.setData("text/plain", category.slug);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
     });
 
@@ -182,32 +236,37 @@ export function initCategoryManager(): CategoryManager {
       const rect = row.getBoundingClientRect();
       const insertAfter = event.clientY > rect.top + rect.height / 2;
       list.insertBefore(draggingRow, insertAfter ? row.nextElementSibling : row);
+      // The optimistic list has to follow the DOM, or an up/down nudge afterwards
+      // would reorder from a stale snapshot.
+      rendered = reorderCategories(rendered, Array.from(list.querySelectorAll<HTMLLIElement>(".category-row"))
+        .map((entry) => entry.dataset.categorySlug ?? "")
+        .filter((slug) => slug.length > 0));
     });
 
     row.addEventListener("dragend", () => {
       row.classList.remove("dragging");
       draggingRow = null;
-      void persistOrderFromDom();
+      persistOrderFromDom();
     });
 
     return row;
   }
 
-  /** Read the current DOM order and persist it (no-op when unchanged). */
-  async function persistOrderFromDom(): Promise<void> {
-    const ids = Array.from(list.querySelectorAll<HTMLLIElement>(".category-row"))
-      .map((row) => row.dataset.categoryId ?? "")
-      .filter((id) => id.length > 0);
+  function renderRows(categories: Category[]): void {
+    rendered = categories;
+    lastOrder = categories.map((category) => category.slug);
+    empty.hidden = categories.length > 0;
 
-    if (ids.length !== lastOrder.length) return;
-    if (ids.join("\u0000") === lastOrder.join("\u0000")) return;
+    // The chip mirrors the gallery's "4 collections" count. `aria-label` carries
+    // the unit, since the visible text is the bare number.
+    const total = categories.length;
+    countEl.textContent = String(total);
+    countEl.setAttribute("aria-label", `${total} ${total === 1 ? "category" : "categories"}`);
 
-    try {
-      await reorderCategories(ids);
-      clearError();
-    } catch (error) {
-      showError(messageOf(error));
-    }
+    // Never destroy an open rename input on an unrelated storage change.
+    if (activeRenameId !== null) return;
+
+    list.replaceChildren(...categories.map((category, index) => renderRow(category, index, total)));
   }
 
   toggle.addEventListener("click", openAddForm);
@@ -221,31 +280,16 @@ export function initCategoryManager(): CategoryManager {
       nameInput.focus();
       return;
     }
-    void addCategory({ name, color: colorInput.value })
-      .then(() => {
-        closeAddForm();
-        clearError();
-      })
-      .catch((error: unknown) => showError(messageOf(error)));
+    void apply({ type: "CREATE_COLLECTION", name, color: colorInput.value }).then(() => {
+      if (errorEl.hidden) closeAddForm();
+    });
   });
 
   // Populate the add form's colour picker from the shared palette's first entry.
   colorInput.value = CATEGORY_COLOR_PALETTE[0] ?? DEFAULT_CATEGORY_COLOR;
 
   function render(store: Store): void {
-    lastOrder = store.categories.map((category) => category.id);
-    empty.hidden = store.categories.length > 0;
-
-    // The chip mirrors the gallery's "4 collections" count. `aria-label` carries
-    // the unit, since the visible text is the bare number.
-    const total = store.categories.length;
-    countEl.textContent = String(total);
-    countEl.setAttribute("aria-label", `${total} ${total === 1 ? "category" : "categories"}`);
-
-    // Never destroy an open rename input on an unrelated storage change.
-    if (activeRenameId !== null) return;
-
-    list.replaceChildren(...store.categories.map(renderRow));
+    renderRows(store.categories);
   }
 
   return { render };

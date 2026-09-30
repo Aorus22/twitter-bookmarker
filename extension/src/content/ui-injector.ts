@@ -29,7 +29,7 @@ import {
   updateOrganizerSaved,
   updateOrganizerSaving,
 } from "./organizer.ts";
-import type { OrganizerCallbacks } from "./organizer.ts";
+import type { OrganizerCallbacks, OrganizerVariant } from "./organizer.ts";
 
 /** Input for {@link injectOrganizer}. */
 export interface InjectOrganizerOptions {
@@ -45,11 +45,16 @@ export interface InjectOrganizerOptions {
   saved: boolean;
   /** Phase-4 callback seam. */
   callbacks: OrganizerCallbacks;
+  /**
+   * Trigger style: the bookmarks-timeline organizer, or our own bookmark button on
+   * any other X page. Defaults to `"organize"`.
+   */
+  variant?: OrganizerVariant | undefined;
 }
 
 /** Input for {@link rerenderAll}. */
 export interface RerenderAllInput {
-  /** All categories, in storage order. */
+  /** All categories, in the backend's order. */
   categories: readonly Category[];
   /** Current settings (drives the display mode). */
   settings: Settings;
@@ -57,6 +62,8 @@ export interface RerenderAllInput {
   savedIds: ReadonlySet<string>;
   /** Phase-4 callback seam. */
   callbacks: OrganizerCallbacks;
+  /** Trigger style; see {@link InjectOrganizerOptions.variant}. */
+  variant?: OrganizerVariant | undefined;
 }
 
 function defaultDocument(): Document {
@@ -121,6 +128,7 @@ function renderOptionsFor(
     displayMode: options.displayMode,
     saved: options.saved,
     callbacks: options.callbacks,
+    variant: options.variant,
   };
 }
 
@@ -221,6 +229,7 @@ export function rerenderAll(doc: Document, input: RerenderAllInput): void {
       displayMode: input.settings.displayMode,
       saved,
       callbacks: input.callbacks,
+      variant: input.variant,
     });
   }
 }

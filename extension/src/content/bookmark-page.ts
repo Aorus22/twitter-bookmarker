@@ -1,8 +1,15 @@
 /**
- * Bookmarks-page lifecycle: route-entry startup, the single `MutationObserver`
- * that discovers dynamically loaded tweets, idempotent per-tweet processing, the
+ * Tweet-page lifecycle: route-entry startup, the single `MutationObserver` that
+ * discovers dynamically loaded tweets, idempotent per-tweet processing, the
  * once-per-entry saved-index cache, and teardown on route leave
  * (PRD §26–§28, §34, §54; XI-02/XI-03/XI-04).
+ *
+ * Despite the name it serves two surfaces. On the bookmarks timeline the injected
+ * control is the organizer (`variant: "organize"`), and on every other X page it is
+ * our own bookmark button (`variant: "bookmark"`). Everything else is shared on
+ * purpose: one observer, one saved-index fetch per entry, one click guard, one
+ * teardown — so the two surfaces cannot drift into two half-implementations of the
+ * same behaviour.
  */
 
 import { DEFAULT_SETTINGS, createDefaultStore } from "../shared/constants.ts";
@@ -17,7 +24,7 @@ import {
 } from "./hardening.ts";
 import type { ResilientObserver, SavedIndexRefresher } from "./hardening.ts";
 import { closeStalePopover } from "./organizer.ts";
-import type { OrganizerCallbacks } from "./organizer.ts";
+import type { OrganizerCallbacks, OrganizerVariant } from "./organizer.ts";
 import { dismissAllToasts } from "./toast.ts";
 import { EXTRACTION_ERROR, extractTweet } from "./tweet-extractor.ts";
 import type { ExtractionResult } from "./tweet-extractor.ts";
@@ -79,6 +86,12 @@ export interface BookmarksPageDeps {
   dismissToasts?: () => void;
   /** Debounce override, default {@link SWEEP_DEBOUNCE_MS}. */
   sweepDebounceMs?: number;
+  /**
+   * Trigger style for the injected controls: `"organize"` on the bookmarks
+   * timeline (the default), `"bookmark"` on any other X page, where the controls
+   * are our own button rather than an organizer for a tweet X already holds.
+   */
+  variant?: OrganizerVariant;
 }
 
 interface ResolvedDeps {
@@ -98,6 +111,7 @@ interface ResolvedDeps {
   onExtractionError: (article: HTMLElement, reason: string) => void;
   dismissToasts: () => void;
   sweepDebounceMs: number;
+  variant: OrganizerVariant;
 }
 
 interface PageState {
@@ -185,6 +199,7 @@ function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
     onExtractionError: user.onExtractionError ?? defaultOnExtractionError,
     dismissToasts: user.dismissToasts ?? dismissAllToasts,
     sweepDebounceMs: user.sweepDebounceMs ?? SWEEP_DEBOUNCE_MS,
+    variant: user.variant ?? "organize",
   };
 }
 
@@ -235,6 +250,7 @@ function processArticle(article: HTMLElement, current: PageState): void {
       displayMode: current.settings.displayMode,
       saved: current.savedIds.has(result.tweet.tweetId),
       callbacks: callbacksFor(current),
+      variant: current.deps.variant,
     });
     if (!root) article.removeAttribute(INJECTED_ATTRIBUTE);
   } catch (error) {
@@ -335,6 +351,7 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
         settings: current.settings,
         savedIds: current.savedIds,
         callbacks: callbacksFor(current),
+        variant: current.deps.variant,
       });
     },
     onError: (error) => {
@@ -468,6 +485,7 @@ export function refreshBookmarksPage(store: Store): void {
       settings: current.settings,
       savedIds: current.savedIds,
       callbacks: callbacksFor(current),
+      variant: current.deps.variant,
     });
 
     for (const article of queryAll<HTMLElement>(current.deps.document, "tweetArticle")) {

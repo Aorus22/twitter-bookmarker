@@ -25,6 +25,10 @@ import {
 export const ORGANIZE_LABEL = "Organize";
 /** Popover trigger label while a save is in flight (PRD §35). */
 export const SAVING_LABEL = "Saving…";
+/** Popover trigger label on a general X page (not the bookmarks timeline). */
+export const BOOKMARK_LABEL = "Save to…";
+/** Accessible name for that trigger, which an icon alone cannot carry. */
+export const BOOKMARK_ARIA_LABEL = "Save to Twitter Bookmarker";
 /** Exact saved-state copy; no category name is ever shown (PRD §34, XI-11). */
 export const SAVED_LABEL = "✓ Saved";
 /**
@@ -32,6 +36,18 @@ export const SAVED_LABEL = "✓ Saved";
  * selection, so a double-click cannot fire `onSelect` twice (PRD §64).
  */
 export const CLICK_GUARD_MS = 400;
+
+/**
+ * Which surface the controls are rendered on.
+ *
+ * The two differ only in the trigger, and they exist because the contract does:
+ * on the bookmarks timeline the controls are an *organizer* for a tweet X is
+ * already holding, while on any other page they are our own bookmark button, the
+ * web counterpart of the phone's action-bar button. The popover, the category
+ * rows, the click guard and the saved state are shared, so a category picked in
+ * either place behaves identically.
+ */
+export type OrganizerVariant = "organize" | "bookmark";
 
 /** Identifies the tweet a control belongs to (PRD §32 callback context). */
 export interface OrganizerContext {
@@ -57,7 +73,7 @@ export interface OrganizerCallbacks {
 export interface OrganizerRenderOptions {
   /** X status id of the tweet. */
   tweetId: string;
-  /** All categories, in storage order. */
+  /** All categories, in the backend's order. */
   categories: readonly Category[];
   /** Popover or inline rendering (PRD §32/§33). */
   displayMode: DisplayMode;
@@ -65,6 +81,11 @@ export interface OrganizerRenderOptions {
   saved: boolean;
   /** Phase-4 callback seam. */
   callbacks: OrganizerCallbacks;
+  /**
+   * Trigger style. Defaults to `"organize"`, the bookmarks-timeline surface; the
+   * content script passes `"bookmark"` on every other page.
+   */
+  variant?: OrganizerVariant | undefined;
 }
 
 interface OpenPopover {
@@ -89,6 +110,39 @@ let lastOptions = new WeakMap<HTMLElement, OrganizerRenderOptions>();
 /** Categories ordered by `order` (stable), never mutating the input. */
 function orderedCategories(categories: readonly Category[]): Category[] {
   return [...categories].sort((a, b) => a.order - b.order);
+}
+
+/** The trigger label for a variant: what the button says when it is idle. */
+function triggerLabel(variant: OrganizerVariant | undefined): string {
+  return variant === "bookmark" ? BOOKMARK_LABEL : ORGANIZE_LABEL;
+}
+
+/**
+ * The bookmark glyph, drawn as inline SVG.
+ *
+ * Inline rather than an image file: the content script runs inside X's page, where
+ * a `chrome-extension://` URL in an `<img>` would be blocked by X's own
+ * `img-src` policy, and a data URL would be four times the size for no benefit.
+ */
+function bookmarkGlyph(doc: Document): Element {
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = doc.createElementNS(namespace, "svg");
+  svg.setAttribute("width", "12");
+  svg.setAttribute("height", "12");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.style.flex = "0 0 auto";
+
+  const path = doc.createElementNS(namespace, "path");
+  path.setAttribute("d", "M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z");
+  svg.appendChild(path);
+  return svg;
 }
 
 /** The tweet container for a root, falling back to its parent element. */
@@ -280,8 +334,20 @@ export function renderOrganizer(root: HTMLElement, options: OrganizerRenderOptio
   trigger.setAttribute("aria-haspopup", "true");
   trigger.setAttribute("aria-expanded", "false");
   trigger.className = "twb-trigger";
-  trigger.textContent = ORGANIZE_LABEL;
   trigger.style.fontWeight = "600";
+
+  // The label lives in its own span in both variants so the saving transition can
+  // swap the text without rebuilding the trigger (or dropping the glyph).
+  const label = doc.createElement("span");
+  label.className = "twb-trigger-label";
+  label.textContent = triggerLabel(options.variant);
+
+  if (options.variant === "bookmark") {
+    trigger.setAttribute("aria-label", BOOKMARK_ARIA_LABEL);
+    trigger.append(bookmarkGlyph(doc), label);
+  } else {
+    trigger.appendChild(label);
+  }
 
   const panel = doc.createElement("div");
   panel.setAttribute(PANEL_ATTRIBUTE, "true");
@@ -331,7 +397,11 @@ export function updateOrganizerSaving(root: HTMLElement, saving: boolean): void 
   const trigger = queryFirst<HTMLElement>(root, "organizerTrigger");
   if (trigger) {
     (trigger as HTMLButtonElement).disabled = saving;
-    trigger.textContent = saving ? SAVING_LABEL : ORGANIZE_LABEL;
+    // Only the label text changes, so the bookmark variant keeps its glyph.
+    const label = trigger.querySelector<HTMLElement>(".twb-trigger-label");
+    const idle = triggerLabel(lastOptions.get(root)?.variant);
+    if (label) label.textContent = saving ? SAVING_LABEL : idle;
+    else trigger.textContent = saving ? SAVING_LABEL : idle;
   }
 
   for (const button of queryAll<HTMLElement>(root, "categoryButton")) {

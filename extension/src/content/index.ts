@@ -1,16 +1,26 @@
 /**
- * X bookmarks content script — bootstrap (Phase 4 + Phase 5).
+ * X content script — bootstrap (Phase 4 + Phase 5, plus the general-page button).
  *
- * Wires the SPA route watcher to the bookmarks-page lifecycle, supplies the real
- * save controller as `onSelect`, routes extraction failures to a toast, and
- * subscribes to `chrome.storage.onChanged` so visible controls re-render without
- * a reload (PRD §26, §40, §51).
+ * Wires the SPA route watcher to the tweet-page lifecycle, supplies the real save
+ * controller as `onSelect`, routes extraction failures to a toast, and subscribes
+ * to `chrome.storage.onChanged` so visible controls re-render without a reload
+ * (PRD §26, §40, §51).
+ *
+ * The route decides *which* button is injected, not whether the lifecycle runs: on
+ * the bookmarks timeline it is the organizer for a tweet X already holds, and on
+ * every other page it is our own bookmark button — the web counterpart of the
+ * phone's action-bar button. Both pick a category from the same backend list and
+ * both save through the same controller.
  *
  * `onSaved` is the one place auto-unbookmark lives (PRD §37, §38). It is invoked
  * by the save controller only after a confirmed `201`, gated on
- * `settings.unbookmarkAfterSave`, and never rolls back a confirmed save.
+ * `settings.unbookmarkAfterSave`, and never rolls back a confirmed save. It applies
+ * on both surfaces, which is consistent: `unbookmarkTweet` only clicks a control
+ * that is currently *bookmarked*, so a tweet that was never in X's list is left
+ * alone.
  */
 
+import { refreshCollectionsIfStale } from "../shared/collections-sync.ts";
 import { DEFAULT_SETTINGS } from "../shared/constants.ts";
 import { getStore, onStoreChanged } from "../shared/storage.ts";
 import type { Settings, Store } from "../shared/types.ts";
@@ -22,7 +32,7 @@ import {
 } from "./bookmark-page.ts";
 import { createSaveController } from "./save-controller.ts";
 import type { SavedTweetContext } from "./save-controller.ts";
-import { watchRoute } from "./route.ts";
+import { tweetPageMode, watchRouteKey } from "./route.ts";
 import { showToast } from "./toast.ts";
 import type { ToastKind } from "./toast.ts";
 import { EXTRACTION_ERROR } from "./tweet-extractor.ts";
@@ -129,16 +139,24 @@ function bootstrap(): void {
       },
     });
 
-    watchRoute(
-      () => {
-        void startBookmarksPage({ onSelect, onExtractionError: reportExtractionError });
+    watchRouteKey(
+      (pathname) => tweetPageMode(pathname),
+      (mode) => {
+        // The cached list renders immediately; this fills the gap when it is empty
+        // or old, and the refresh arrives back here as a storage change.
+        void refreshCollectionsIfStale();
+        void startBookmarksPage({
+          onSelect,
+          onExtractionError: reportExtractionError,
+          variant: mode === "bookmarks" ? "organize" : "bookmark",
+        });
       },
       () => {
         stopBookmarksPage();
       },
     );
 
-    // Keep the settings seam warm; `refreshBookmarksPage` owns categories.
+    // Keep the settings seam warm; `refreshBookmarksPage` owns the category list.
     void getStore()
       .then((store: Store) => {
         currentSettings = { ...store.settings };

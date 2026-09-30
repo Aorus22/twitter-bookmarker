@@ -12,8 +12,8 @@ import assert from "node:assert/strict";
 const realFetch = globalThis.fetch;
 
 let listener = null;
-/** The single stored `Store` object, or `null` for "first run". */
-let storedStore = null;
+/** Everything in `chrome.storage.local`, keyed the way the extension keys it. */
+let records = {};
 
 globalThis.chrome = {
   runtime: {
@@ -27,22 +27,31 @@ globalThis.chrome = {
   storage: {
     local: {
       async get(key) {
-        if (storedStore === null) return {};
-        return typeof key === "string" ? { [key]: structuredClone(storedStore) } : {};
+        // Mirror the real API: a string key, a list of keys, or everything. The
+        // worker reads settings and the collection cache in one call.
+        const keys = typeof key === "string" ? [key] : Array.isArray(key) ? key : Object.keys(records);
+        const out = {};
+        for (const name of keys) if (name in records) out[name] = structuredClone(records[name]);
+        return out;
       },
       async set(items) {
-        for (const value of Object.values(items)) storedStore = structuredClone(value);
+        for (const [key, value] of Object.entries(items)) records[key] = structuredClone(value);
       },
     },
     onChanged: { addListener() {}, removeListener() {} },
   },
 };
 
-/** Persist settings the way the popup would, under the one documented key. */
+/** Persist settings the way the popup would, under the settings key. */
 async function storeSettings(settings) {
   await globalThis.chrome.storage.local.set({
-    twitterBookmarker: { version: 2, settings, categories: [] },
+    twitterBookmarker: { version: 3, settings },
   });
+}
+
+/** The cached collection list the worker writes, read straight from the fake. */
+function storedCollections() {
+  return records.twitterBookmarkerCollections ?? null;
 }
 
 // The worker registers its listener at import time, so `chrome` must be stubbed
@@ -51,7 +60,7 @@ await import("../src/background/service-worker.ts");
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  storedStore = null;
+  records = {};
 });
 
 function jsonResponse(status, body) {
@@ -228,4 +237,175 @@ test("SAVE_TWEET forwards the payload and resolves 201/409/5xx to typed shapes",
 test("an unknown message is ignored (returns false, sends nothing)", () => {
   const { returned } = dispatch({ type: "NOT_A_MESSAGE" });
   assert.equal(returned, false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Collections                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** A wire collection, with the fields the mapper reads spelled out. */
+function collection(slug, name, order) {
+  return { slug, name, color: "#bf3f2e", order, post_count: 0, media_count: 0, last_saved_at: null, cover_media: [] };
+}
+
+test("LIST_COLLECTIONS fetches, caches, and answers with typed rows", async () => {
+  const calls = captureFetch(() =>
+    jsonResponse(200, {
+      // Deliberately out of order: the answer is ordered by the backend's
+      // positions, not by the array the response happened to use.
+      collections: [collection("read-later", "Read Later", 1), collection("linux", "Linux", 0)],
+    }),
+  );
+
+  const { response } = dispatch({ type: "LIST_COLLECTIONS" });
+  const answer = await response;
+
+  assert.equal(answer.ok, true);
+  assert.deepEqual(
+    answer.collections.map((category) => [category.slug, category.order]),
+    [
+      ["linux", 0],
+      ["read-later", 1],
+    ],
+  );
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/collections");
+
+  // The worker is the only writer of the cache, and a reader's request refreshes
+  // it — which is how an open timeline learns about a category added elsewhere.
+  const cache = storedCollections();
+  assert.ok(cache, "the list was cached");
+  assert.equal(typeof cache.fetchedAt, "number");
+  assert.deepEqual(cache.collections.map((category) => category.slug), ["linux", "read-later"]);
+});
+
+test("LIST_COLLECTIONS degrades to a typed failure and leaves the cache alone", async () => {
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+
+  assert.deepEqual(await dispatch({ type: "LIST_COLLECTIONS" }).response, {
+    ok: false,
+    collections: null,
+    error: "backend_unavailable",
+  });
+  assert.equal(storedCollections(), null, "a failed read never writes a cache");
+});
+
+test("CREATE_COLLECTION posts the name and answers with the refetched list", async () => {
+  const calls = captureFetch((url, init) => {
+    if (init.method === "POST") {
+      return jsonResponse(201, { status: "created", collection: collection("read-later", "Read Later", 0) });
+    }
+    return jsonResponse(200, { collections: [collection("read-later", "Read Later", 0)] });
+  });
+
+  const answer = await dispatch({ type: "CREATE_COLLECTION", name: "Read Later", color: "#BF3F2E" }).response;
+
+  assert.equal(answer.ok, true);
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/collections");
+  assert.equal(calls[0].init.method, "POST");
+  // Only the name and colour travel: the backend derives the slug, so the browser
+  // cannot disagree with the phone about what the key should be.
+  assert.deepEqual(JSON.parse(calls[0].init.body), { name: "Read Later", color: "#BF3F2E" });
+  assert.deepEqual(calls[1].url, "http://127.0.0.1:43121/v1/collections");
+  assert.equal(calls[1].init.method, "GET");
+  assert.deepEqual(answer.collections.map((category) => category.slug), ["read-later"]);
+  assert.deepEqual(storedCollections().collections.map((category) => category.slug), ["read-later"]);
+});
+
+test("CREATE_COLLECTION maps a taken name to conflict", async () => {
+  captureFetch(() => jsonResponse(409, { status: "error", reason: "collection already exists" }));
+
+  assert.deepEqual(await dispatch({ type: "CREATE_COLLECTION", name: "Linux" }).response, {
+    ok: false,
+    collections: null,
+    error: "conflict",
+  });
+});
+
+test("UPDATE_COLLECTION sends only the fields it was given", async () => {
+  const calls = captureFetch((url, init) => {
+    if (init.method === "PUT") {
+      return jsonResponse(200, { status: "updated", collection: collection("linux-bsd", "Linux & BSD", 0) });
+    }
+    return jsonResponse(200, { collections: [collection("linux-bsd", "Linux & BSD", 0)] });
+  });
+
+  const answer = await dispatch({ type: "UPDATE_COLLECTION", slug: "linux", name: "Linux & BSD" }).response;
+
+  assert.equal(answer.ok, true);
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/collections/linux");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { name: "Linux & BSD" }, "absent fields stay absent");
+  assert.deepEqual(answer.collections.map((category) => category.slug), ["linux-bsd"]);
+});
+
+test("UPDATE_COLLECTION escapes the slug and maps 404 to not_found", async () => {
+  const calls = captureFetch(() => jsonResponse(404, { status: "error", reason: "collection does not exist" }));
+
+  const answer = await dispatch({ type: "UPDATE_COLLECTION", slug: "a b/c", color: "" }).response;
+
+  assert.equal(answer.error, "not_found");
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/collections/a%20b%2Fc");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { color: "" }, "an empty colour is a real instruction");
+});
+
+test("REORDER_COLLECTIONS sends the whole order and answers with the backend's list", async () => {
+  const calls = captureFetch((url, init) => {
+    if (init.method === "PUT") {
+      return jsonResponse(200, {
+        status: "ordered",
+        collections: [collection("design", "Design", 0), collection("linux", "Linux", 1)],
+      });
+    }
+    return jsonResponse(200, { collections: [collection("design", "Design", 0), collection("linux", "Linux", 1)] });
+  });
+
+  const answer = await dispatch({ type: "REORDER_COLLECTIONS", slugs: ["design", "linux"] }).response;
+
+  assert.equal(answer.ok, true);
+  // One request: the reorder response is already the whole renumbered list.
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/collections/order");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { slugs: ["design", "linux"] });
+  assert.deepEqual(answer.collections.map((category) => category.slug), ["design", "linux"]);
+  assert.deepEqual(storedCollections().collections.map((category) => category.slug), ["design", "linux"]);
+});
+
+test("a mutation that succeeded but could not be re-read still reports success", async () => {
+  // The change is real; only the follow-up read failed. Reporting a failure would
+  // invite the user to repeat a change that already happened.
+  let call = 0;
+  captureFetch(() => {
+    call += 1;
+    return call === 1
+      ? jsonResponse(200, { status: "updated", collection: collection("linux", "Linux", 0) })
+      : jsonResponse(503, { error: "unavailable" });
+  });
+
+  assert.deepEqual(await dispatch({ type: "UPDATE_COLLECTION", slug: "linux", color: "#000000" }).response, {
+    ok: true,
+    collections: null,
+  });
+  assert.equal(storedCollections(), null, "nothing was cached from a failed read");
+});
+
+test("every collection message carries the stored token", async () => {
+  await storeSettings({
+    backendMode: "custom",
+    backendUrl: "https://tw-bookmark.example",
+    backendToken: "s3cret",
+  });
+
+  const calls = captureFetch((url, init) =>
+    init.method === "GET"
+      ? jsonResponse(200, { collections: [] })
+      : jsonResponse(200, { status: "ordered", collections: [] }),
+  );
+
+  await dispatch({ type: "LIST_COLLECTIONS" }).response;
+  await dispatch({ type: "REORDER_COLLECTIONS", slugs: ["linux"] }).response;
+
+  assert.equal(calls.length, 2, "one list, one reorder");
+  for (const call of calls) assert.equal(call.init.headers.Authorization, "Bearer s3cret");
 });

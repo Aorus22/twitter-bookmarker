@@ -1,10 +1,14 @@
 // Post-build verification for the extension `dist/` output.
 //
-// Proves the three things the roadmap requires of a loadable MV3 bundle:
+// Proves the four things the roadmap requires of a loadable MV3 bundle:
 //   1. `dist/manifest.json` is valid JSON with `manifest_version: 3` and exactly
 //      the permitted permissions/hosts;
 //   2. every file the manifest (and popup HTML) references exists in `dist/`;
-//   3. the PRD §8 slug examples and the fallback regex hold.
+//   3. a slug arriving from anywhere is still validated before it reaches a
+//      request path, and the derivation that now lives in the backend is gone
+//      from this bundle;
+//   4. the category list is read and written through the service worker's
+//      collection endpoints, with no local CRUD and no delete anywhere.
 //
 // Run after `npm run build`:  node scripts/verify-dist.mjs
 
@@ -13,7 +17,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SLUG_PATTERN, isValidSlug, slugify } from "../src/shared/slug.ts";
+import { SLUG_PATTERN, isValidSlug } from "../src/shared/slug.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "dist");
@@ -50,14 +54,11 @@ async function verifyManifest() {
   assert.deepEqual(manifest.background, { service_worker: "background/service-worker.js", type: "module" });
   pass("background service worker is an ES module");
 
-  // The Bookmarks timeline moved from /i/bookmarks to /i/history; the manifest
-  // match list and the route matcher must agree, or the content script either
-  // never loads or never activates. This catches drift between the two.
-  assert.deepEqual(manifest.content_scripts[0].matches, [
-    "https://x.com/i/history*",
-    "https://x.com/i/bookmarks*",
-  ]);
-  pass("content script matches the canonical /i/history plus the legacy /i/bookmarks alias");
+  // The content script now loads on every x.com page, because the button is
+  // injected outside the bookmarks timeline too. That makes the route decision
+  // inside the bundle, not in the manifest, the thing worth pinning.
+  assert.deepEqual(manifest.content_scripts[0].matches, ["https://x.com/*"]);
+  pass("content script matches all of x.com (the bookmark button lives off the bookmarks page)");
   const contentBundle = await readFile(
     path.join(DIST, manifest.content_scripts[0].js[0]),
     "utf8",
@@ -65,7 +66,11 @@ async function verifyManifest() {
   for (const route of ["/i/history", "/i/bookmarks"]) {
     assert.ok(contentBundle.includes(route), `content bundle is missing route literal ${route}`);
   }
-  pass("content bundle contains both accepted route literals");
+  pass("content bundle contains both accepted bookmarks-timeline route literals");
+  for (const ignored of ["/settings", "/messages", "/compose"]) {
+    assert.ok(contentBundle.includes(ignored), `content bundle is missing ignored-path literal ${ignored}`);
+  }
+  pass("content bundle contains the tweet-free paths it deliberately skips");
 
   // Media extraction (PRD §14) is DOM-coupled: if the anchors or the media
   // host filter fall out of the bundle, saved rows silently lose their media
@@ -98,42 +103,50 @@ async function verifyManifest() {
   }
 }
 
-function verifySlug() {
-  const id = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+/**
+ * The extension no longer derives slugs — `storage.Slugify` on the backend does —
+ * so what is left to prove is the boundary: a slug that arrives from the cache, a
+ * hand-edited store or the backend is validated before it is put in a request path.
+ */
+function verifySlugSafety() {
+  for (const accepted of ["linux", "ai-llm", "read-later", "category-3f2504e0"]) {
+    assert.ok(isValidSlug(accepted), `${accepted} should be a valid slug`);
+  }
+  pass("slug validation accepts the shapes the backend produces");
 
-  assert.equal(slugify("Linux", id), "linux");
-  pass("slug: Linux -> linux");
+  for (const rejected of ["../../etc/passwd", "/etc/passwd", "Linux", "linux.csv", "linux slug", "-linux", ".."]) {
+    assert.ok(!isValidSlug(rejected), `${rejected} must be rejected before it reaches a request path`);
+  }
+  pass(`slug validation rejects path traversal, separators, case and extensions (${SLUG_PATTERN})`);
 
-  assert.equal(slugify("AI & LLM", id), "ai-llm");
-  pass("slug: AI & LLM -> ai-llm");
-
-  assert.equal(slugify("Read Later", id), "read-later");
-  pass("slug: Read Later -> read-later");
-
-  const fallback = slugify("!!!", id);
-  assert.equal(fallback, "category-3f2504e0");
-  assert.match(fallback, SLUG_PATTERN);
-  assert.ok(isValidSlug(fallback));
-  pass(`slug fallback: "!!!" -> ${fallback} (matches ${SLUG_PATTERN})`);
-
-  const pathTraversal = slugify("../../etc/passwd", id);
-  assert.match(pathTraversal, SLUG_PATTERN);
-  pass(`slug safety: "../../etc/passwd" -> ${pathTraversal}`);
+  assert.ok(!SLUG_PATTERN.test("linux\n"), "the pattern must be anchored");
+  pass("the slug pattern is anchored at both ends");
 }
 
 async function verifyPopupCopy() {
   const popupJs = await readFile(path.join(DIST, "popup/popup.js"), "utf8");
-  assert.ok(popupJs.includes("Delete category \""));
-  assert.ok(popupJs.includes("Existing bookmarks will not be deleted."));
-  pass("built popup bundle contains the exact delete-confirmation copy");
-
   const popupHtml = await readFile(path.join(DIST, "popup/popup.html"), "utf8");
+
+  // Deleting a category is gone from the product, not merely disabled: a delete
+  // would have to decide what happens to the bookmarks filed under it, and the
+  // answer is "the backend keeps them".
+  for (const gone of ["Delete category", "Existing bookmarks will not be deleted."]) {
+    assert.ok(!popupJs.includes(gone), `the delete flow must be gone, found ${JSON.stringify(gone)}`);
+    assert.ok(!popupHtml.includes(gone), `the delete flow must be gone, found ${JSON.stringify(gone)} in the markup`);
+  }
+  assert.ok(!popupHtml.includes("category-delete"), "the delete button hook must be gone");
+  pass("no delete-category flow exists in the popup (bundle or markup)");
+
   assert.ok(popupHtml.includes("No categories yet"));
   assert.ok(popupHtml.includes("+ Add category"));
   assert.ok(popupHtml.includes("Unbookmark after save"));
   assert.ok(popupHtml.includes("Popover"));
   assert.ok(popupHtml.includes("Inline"));
   pass("built popup markup contains the empty state, add-category, and settings rows");
+
+  assert.ok(popupHtml.includes("field-hint"), "the popup must say where categories live");
+  assert.ok(popupHtml.includes("backend"), "the popup must name the backend as the owner of the list");
+  pass("built popup markup tells the user the category list lives in the backend");
 }
 
 /**
@@ -185,7 +198,8 @@ async function verifyPopupWiring() {
     "category-name-input",
     "category-slug",
     "category-rename",
-    "category-delete",
+    "category-up",
+    "category-down",
     "drag-handle",
     "status-text",
     "segmented-option",
@@ -231,8 +245,37 @@ async function verifySettingsWiring() {
   pass("the health probe keeps its 4 s ceiling in the source");
 
   assert.ok(popup.includes("onStoreChanged(render)"), "popup must rerender through onStoreChanged");
-  assert.ok(popup.includes("window.confirm"), "delete must use a native confirmation");
-  pass("popup bootstrap subscribes to onStoreChanged and delete confirms natively");
+  pass("popup bootstrap subscribes to onStoreChanged");
+}
+
+/**
+ * Every category change is a backend request made by the service worker.
+ *
+ * This is the load-bearing invariant of the change: the popup must not keep its
+ * own editable list, and the worker must be the one holding the credential.
+ */
+async function verifyCollectionsWiring() {
+  const popup = await readFile(path.join(DIST, "popup/popup.js"), "utf8");
+  for (const message of ["CREATE_COLLECTION", "UPDATE_COLLECTION", "REORDER_COLLECTIONS", "LIST_COLLECTIONS"]) {
+    assert.ok(popup.includes(message), `the popup must drive the list through ${message}`);
+  }
+  assert.ok(!/addCategory|renameCategory|deleteCategory/.test(popup), "the popup must not own category CRUD");
+  pass("built popup bundle drives every category change through a worker message");
+
+  const worker = await readFile(path.join(DIST, "background/service-worker.js"), "utf8");
+  for (const needle of ["/v1/collections", "/v1/collections/order", "twitterBookmarkerCollections", "Bearer "]) {
+    assert.ok(worker.includes(needle), `the worker is missing ${JSON.stringify(needle)}`);
+  }
+  pass("service worker owns the collection endpoints and the only cache write");
+
+  const content = await readFile(path.join(DIST, "content/content.js"), "utf8");
+  // The ellipsis is escaped by the minifier, so the label is matched with the
+  // escaped spelling: `"Save to\\u2026"` in the bundle output.
+  const saveLabel = "Save to" + String.fromCharCode(92) + "u2026";
+  for (const needle of [saveLabel, "LIST_COLLECTIONS", "Organize"]) {
+    assert.ok(content.includes(needle), `the content bundle is missing ${JSON.stringify(needle)}`);
+  }
+  pass("content bundle carries both trigger variants and refreshes from the worker");
 }
 
 /**
@@ -302,11 +345,12 @@ async function verifyBundleFormats() {
 
 try {
   await verifyManifest();
-  verifySlug();
+  verifySlugSafety();
   await verifyPopupCopy();
   await verifyPopupAssets();
   await verifyPopupWiring();
   await verifySettingsWiring();
+  await verifyCollectionsWiring();
   await verifyBackendTargetWiring();
   await verifyBundleFormats();
   console.log(`\nAll ${checks.length} dist checks passed.`);

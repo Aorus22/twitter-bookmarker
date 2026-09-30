@@ -11,8 +11,12 @@ import {
   BackendUnavailableError,
   bgErrorFrom,
   checkHealth,
+  createCollection,
+  fetchCollections,
   fetchSavedIndex,
   postBookmark,
+  reorderCollections,
+  updateCollection,
 } from "../src/shared/api.ts";
 import { savedIndexToSet } from "../src/shared/messages.ts";
 
@@ -253,4 +257,129 @@ test("savedIndexToSet degrades a failed index to an empty Set", () => {
     [...savedIndexToSet({ ok: true, index: { items: { 1: { url: "u", slug: "f", saved_at: "t" }, 2: { url: "u", slug: "f", saved_at: "t" } } } })].sort(),
     ["1", "2"],
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* collections                                                                */
+/* -------------------------------------------------------------------------- */
+
+/** A wire collection with every field the endpoint documents. */
+function collection(slug, name, order, color = "#bf3f2e") {
+  return { slug, name, color, order, post_count: 3, media_count: 5, last_saved_at: "t", cover_media: ["u"] };
+}
+
+test("fetchCollections maps the wire list onto ordered rows", async () => {
+  const calls = captureFetch(() =>
+    jsonResponse(200, {
+      collections: [collection("read-later", "Read Later", 1, ""), collection("linux", "Linux", 0)],
+    }),
+  );
+
+  const categories = await fetchCollections("https://tw-bookmark.example", "tok");
+
+  assert.deepEqual(
+    categories.map((category) => [category.id, category.name, category.color, category.order]),
+    [
+      ["linux", "Linux", "#bf3f2e", 0],
+      ["read-later", "Read Later", "", 1],
+    ],
+  );
+  assert.equal(calls[0].url, "https://tw-bookmark.example/v1/collections");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer tok");
+});
+
+test("fetchCollections drops an entry whose slug could not be used in a path", async () => {
+  captureFetch(() =>
+    jsonResponse(200, {
+      collections: [
+        collection("linux", "Linux", 0),
+        collection("../etc/passwd", "Escape", 1),
+        collection("linux csv", "Space", 2),
+      ],
+    }),
+  );
+
+  assert.deepEqual((await fetchCollections()).map((category) => category.slug), ["linux"]);
+});
+
+test("fetchCollections rejects a malformed body instead of rendering it", async () => {
+  captureFetch(() => jsonResponse(200, { collections: "nope" }));
+  await assert.rejects(fetchCollections(), (error) => error instanceof BackendRequestError && error.code === "internal");
+
+  captureFetch(() => jsonResponse(200, null));
+  await assert.rejects(fetchCollections(), (error) => error.code === "internal");
+});
+
+test("createCollection posts only the name and colour", async () => {
+  const calls = captureFetch(() =>
+    jsonResponse(201, { status: "created", collection: collection("read-later", "Read Later", 0, "") }),
+  );
+
+  const created = await createCollection({ name: "Read Later" }, "https://tw-bookmark.example", "tok");
+
+  assert.equal(created.slug, "read-later");
+  assert.equal(calls.length, 1, "the caller decides whether it needs the whole list");
+  assert.equal(calls[0].url, "https://tw-bookmark.example/v1/collections");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { name: "Read Later" });
+});
+
+test("updateCollection escapes the slug and forwards only the given fields", async () => {
+  const calls = captureFetch(() =>
+    jsonResponse(200, { status: "updated", collection: collection("linux", "Linux", 0) }),
+  );
+
+  await updateCollection("a b/c", { color: "" }, "https://tw-bookmark.example", "tok");
+
+  assert.equal(calls[0].url, "https://tw-bookmark.example/v1/collections/a%20b%2Fc");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { color: "" }, "an empty colour must survive JSON");
+});
+
+test("reorderCollections sends the whole order and returns the answered list", async () => {
+  const calls = captureFetch(() =>
+    jsonResponse(200, {
+      status: "ordered",
+      collections: [collection("design", "Design", 0), collection("linux", "Linux", 1)],
+    }),
+  );
+
+  const categories = await reorderCollections(["design", "linux"], "https://tw-bookmark.example", "tok");
+
+  assert.deepEqual(categories.map((category) => category.slug), ["design", "linux"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://tw-bookmark.example/v1/collections/order");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { slugs: ["design", "linux"] });
+});
+
+test("collection failures follow the shared status mapping", async () => {
+  const cases = [
+    [400, "invalid_request"],
+    [404, "not_found"],
+    [409, "conflict"],
+    [500, "internal"],
+    [503, "internal"],
+  ];
+  for (const [status, code] of cases) {
+    captureFetch(() => jsonResponse(status, { status: "error", reason: "nope" }));
+    await assert.rejects(fetchCollections(), (error) => {
+      assert.ok(error instanceof BackendRequestError, `status ${status} should be a BackendRequestError`);
+      assert.equal(error.status, status);
+      assert.equal(error.code, code);
+      assert.equal(bgErrorFrom(error), code, "the worker's mapping agrees with the client's");
+      return true;
+    });
+  }
+});
+
+test("an unreachable backend on a collection call is backend_unavailable", async () => {
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  await assert.rejects(fetchCollections(), (error) => {
+    assert.ok(error instanceof BackendUnavailableError);
+    assert.equal(bgErrorFrom(error), "backend_unavailable");
+    return true;
+  });
 });

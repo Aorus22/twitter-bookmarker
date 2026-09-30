@@ -122,7 +122,7 @@ test("popover mode: single trigger, ordered panel, visible colours (XI-09)", () 
   const buttons = panel.querySelectorAll("[data-category-id]");
   assert.deepEqual(
     buttons.map((button) => button.getAttribute("data-category-id")),
-    ["cat-ai", "cat-linux"],
+    ["ai", "linux"],
     "order follows category.order (AI=0 before Linux=1)",
   );
   assert.deepEqual(
@@ -149,7 +149,7 @@ test("inline mode renders every category in order with colour (XI-10)", () => {
   const buttons = root.querySelectorAll("[data-category-id]");
   assert.deepEqual(
     buttons.map((button) => button.getAttribute("data-category-id")),
-    ["cat-ai", "cat-linux"],
+    ["ai", "linux"],
   );
   assert.deepEqual(
     buttons.map((button) => button.querySelector("[data-twitter-bookmarker-color]").style.backgroundColor),
@@ -202,18 +202,18 @@ test("popover closes on category selection and fires onSelect once (XI-09)", () 
   trigger.click();
   assert.equal(panel.hidden, false);
 
-  root.querySelector('[data-category-id="cat-linux"]').click();
+  root.querySelector('[data-category-id="linux"]').click();
   assert.equal(panel.hidden, true, "selecting closes the popover");
-  assert.deepEqual(selections, [["cat-linux", "42", true]]);
+  assert.deepEqual(selections, [["linux", "42", true]]);
 
   // A fast double-click collapses into one selection.
   trigger.click();
-  const ai = root.querySelector('[data-category-id="cat-ai"]');
+  const ai = root.querySelector('[data-category-id="ai"]');
   ai.click();
   ai.click();
   assert.deepEqual(selections, [
-    ["cat-linux", "42", true],
-    ["cat-ai", "42", true],
+    ["linux", "42", true],
+    ["ai", "42", true],
   ]);
   assert.ok(doc);
 });
@@ -366,4 +366,74 @@ test("a fresh article node with no marker receives controls exactly once (marker
   inject(replacement);
   inject(replacement);
   assert.equal(rootsIn(replacement).length, 1, "fresh node gets exactly one organizer");
+});
+
+/* -------------------------------------------------------------------------- */
+/* The general-page variant                                                   */
+/* -------------------------------------------------------------------------- */
+
+test("the bookmark variant renders our own labelled glyph button", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.ok(trigger, "the trigger is still the organizer trigger");
+  assert.equal(trigger.querySelector(".twb-trigger-label").textContent, "Save to…");
+  assert.equal(trigger.getAttribute("aria-label"), "Save to Twitter Bookmarker");
+
+  // The glyph is inline SVG: an <img> to a chrome-extension:// URL would be blocked
+  // by X's own img-src policy, so it has to be built from nodes.
+  const glyph = trigger.querySelector("svg");
+  assert.ok(glyph, "the button carries its icon");
+  assert.equal(glyph.getAttribute("aria-hidden"), "true");
+  assert.equal(glyph.querySelector("path").getAttribute("d").startsWith("M17 3a2 2"), true);
+
+  // The popover is the same one, with the same categories in the same order.
+  assert.deepEqual(
+    root.querySelectorAll("[data-category-id]").map((button) => button.getAttribute("data-category-id")),
+    ["ai", "linux"],
+  );
+});
+
+test("the organize variant keeps the plain text trigger", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "organize" });
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.textContent, "Organize");
+  assert.equal(trigger.querySelector("svg"), null);
+  assert.equal(trigger.getAttribute("aria-label"), null);
+});
+
+test("saving swaps the label without dropping the bookmark glyph", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  setSaving("1234567890", true, root.ownerDocument);
+  let trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.querySelector(".twb-trigger-label").textContent, "Saving…");
+  assert.ok(trigger.querySelector("svg"), "the glyph survives the state change");
+
+  setSaving("1234567890", false, root.ownerDocument);
+  trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.querySelector(".twb-trigger-label").textContent, "Save to…");
+  assert.ok(trigger.querySelector("svg"));
+});
+
+test("a rerender keeps the variant it was given", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  rerenderAll(root.ownerDocument, {
+    categories: sampleCategories(),
+    settings: SETTINGS,
+    savedIds: new Set(),
+    callbacks: makeCallbacks(),
+    variant: "bookmark",
+  });
+
+  assert.equal(
+    root.querySelector("[data-twitter-bookmarker-trigger] .twb-trigger-label").textContent,
+    "Save to…",
+  );
 });

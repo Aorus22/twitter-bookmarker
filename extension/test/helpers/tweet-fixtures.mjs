@@ -167,7 +167,7 @@ export function createPlainTweet(overrides = {}) {
 /** A store shaped like `chrome.storage.local`'s payload. */
 export function makeStore(categories, displayMode = "inline") {
   return {
-    version: 1,
+    version: 3,
     settings: { unbookmarkAfterSave: false, displayMode },
     categories,
   };
@@ -175,8 +175,11 @@ export function makeStore(categories, displayMode = "inline") {
 
 /** Two categories in a deliberately non-array order, for order assertions. */
 export function sampleCategories() {
+  // `id` is the collection slug, which is what the backend's list maps to: the
+  // extension no longer invents identifiers, so a row's identity and its key are
+  // the same string.
   return [
-    { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 1 },
-    { id: "cat-ai", name: "AI", slug: "ai", color: "#4f46e5", order: 0 },
+    { id: "linux", name: "Linux", slug: "linux", color: "#10b981", order: 1 },
+    { id: "ai", name: "AI", slug: "ai", color: "#4f46e5", order: 0 },
   ];
 }

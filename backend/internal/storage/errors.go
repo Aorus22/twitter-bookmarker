@@ -47,12 +47,9 @@ func (e *NotFoundError) Unwrap() error { return ErrNotFound }
 // ErrNotFound is the sentinel not-found error.
 var ErrNotFound = errors.New("tweet not found")
 
-// CollectionNotFoundError marks a move into a collection that does not exist
-// (HTTP 404).
-//
-// The web layer never creates collections: the extension owns the user's folder
-// names, so a slug the database does not know is a stale picker, not an
-// instruction to invent a folder called after a slug.
+// CollectionNotFoundError marks a collection slug the database does not know
+// (HTTP 404): a move into a folder that was renamed or never existed, a rename
+// of something already gone, or a slug missing from a reorder list.
 type CollectionNotFoundError struct {
 	Slug string
 }
@@ -66,3 +63,24 @@ func (e *CollectionNotFoundError) Unwrap() error { return ErrCollectionNotFound 
 
 // ErrCollectionNotFound is the sentinel collection-not-found error.
 var ErrCollectionNotFound = errors.New("collection not found")
+
+// CollectionExistsError marks a create or rename whose slug is already taken
+// (HTTP 409).
+//
+// The slug is derived from the name, so this is what a second "AI & LLM" looks
+// like: not a duplicate name check, but the database's own uniqueness constraint
+// reported as a conflict the caller can act on. Slug carries the existing
+// collection so the client can say which one was in the way.
+type CollectionExistsError struct {
+	Slug string
+}
+
+func (e *CollectionExistsError) Error() string {
+	return "collection " + e.Slug + " already exists"
+}
+
+// Unwrap makes errors.Is(err, ErrCollectionExists) work.
+func (e *CollectionExistsError) Unwrap() error { return ErrCollectionExists }
+
+// ErrCollectionExists is the sentinel duplicate-collection error.
+var ErrCollectionExists = errors.New("collection already exists")

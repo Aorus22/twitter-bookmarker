@@ -17,6 +17,7 @@ import {
 } from "../src/content/bookmark-page.ts";
 import { INJECTED_ATTRIBUTE } from "../src/content/selectors.ts";
 import { isPopoverOpen } from "../src/content/organizer.ts";
+import { injectOrganizer, rerenderAll } from "../src/content/ui-injector.ts";
 import { extractTweet } from "../src/content/tweet-extractor.ts";
 import { appendTweet, createTweetDocument, makeStore, sampleCategories } from "./helpers/tweet-fixtures.mjs";
 
@@ -271,12 +272,12 @@ test("refresh rerenders order and display mode on existing controls (PRD §51)",
   const root = rootsIn(article)[0];
   assert.deepEqual(
     root.querySelectorAll("[data-category-id]").map((button) => button.getAttribute("data-category-id")),
-    ["cat-ai", "cat-linux"],
+    ["ai", "linux"],
   );
 
   const reordered = [
-    { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 },
-    { id: "cat-ai", name: "AI", slug: "ai", color: "#4f46e5", order: 1 },
+    { id: "linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 },
+    { id: "ai", name: "AI", slug: "ai", color: "#4f46e5", order: 1 },
   ];
   refreshBookmarksPage(makeStore(reordered, "popover"));
 
@@ -286,7 +287,7 @@ test("refresh rerenders order and display mode on existing controls (PRD §51)",
     .querySelector("[data-twitter-bookmarker-panel]")
     .querySelectorAll("[data-category-id]")
     .map((button) => button.getAttribute("data-category-id"));
-  assert.deepEqual(panelButtons, ["cat-linux", "cat-ai"], "reorder is reflected live");
+  assert.deepEqual(panelButtons, ["linux", "ai"], "reorder is reflected live");
 });
 
 test("extraction failure surfaces once, injects nothing, and never sends a partial record (XI-12)", async () => {
@@ -361,4 +362,57 @@ test("markTweetSaved updates the cache and renders ✓ Saved (Phase 4 seam)", as
   markTweetSaved("1234567890");
   assert.equal(isTweetSaved("1234567890"), true);
   assert.ok(article.querySelector("[data-twitter-bookmarker-saved]"));
+});
+
+test("the variant reaches the injector and every live rerender (general pages)", async () => {
+  // The lifecycle is shared between the bookmarks timeline and every other page;
+  // the variant is the only difference, so it has to travel with the options into
+  // the injector and into each stored re-render.
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const observers = createObserverHarness();
+  const timers = createTimerHarness();
+  const injected = [];
+  const rerendered = [];
+
+  await startBookmarksPage(
+    baseDeps(doc, observers, timers, {
+      // Popover, so the trigger is the thing under test: in inline mode the
+      // categories are the buttons and there is no trigger to label.
+      loadStore: async () => makeStore(sampleCategories(), "popover"),
+      variant: "bookmark",
+      inject: (options) => {
+        injected.push(options.variant);
+        return injectOrganizer(options);
+      },
+      rerenderAll: (targetDoc, input) => {
+        rerendered.push(input.variant);
+        rerenderAll(targetDoc, input);
+      },
+    }),
+  );
+
+  assert.deepEqual(injected, ["bookmark"]);
+  const root = rootsIn(article)[0];
+  const label = () =>
+    root.querySelector("[data-twitter-bookmarker-trigger]").querySelector(".twb-trigger-label").textContent;
+  assert.equal(label(), "Save to…");
+
+  refreshBookmarksPage(makeStore(sampleCategories(), "popover"));
+  assert.ok(rerendered.length > 0, "the live re-render went through the injected seam");
+  assert.deepEqual([...new Set(rerendered)], ["bookmark"], "the variant survives a live re-render");
+  assert.equal(label(), "Save to…");
+
+  // The default is the organizer, so a caller that does not care keeps the
+  // bookmarks-timeline behaviour it always had.
+  stopBookmarksPage();
+  const second = createTweetDocument({ text: "hi" });
+  await startBookmarksPage(
+    baseDeps(second.doc, createObserverHarness(), createTimerHarness(), {
+      loadStore: async () => makeStore(sampleCategories(), "popover"),
+    }),
+  );
+  assert.equal(
+    rootsIn(second.article)[0].querySelector("[data-twitter-bookmarker-trigger]").textContent,
+    "Organize",
+  );
 });

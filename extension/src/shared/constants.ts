@@ -1,26 +1,53 @@
 /**
  * Extension-wide constants.
  *
- * Storage policy (PRD §7): every bit of extension configuration lives in
- * `chrome.storage.local` under the single key below. `chrome.storage.sync` is
+ * Storage policy: every bit of extension *configuration* lives in
+ * `chrome.storage.local` under {@link STORAGE_KEY}. `chrome.storage.sync` is
  * never used.
+ *
+ * Categories are not configuration any more: the backend owns them, and the
+ * extension keeps a cache of the list under {@link COLLECTIONS_CACHE_KEY} so a
+ * popup or a timeline renders without waiting on a request.
  */
 
 import type { Settings, Store } from "./types.ts";
 
-/** The single `chrome.storage.local` key that holds the whole extension store. */
+/** The single `chrome.storage.local` key that holds the user's settings. */
 export const STORAGE_KEY = "twitterBookmarker";
+
+/**
+ * `chrome.storage.local` key holding the cached backend collection list.
+ *
+ * Separate from {@link STORAGE_KEY} because they have different owners: settings
+ * are the user's and only this extension writes them, while the collection list
+ * is the backend's and the cache is a copy with a timestamp. Keeping them apart
+ * means refreshing categories cannot overwrite a setting.
+ */
+export const COLLECTIONS_CACHE_KEY = "twitterBookmarkerCollections";
+
+/**
+ * How long a cached collection list stays fresh, in milliseconds.
+ *
+ * Ten minutes is a compromise: long enough that browsing a timeline does not
+ * refetch the list on every navigation, short enough that a category added on the
+ * phone shows up in the browser without restarting it. The backend is on
+ * loopback for the common case, so a stale render is cheap to correct: every
+ * mutating action refetches.
+ */
+export const COLLECTIONS_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Current storage schema version.
  *
- * v2 renamed `Category.filename` (which held "linux.csv") to `Category.slug`
- * (which holds "linux"). Nothing reads the version to migrate: `normalizeStore`
- * recomputes a category's derived key from its name whenever the stored value
- * does not validate, so a v1 record loads as a v2 one losslessly. The bump only
- * records that the stored shape changed.
+ * v3 removed `categories` from the persisted record. v1 stored a `filename`
+ * ("linux.csv"), v2 stored a `slug` and a UI-only colour that no client could
+ * agree on; v3 stores settings only, because the backend holds the list. Nothing
+ * reads the version to migrate: a v2 record's `categories` array is simply
+ * ignored on read, and the list is fetched from the backend instead — which
+ * already holds every category the extension ever created, since every save
+ * created one there.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Default backend base URL (PRD §5, §50).
@@ -65,7 +92,9 @@ export const DEFAULT_SETTINGS: Settings = {
  * Colour used when a category has no (or an invalid) colour.
  *
  * The v2 Editorial accent coral (design spec §2.1), so a fresh category's dot
- * matches the gallery/popup theme.
+ * matches the gallery/popup theme. The backend carries the same default as
+ * `model.DefaultCollectionColor`; it is duplicated rather than fetched because a
+ * dot has to be paintable before any request completes.
  */
 export const DEFAULT_CATEGORY_COLOR = "#bf3f2e";
 

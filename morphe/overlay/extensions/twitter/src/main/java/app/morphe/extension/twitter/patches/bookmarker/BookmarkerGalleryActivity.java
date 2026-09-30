@@ -1,0 +1,1213 @@
+/*
+ * Copyright (C) 2026 piko <https://github.com/crimera/piko>
+ *
+ * See the included NOTICE file for GPLv3 §7(b) terms that apply to this code.
+ *
+ * Part of the Twitter Bookmarker overlay: see morphe/README.md.
+ */
+
+package app.morphe.extension.twitter.patches.bookmarker;
+
+import android.app.Activity;
+import android.app.DatePickerDialog;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Bundle;
+import android.text.TextUtils;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ListView;
+import android.widget.TextView;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.TimeZone;
+
+import app.morphe.extension.shared.Logger;
+import app.morphe.extension.shared.ResourceType;
+import app.morphe.extension.shared.ResourceUtils;
+import app.morphe.extension.shared.Utils;
+import app.morphe.extension.twitter.patches.nativeFeatures.shareMenu.BottomSheetAction;
+import app.morphe.extension.twitter.patches.nativeFeatures.shareMenu.BottomSheetHelper;
+
+/**
+ * The phone's own bookmark gallery: the archive as the backend holds it, in two
+ * levels.
+ *
+ * <p>The first level is the folder list — the backend's collections, in the
+ * backend's order, each with the colour the user gave it. The second is one
+ * collection's bookmarks, drawn as cards, with the date filter and the sort the
+ * web gallery offers: newest or oldest, by the date the archive saved it or by
+ * the date the tweet was posted.
+ *
+ * <p>Why a real Activity rather than a sheet: the share sheet's rows are one line
+ * each, and a gallery row is a card with an author, text, media and a date. It is
+ * read-only by design — creating, renaming and recolouring collections happens in
+ * the save sheet ({@link BookmarkerSheets}) and in the browser, and this screen
+ * only shows what those wrote.
+ *
+ * <p>The views are built in code rather than inflated from a layout. The overlay
+ * is additive and ships no {@code res/} of its own, so there is no layout file to
+ * keep in sync with a resource id that the patcher has to allocate; a screen this
+ * simple does not need one.
+ *
+ * <p>Threading: every load runs through {@link Utils#runOnBackgroundThread}, and
+ * only the main thread touches a view. A load carries a generation number, so an
+ * answer that arrives after the user changed the sort is dropped rather than
+ * appended to a list it no longer describes.
+ */
+public final class BookmarkerGalleryActivity extends Activity {
+
+    /** How many bookmarks a page asks for. The backend caps this at 100. */
+    private static final int PAGE_LIMIT = 30;
+
+    /**
+     * The names X's link handler has answered to, newest first.
+     *
+     * <p>The first is what the pinned Piko commit names in its own fingerprints and
+     * builds its settings shortcut against, and the second is what older builds
+     * called the same activity. Neither is a contract: X renames its own classes
+     * whenever it likes, which is why this list is only the fast path and
+     * {@link #handlerInApp} exists to ask the app what it registers today.
+     */
+    private static final String[] POST_HANDLER_CANDIDATES = {
+            "com.twitter.deeplink.implementation.UrlInterpreterActivity",
+            "com.twitter.android.UrlInterpreterActivity",
+    };
+
+    private static final String ISO_UTC = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+
+    /** Row glyphs for the filter sheet: both names are Piko-referenced, so certain. */
+    private static final String OPTION_ICON = "ic_vector_bulleted_list";
+    private static final String RANGE_ICON = "ic_vector_timeline_stroke";
+
+    private static final int COLOR_TEXT_LIGHT = 0xFF0F1419;
+    private static final int COLOR_TEXT_DARK = 0xFFE7E9EA;
+    private static final int COLOR_MUTED_LIGHT = 0xFF536471;
+    private static final int COLOR_MUTED_DARK = 0xFF71767B;
+    private static final int COLOR_CARD_LIGHT = 0xFFF7F9F9;
+    private static final int COLOR_CARD_DARK = 0xFF1E2732;
+    private static final int COLOR_BORDER_LIGHT = 0xFFEFF3F4;
+    private static final int COLOR_BORDER_DARK = 0xFF2F3336;
+    /**
+     * What an image that has not arrived yet is drawn as.
+     *
+     * <p>A box of the right size and the right colour, so the row's layout is the
+     * finished layout from the first frame: nothing shifts sideways when a picture
+     * lands, and an avatar that is missing outright still leaves the column it
+     * occupies. X's own placeholder greys.
+     */
+    private static final int COLOR_PLACEHOLDER_LIGHT = 0xFFE1E8ED;
+    private static final int COLOR_PLACEHOLDER_DARK = 0xFF2F3336;
+    private static final int COLOR_ACCENT = 0xFF1D9BF0;
+
+    /**
+     * How long a post Twitter would not describe is left alone before asking again.
+     *
+     * <p>A private or deleted post answers with a code and is remembered for the
+     * session; this is only for the failures that might be transient — no network,
+     * a timeout, the service having a bad minute — so that scrolling a long
+     * collection cannot turn into a request storm against a third party.
+     */
+    private static final long ENRICH_RETRY_GAP_MS = 60 * 1000L;
+
+    /**
+     * How many rows in a row may come back empty before the screen stops asking.
+     *
+     * <p>Per-tweet backoff is not enough on its own: a collection of a hundred rows
+     * with no route to the host is a hundred timeouts, and the user is left waiting
+     * for a screen that will not change. Three in a row is the point where the
+     * problem is the network rather than any one post, so the fetches pause and the
+     * screen says so in one line instead of staying silent about it.
+     */
+    private static final int ENRICH_FAILURES_BEFORE_PAUSE = 3;
+    private static final long ENRICH_PAUSE_MS = 5 * 60 * 1000L;
+
+    /** What the screen says while the fetches are paused; the line is also the retry. */
+    private static final String ENRICH_PAUSED_MESSAGE =
+            "Twitter is not answering, so these rows are the copies saved in the archive. "
+                    + "Tap here to try again.";
+
+    /**
+     * Tweet ids being fetched right now, and when a failed one was last tried.
+     *
+     * <p>Process-wide and touched only from the main thread: a bind starts a fetch,
+     * and the answer comes back through {@code runOnMainThread}. Two rows for the
+     * same tweet — the same bookmark can appear twice after a re-save — must not
+     * produce two requests.
+     */
+    private static final java.util.Set<String> ENRICH_IN_FLIGHT = new java.util.HashSet<>();
+    private static final java.util.Map<String, Long> ENRICH_FAILED_AT = new java.util.HashMap<>();
+
+    /** See {@link BookmarkerThreads}: the fetches do not share the image loader. */
+    private static final java.util.concurrent.ExecutorService ENRICH_POOL =
+            BookmarkerThreads.fixedPool("twb-live", 3);
+
+    /** Consecutive empty answers, and how long the screen has stopped asking. */
+    private static int enrichFailures;
+    private static long enrichPausedUntil;
+
+    /** Opens the gallery; usable from any context the sheet or dialog holds. */
+    public static void open(android.content.Context context) {
+        if (context == null) return;
+        try {
+            Intent intent = new Intent(context, BookmarkerGalleryActivity.class);
+            // The caller is usually a dialog or a sheet, whose context is not an
+            // Activity, so the flag is not optional there and harmless elsewhere.
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) {
+            Logger.printException(() -> "twb: could not open the gallery", e);
+            Utils.showToastShort("Twitter Bookmarker: could not open the gallery");
+        }
+    }
+
+    private boolean dark;
+
+    private TextView titleView;
+    /** The filter button's icon: see {@link #buildFilterButton()}. */
+    private ImageView filterIcon;
+    /** The wrappers, so a screen can show one action and not the other. */
+    private View filterButton;
+    private View overflowButton;
+    private TextView statusView;
+    private TextView liveView;
+    private ListView listView;
+    private BookmarkerGalleryAdapter.FolderAdapter folderAdapter;
+    private BookmarkerGalleryAdapter.PostAdapter postAdapter;
+
+    /* Browsing state. `opened == null` means the folder list is showing. */
+    private BookmarkerApi.Collection opened;
+    /** The folder list as it was last loaded, for the overflow's rename picker. */
+    private final List<BookmarkerApi.Collection> folders = new ArrayList<>();
+    private final List<BookmarkerApi.Post> posts = new ArrayList<>();
+    private String cursor = "";
+    private boolean hasMore;
+    private boolean loading;
+    /** Incremented whenever the list is reset; a stale answer is discarded. */
+    private int generation;
+
+    /* Filter state. */
+    private boolean basisPosted;
+    private boolean oldestFirst;
+    private boolean anyTime = true;
+    private long rangeFromMs;
+    private long rangeToMs;
+
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        // The app's own configuration, not the system's: X can be in "Lights out"
+        // while the phone is in light mode, and the screen should follow the app
+        // the user is looking at. `Resources.getSystem()` would report the phone.
+        int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        dark = nightMode == Configuration.UI_MODE_NIGHT_YES;
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(backgroundColor());
+        // No side padding here: the list draws rows the way X does — edge to edge,
+        // separated by a hairline — so the header and the chips carry the inset
+        // themselves instead.
+        root.setPadding(0, dp(8), 0, 0);
+
+        // The window's own bars, in the screen's own colour. Without this the
+        // Activity inherits X's theme and paints its status and navigation bars in
+        // the app's blue, which is visible against a dark gallery on every edge of
+        // the screen. The flags are the light/dark *icons* on those bars; an OS that
+        // does not know one of them ignores the bit, so no version check is needed.
+        getWindow().setStatusBarColor(backgroundColor());
+        getWindow().setNavigationBarColor(backgroundColor());
+        // The flags go on the decor view: on any other view they describe that view's
+        // visibility in the window rather than the window's own chrome.
+        getWindow().getDecorView().setSystemUiVisibility(dark
+                ? 0
+                : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+
+        root.addView(buildHeader());
+
+        // Above the loading/empty line, because it is about the rows themselves
+        // rather than about this screen's own request to the backend.
+        liveView = new TextView(this);
+        liveView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        liveView.setTextColor(mutedColor());
+        liveView.setPadding(dp(12), dp(8), dp(12), dp(8));
+        liveView.setVisibility(View.GONE);
+        // The line is a retry as well as an explanation: the pause it describes is
+        // this screen's guess about the network, and the user is the one who knows
+        // whether the network came back.
+        liveView.setClickable(true);
+        liveView.setOnClickListener(v -> {
+            resumeEnriching();
+            if (opened != null) loadPosts(true);
+        });
+        root.addView(liveView);
+
+        statusView = new TextView(this);
+        statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        statusView.setTextColor(mutedColor());
+        statusView.setGravity(Gravity.CENTER);
+        statusView.setPadding(0, dp(16), 0, dp(16));
+        root.addView(statusView);
+
+        listView = new ListView(this);
+        // X separates posts with a hairline rather than a gap, and the list can draw
+        // that itself: a divider between every pair of rows costs no view and no
+        // margin, which matters because a ListView child cannot carry margins.
+        listView.setDivider(new android.graphics.drawable.ColorDrawable(borderColor()));
+        listView.setDividerHeight(Math.max(1, (int) (getResources().getDisplayMetrics().density / 2f)));
+        listView.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        listView.setOnItemClickListener((parent, view, position, id) -> onRowTapped(position));
+        listView.setOnScrollListener(new android.widget.AbsListView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(android.widget.AbsListView view, int scrollState) {}
+
+            @Override
+            public void onScroll(android.widget.AbsListView view, int firstVisible, int visibleCount,
+                                 int totalCount) {
+                // Further from the end than the two rows this used to be, so the next
+                // page is in the list — and, through prefetchAhead(), already fetched
+                // from Twitter — before the user can reach the last row of this one.
+                if (totalCount > 0 && firstVisible + visibleCount >= totalCount - 8) {
+                    loadPosts(false);
+                }
+                prefetchAhead(firstVisible, visibleCount);
+            }
+        });
+        root.addView(listView);
+
+        setContentView(root);
+
+        folderAdapter = new BookmarkerGalleryAdapter.FolderAdapter(this);
+        postAdapter = new BookmarkerGalleryAdapter.PostAdapter(this);
+        updateChips();
+        showFolders();
+    }
+
+    /** The title bar: our own, because the app's theme is the app's business. */
+    private View buildHeader() {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(12), dp(4), dp(12), dp(8));
+
+        header.addView(buildBackButton());
+
+        titleView = new TextView(this);
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        titleView.setTextColor(textColor());
+        titleView.setSingleLine(true);
+        titleView.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titleParams.setMarginStart(dp(10));
+        titleView.setLayoutParams(titleParams);
+        header.addView(titleView);
+
+        // A filter button and an overflow, which is what X's own headers carry and
+        // what took the place of the chip row: the filters themselves live one tap
+        // below, in a sheet, instead of in a capsule each.
+        filterButton = buildFilterButton();
+        overflowButton = buildOverflowButton();
+        header.addView(filterButton);
+        header.addView(overflowButton);
+        return header;
+    }
+
+    /**
+     * X's own rule, which this screen had wrong: the folder list has an overflow and a
+     * collection has a filter.
+     *
+     * <p>It is not only a matter of taste. The overflow's rows are about the
+     * collections (a new one, a rename), so offering them while a collection is open
+     * suggests they act on it; and a filter has nothing to filter in a list of
+     * folders. One visible action per screen is also what X does with this header.
+     */
+    private void showHeaderActions(boolean inCollection) {
+        if (filterButton != null) {
+            filterButton.setVisibility(inCollection ? View.VISIBLE : View.GONE);
+        }
+        if (overflowButton != null) {
+            overflowButton.setVisibility(inCollection ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    /**
+     * The back arrow.
+     *
+     * <p>{@code ic_vector_arrow_left} is a name Piko's own patches reference, so the
+     * arrow is what a device with this build sees; the chip is the fallback for a
+     * build where it moved, and keeps the screen navigable with a word instead of an
+     * empty gap.
+     */
+    private View buildBackButton() {
+        int arrow = firstDrawable("ic_vector_arrow_left", "ic_vector_arrow_back", "ic_vector_back");
+        if (arrow == 0) {
+            TextView fallback = chip("Close");
+            fallback.setOnClickListener(v -> onBackPressed());
+            return fallback;
+        }
+
+        ImageView icon = new ImageView(this);
+        int size = dp(20);
+        icon.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        icon.setImageResource(arrow);
+        icon.setColorFilter(textColor());
+        icon.setContentDescription("Back");
+        return touchTarget(icon);
+    }
+
+    /**
+     * The filter button.
+     *
+     * <p>Its colour is its state: accent when a filter that changes the list is on,
+     * muted when the list is unfiltered. The old chips said the same thing by being
+     * filled, and this is the one piece of that information worth keeping visible.
+     *
+     * <p>The glyph is drawn rather than looked up: the names X uses for it were
+     * guesses, none of them resolved on a real device, and a filter button showing the
+     * word "Filter" was the result.
+     */
+    private View buildFilterButton() {
+        filterIcon = new ImageView(this);
+        int size = dp(20);
+        filterIcon.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        filterIcon.setImageDrawable(BookmarkerGlyphs.of(BookmarkerGlyphs.FILTER, mutedColor()));
+        filterIcon.setContentDescription("Filter");
+        View view = touchTarget(filterIcon);
+        view.setOnClickListener(v -> showFilterSheet());
+        return view;
+    }
+
+    /**
+     * The overflow, drawn rather than looked up.
+     *
+     * <p>Three dots are three circles: X's own overflow glyph is not a name Piko
+     * references, and a font glyph for "⋮" is missing from some builds, so this is
+     * the one piece of chrome that is cheaper to draw than to find.
+     */
+    private View buildOverflowButton() {
+        final int dotColor = textColor();
+        final float radius = dp(2);
+        View dots = new View(this) {
+            private final android.graphics.Paint paint = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+            @Override
+            protected void onDraw(android.graphics.Canvas canvas) {
+                paint.setColor(dotColor);
+                float cx = getWidth() / 2f;
+                float cy = getHeight() / 2f;
+                float gap = radius * 2.6f;
+                canvas.drawCircle(cx, cy - gap, radius, paint);
+                canvas.drawCircle(cx, cy, radius, paint);
+                canvas.drawCircle(cx, cy + gap, radius, paint);
+            }
+        };
+        dots.setContentDescription("More options");
+        View view = touchTarget(dots);
+        view.setOnClickListener(v -> showOverflowSheet());
+        return view;
+    }
+
+    /**
+     * A 44 dp square around whatever is inside it.
+     *
+     * <p>The icons in this header are 20 dp because that is how big X draws them, and
+     * 20 dp is not a tap target. The wrapper is: the icon is centred and the touch
+     * area around it carries the click.
+     */
+    private View touchTarget(View content) {
+        android.widget.FrameLayout wrapper = new android.widget.FrameLayout(this);
+        android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(
+                dp(44), dp(44));
+        wrapper.setLayoutParams(params);
+        android.widget.FrameLayout.LayoutParams inner =
+                new android.widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        inner.gravity = Gravity.CENTER;
+        content.setLayoutParams(inner);
+        content.setClickable(false);
+        wrapper.addView(content);
+        wrapper.setClickable(true);
+        wrapper.setFocusable(true);
+        return wrapper;
+    }
+
+    /** The first of these drawable names this build actually has, or 0. */
+    private static int firstDrawable(String... names) {
+        for (String name : names) {
+            int id = ResourceUtils.getIdentifier(ResourceType.DRAWABLE, name);
+            if (id != 0) return id;
+        }
+        return 0;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* Navigation                                                             */
+    /* ---------------------------------------------------------------------- */
+
+    private void showFolders() {
+        opened = null;
+        posts.clear();
+        folderAdapter.notifyDataSetChanged();
+        postAdapter.notifyDataSetChanged();
+
+        titleView.setText("Twitter Bookmarker");
+        showHeaderActions(false);
+        listView.setAdapter(folderAdapter);
+        // Deliberately no "Loading folders…": the line sits above the list, so
+        // clearing it moves every row up by its height — under a finger that is
+        // already reaching for a folder. The list is simply empty until it is not.
+        setStatus("");
+
+        final int request = ++generation;
+        Utils.runOnBackgroundThread(() -> {
+            try {
+                List<BookmarkerApi.Collection> collections = BookmarkerApi.collections(
+                        BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken());
+                Utils.runOnMainThread(() -> {
+                    if (request != generation) return;
+                    folders.clear();
+                    folders.addAll(collections);
+                    folderAdapter.setItems(collections);
+                    setStatus(collections.isEmpty()
+                            ? "No folders yet. Save a tweet from its action bar to create one."
+                            : "");
+                });
+            } catch (Exception e) {
+                Logger.printInfo(() -> "twb: could not list the folders: " + e);
+                Utils.runOnMainThread(() -> {
+                    if (request != generation) return;
+                    folders.clear();
+                    folderAdapter.setItems(new ArrayList<>());
+                    setStatus("Could not load the folders: " + reason(e));
+                });
+            }
+        });
+    }
+
+    /** Opens one collection: page one of its bookmarks, with the current filters. */
+    private void openCollection(BookmarkerApi.Collection collection) {
+        if (collection == null) return;
+        opened = collection;
+        titleView.setText(collection.name);
+
+        showHeaderActions(true);
+        listView.setAdapter(postAdapter);
+        // Painted before the request, not after: the button is the screen's only
+        // statement that a filter is on, and a slow request should not leave it
+        // describing the previous state.
+        updateChips();
+        loadPosts(true);
+    }
+
+    @Override
+    public void onBackPressed() {
+        // One Activity, two levels: back steps out of the collection before it
+        // leaves the screen, which is what a folder list implies.
+        if (opened != null) {
+            showFolders();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* Loading                                                                */
+    /* ---------------------------------------------------------------------- */
+
+    private void loadPosts(boolean reset) {
+        if (opened == null) return;
+        // A reset is never dropped: it is the user asking for a different list, and
+        // answering "not now" would leave the chips describing one sort while the
+        // rows show another. It instead invalidates whatever is in flight, so the
+        // answer that arrives afterwards is discarded by the generation check below.
+        // A follow-up page *is* dropped while a page is loading — two requests for
+        // the same cursor would append the same rows twice.
+        if (!reset && (loading || !hasMore)) return;
+
+        if (reset) {
+            cursor = "";
+            hasMore = true;
+            posts.clear();
+            postAdapter.notifyDataSetChanged();
+            generation++;
+        }
+
+        loading = true;
+
+        final BookmarkerApi.Collection collection = opened;
+        final int request = generation;
+        // Built here, on the main thread that owns the chip state: reading those
+        // fields from the worker would race a tap that changed them mid-request.
+        final BookmarkerApi.PostQuery query = queryFor(reset ? "" : cursor);
+
+        Utils.runOnBackgroundThread(() -> {
+            try {
+                BookmarkerApi.Page page = BookmarkerApi.posts(
+                        BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(),
+                        collection.slug, query);
+                Utils.runOnMainThread(() -> {
+                    if (request != generation) return;
+                    loading = false;
+                    posts.addAll(page.items);
+                    cursor = page.nextCursor;
+                    hasMore = page.hasMore;
+                    postAdapter.setItems(posts, hasMore);
+                    prefetchAhead(listView.getFirstVisiblePosition(), listView.getChildCount());
+                    setStatus(posts.isEmpty() ? emptyMessage() : "");
+                    // The pause outlives the screen: reopening the gallery while it is
+                    // in force has to say why the rows have no numbers either.
+                    if (System.currentTimeMillis() < enrichPausedUntil) {
+                        setLiveStatus(ENRICH_PAUSED_MESSAGE);
+                    }
+                    updateChips();
+                });
+            } catch (Exception e) {
+                Logger.printInfo(() -> "twb: could not load the bookmarks: " + e);
+                Utils.runOnMainThread(() -> {
+                    if (request != generation) return;
+                    loading = false;
+                    postAdapter.setItems(posts, false);
+                    setStatus("Could not load the bookmarks: " + reason(e));
+                    updateChips();
+                });
+            }
+        });
+    }
+
+    /** The wire query for the current chips; `from` is the paging cursor. */
+    private BookmarkerApi.PostQuery queryFor(String from) {
+        String sort;
+        if (basisPosted) {
+            sort = oldestFirst ? BookmarkerApi.SORT_TWEET_ASC : BookmarkerApi.SORT_TWEET_DESC;
+        } else {
+            sort = oldestFirst ? BookmarkerApi.SORT_SAVED_ASC : BookmarkerApi.SORT_SAVED_DESC;
+        }
+
+        String fromDate = anyTime ? "" : isoUtc(rangeFromMs);
+        String toDate = anyTime ? "" : isoUtc(rangeToMs);
+        return new BookmarkerApi.PostQuery(
+                sort,
+                basisPosted ? "" : fromDate,
+                basisPosted ? "" : toDate,
+                basisPosted ? fromDate : "",
+                basisPosted ? toDate : "",
+                from,
+                PAGE_LIMIT);
+    }
+
+    /** How far ahead of the last visible row the fetches are kept. */
+    private static final int PREFETCH_AHEAD = 12;
+
+    /**
+     * Asks for the rows the user is about to reach, not only the ones on screen.
+     *
+     * <p>A row used to start its own fetch when it was drawn, which is the worst
+     * moment there is: the user is already looking at it, so every row they scroll to
+     * is a skeleton that fills in afterwards. This walks from the top of the list to a
+     * dozen rows past the last visible one, so the answer for a row is usually on its
+     * way before the row is on screen — and the queue behind those is the same three
+     * workers, so nothing is fetched twice and the visible rows are still first.
+     *
+     * <p>A dozen rather than the whole page: thirty requests at once is what gets a
+     * client rate-limited, and the rows after this window have their own scroll to
+     * arrive in.
+     */
+    private void prefetchAhead(int firstVisible, int visibleCount) {
+        int until = Math.min(posts.size(), firstVisible + visibleCount + PREFETCH_AHEAD);
+        for (int index = 0; index < until; index++) {
+            BookmarkerApi.Post post = posts.get(index);
+            if (post.fxRow != null) continue;
+            enrich(post, postAdapter::notifyDataSetChanged);
+        }
+    }
+
+    /**
+     * True when the ask for this post failed outright.
+     *
+     * <p>A post Twitter *refuses* comes back as a row with a code and is drawn as
+     * such; this is the other case, where nothing came back at all. The row says so
+     * rather than waiting behind a skeleton for an answer that is not coming.
+     */
+    boolean couldNotLoad(String tweetId) {
+        return tweetId != null && ENRICH_FAILED_AT.containsKey(tweetId);
+    }
+
+    private String emptyMessage() {
+        if (!anyTime) return "No bookmarks in that date range.";
+        return "No bookmarks in this collection yet.";
+    }
+
+    /**
+     * A from/to pair of day pickers.
+     *
+     * <p>Day granularity, converted to an inclusive instant range in the user's
+     * own timezone: the backend compares instants, so "the 3rd" has to mean the
+     * whole of the 3rd where the user is, not where the server is.
+     */
+    private void pickRange() {
+        Calendar start = Calendar.getInstance();
+        if (!anyTime) start.setTimeInMillis(rangeFromMs);
+
+        DatePickerDialog fromDialog = new DatePickerDialog(
+                this,
+                (view, year, month, day) -> {
+                    rangeFromMs = startOfDay(year, month, day);
+                    Calendar end = Calendar.getInstance();
+                    end.setTimeInMillis(rangeFromMs);
+                    // The second picker starts on the day just chosen, so a
+                    // single-day range is two taps on the same date.
+                    DatePickerDialog toDialog = new DatePickerDialog(
+                            BookmarkerGalleryActivity.this,
+                            (toView, toYear, toMonth, toDay) -> {
+                                rangeToMs = endOfDay(toYear, toMonth, toDay);
+                                anyTime = false;
+                                loadPosts(true);
+                            },
+                            end.get(Calendar.YEAR),
+                            end.get(Calendar.MONTH),
+                            end.get(Calendar.DAY_OF_MONTH));
+                    toDialog.setTitle("To");
+                    toDialog.show();
+                },
+                start.get(Calendar.YEAR),
+                start.get(Calendar.MONTH),
+                start.get(Calendar.DAY_OF_MONTH));
+        fromDialog.setTitle("From");
+        fromDialog.show();
+    }
+
+    private static long startOfDay(int year, int month, int day) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(year, month, day, 0, 0, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar.getTimeInMillis();
+    }
+
+    private static long endOfDay(int year, int month, int day) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(year, month, day, 23, 59, 59);
+        calendar.set(Calendar.MILLISECOND, 999);
+        return calendar.getTimeInMillis();
+    }
+
+    /** An instant as RFC 3339 in UTC, which is what the query parser accepts. */
+    private static String isoUtc(long millis) {
+        SimpleDateFormat format = new SimpleDateFormat(ISO_UTC, Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(new Date(millis));
+    }
+
+    private void onRowTapped(int position) {
+        if (opened == null) {
+            BookmarkerApi.Collection collection = folderAdapter.itemAt(position);
+            if (collection != null) openCollection(collection);
+            return;
+        }
+        if (position >= posts.size()) {
+            loadPosts(false);
+            return;
+        }
+        BookmarkerApi.Post post = posts.get(position);
+        String link = post.link();
+        if (link.isEmpty()) {
+            Utils.showToastShort("Twitter Bookmarker: this bookmark has no URL");
+            return;
+        }
+        // Opening the tweet is the one thing a gallery row should do beyond showing
+        // itself: the archive is a copy, and the original is where the replies are.
+        openInApp(link);
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* Enriching a row with the live post                                     */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Asks Twitter what this post says today, and hands the answer back on the main
+     * thread.
+     *
+     * <p>Only ever called from a row's bind, so the work follows the user's scroll:
+     * a collection of a thousand bookmarks costs nothing until the rows are seen.
+     * The row is already drawn from the archive at that point, so this is an upgrade
+     * rather than a load — which is also why every failure ends in silence.
+     *
+     * @param onLanded run on the main thread once the post is known; the row that
+     *                 asked rebinds itself then.
+     */
+    void enrich(final BookmarkerApi.Post post, final Runnable onLanded) {
+        if (post == null || post.fxRow != null) return;
+        final String id = post.tweetId;
+        if (id == null || id.isEmpty()) return;
+        if (ENRICH_IN_FLIGHT.contains(id)) return;
+        if (System.currentTimeMillis() < enrichPausedUntil) return;
+
+        Long failedAt = ENRICH_FAILED_AT.get(id);
+        if (failedAt != null && System.currentTimeMillis() - failedAt < ENRICH_RETRY_GAP_MS) return;
+
+        ENRICH_IN_FLIGHT.add(id);
+        ENRICH_POOL.execute(() -> {
+            FxTweet.Row row = null;
+            try {
+                row = FxTweet.fetch(id);
+            } catch (Exception e) {
+                Logger.printInfo(() -> "twb: could not read post " + id + " from Twitter: " + e);
+            }
+
+            final FxTweet.Row fetched = row;
+            Utils.runOnMainThread(() -> {
+                ENRICH_IN_FLIGHT.remove(id);
+                if (fetched == null) {
+                    // An empty answer here means the request itself failed: a post
+                    // Twitter refuses (private, deleted) still comes back as a row
+                    // with a code, and is drawn as the archive copy with a note.
+                    ENRICH_FAILED_AT.put(id, System.currentTimeMillis());
+                    noteEnrichFailure();
+                    // The row is sitting behind a skeleton; it has to be told that the
+                    // answer is not coming.
+                    postAdapter.notifyDataSetChanged();
+                    return;
+                }
+                enrichFailures = 0;
+                if (enrichPausedUntil != 0) resumeEnriching();
+                post.fxRow = fetched;
+                onLanded.run();
+            });
+        });
+    }
+
+    /**
+     * Counts empty answers, and stops asking once the network is the obvious answer.
+     *
+     * <p>Silence was the old behaviour: every failure was logged and nothing else,
+     * which is indistinguishable from a patch that does not work. One line saying
+     * which half is missing is the honest version of the same silence.
+     */
+    private void noteEnrichFailure() {
+        enrichFailures++;
+        if (enrichFailures < ENRICH_FAILURES_BEFORE_PAUSE) return;
+        enrichPausedUntil = System.currentTimeMillis() + ENRICH_PAUSE_MS;
+        Logger.printInfo(() -> "twb: " + enrichFailures + " posts in a row came back empty; "
+                + "pausing live posts for " + (ENRICH_PAUSE_MS / 1000) + "s");
+        setLiveStatus(ENRICH_PAUSED_MESSAGE);
+    }
+
+    /** Clears the pause and the line that explains it. */
+    private void resumeEnriching() {
+        enrichFailures = 0;
+        enrichPausedUntil = 0;
+        setLiveStatus("");
+    }
+
+    private void setLiveStatus(String message) {
+        liveView.setText(message == null ? "" : message);
+        liveView.setVisibility(message == null || message.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * Opens a tweet inside X, falling back to whatever handles the URL.
+     *
+     * <p>X's own URL interpreter is the activity that turns an {@code x.com} link
+     * into the tweet screen, and naming it explicitly is what keeps the user in the
+     * app instead of handing them to a browser — a link the launcher resolves
+     * normally would let the user's default browser win.
+     *
+     * <p>Naming it is also how this broke once: the name was a lone literal, wrong
+     * for the installed X build, and every tap quietly ended in a browser. So the
+     * name is now a list of candidates that are checked against the package manager
+     * rather than started blindly, and behind that list is a question to the app
+     * itself ({@link #handlerInApp}), which still answers after a rename. The
+     * external viewer remains the last resort, and says so in the log.
+     */
+    private void openInApp(String url) {
+        Uri target = Uri.parse(url);
+
+        for (String candidate : POST_HANDLER_CANDIDATES) {
+            Intent intent = viewIntent(target);
+            intent.setClassName(getPackageName(), candidate);
+            // resolveActivity, not a try/catch: a class that does not exist in this
+            // build is an expected answer here, not an exception.
+            if (intent.resolveActivity(getPackageManager()) == null) continue;
+            if (start(intent)) {
+                Logger.printInfo(() -> "twb: opened a post with " + candidate);
+                return;
+            }
+        }
+
+        String handler = handlerInApp(target);
+        if (handler != null) {
+            Intent intent = viewIntent(target);
+            intent.setClassName(getPackageName(), handler);
+            if (start(intent)) {
+                Logger.printInfo(() -> "twb: opened a post with " + handler);
+                return;
+            }
+        }
+
+        Logger.printInfo(() -> "twb: nothing in the app resolved " + url
+                + ", so the system had to; a tap landing in a browser is this line");
+        Utils.openLink(url);
+    }
+
+    /**
+     * Whatever this app registers for one of its own links.
+     *
+     * <p>The package filter is doing two jobs: it keeps the answer inside X, so a
+     * browser can never win, and it sidesteps package visibility, which only ever
+     * restricts looking at other applications.
+     *
+     * <p>The name preference picks out the link interpreter when the app registers
+     * more than one handler. A wrong pick here is still a screen inside X, and the
+     * caller logs which one it was.
+     */
+    private String handlerInApp(Uri target) {
+        try {
+            List<ResolveInfo> handlers = getPackageManager().queryIntentActivities(
+                    viewIntent(target).setPackage(getPackageName()), 0);
+            if (handlers == null || handlers.isEmpty()) return null;
+
+            ResolveInfo chosen = handlers.get(0);
+            for (ResolveInfo handler : handlers) {
+                String name = handler.activityInfo == null ? "" : handler.activityInfo.name;
+                if (name != null && name.contains("UrlInterpreter")) {
+                    chosen = handler;
+                    break;
+                }
+            }
+            return chosen.activityInfo == null ? null : chosen.activityInfo.name;
+        } catch (Exception e) {
+            Logger.printInfo(() -> "twb: could not ask the app for a link handler: " + e);
+            return null;
+        }
+    }
+
+    /** The intent both resolution paths start from. */
+    private static Intent viewIntent(Uri target) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, target);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }
+
+    /** True when the tap did something; a wrong guess must not swallow the tap. */
+    private boolean start(Intent intent) {
+        try {
+            startActivity(intent);
+            return true;
+        } catch (Exception e) {
+            Logger.printInfo(() -> "twb: could not open a post with "
+                    + (intent.getComponent() == null ? "?" : intent.getComponent().getClassName())
+                    + ": " + e);
+            return false;
+        }
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* View plumbing                                                          */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Repaints the filter button for the state it now describes.
+     *
+     * <p>Which filters are on is the only thing the old chip row conveyed that has
+     * to survive: the values themselves are read in the sheet, one tap away.
+     */
+    private void updateChips() {
+        int color = filtered() ? COLOR_ACCENT : mutedColor();
+        if (filterIcon != null) filterIcon.setColorFilter(color);
+    }
+
+    /** True when the list on screen is not the whole collection in its default order. */
+    private boolean filtered() {
+        return basisPosted || oldestFirst || !anyTime;
+    }
+
+    /** Paint a chip as selected (accent) or not (outline). */
+    private void paintChip(TextView chip, boolean selected) {
+        GradientDrawable background = new GradientDrawable();
+        background.setCornerRadius(dp(14));
+        if (selected) {
+            background.setColor(COLOR_ACCENT);
+        } else {
+            background.setColor(Color.TRANSPARENT);
+            background.setStroke(dp(1), mutedColor());
+        }
+        chip.setBackground(background);
+        chip.setTextColor(selected ? Color.WHITE : textColor());
+    }
+
+    private TextView chip(String label) {
+        TextView chip = new TextView(this);
+        chip.setText(label);
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        chip.setTextColor(textColor());
+        chip.setPadding(dp(12), dp(6), dp(12), dp(6));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMarginEnd(dp(6));
+        chip.setLayoutParams(params);
+        paintChip(chip, false);
+        return chip;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* The filter sheet and the overflow                                        */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Every filter, in one drawer under the header button.
+     *
+     * <p>The rows carry their own state — the active option is the one with the tick
+     * — because a sheet that closes on every tap has to say what it did before it
+     * goes. Each row applies immediately: there is no "Apply" to forget, and the row
+     * the user did not pick is still there when they open it again.
+     *
+     * <p>This sheet is built here rather than in {@link BookmarkerSheets} because the
+     * filter state lives in this Activity and nothing else reads it; the save and
+     * curation sheets are shared, this one has exactly one caller.
+     */
+    private void showFilterSheet() {
+        List<BottomSheetAction<String>> actions = new ArrayList<>();
+
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Saved date", !basisPosted),
+                ignored -> {
+                    basisPosted = false;
+                    loadPosts(true);
+                }));
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Posted date", basisPosted),
+                ignored -> {
+                    basisPosted = true;
+                    loadPosts(true);
+                }));
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Newest first", !oldestFirst),
+                ignored -> {
+                    oldestFirst = false;
+                    loadPosts(true);
+                }));
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Oldest first", oldestFirst),
+                ignored -> {
+                    oldestFirst = true;
+                    loadPosts(true);
+                }));
+
+        // The range row states the range and opens the pickers, so one row covers both
+        // "set one" and "change it"; clearing is its own row, and only exists once
+        // there is something to clear.
+        actions.add(new BottomSheetAction<>(
+                RANGE_ICON,
+                anyTime ? "Date range: any time" : "Date range: " + rangeLabel(),
+                ignored -> pickRange()));
+        if (!anyTime) {
+            actions.add(new BottomSheetAction<>(
+                    BookmarkerSheets.CLOSE_ICON,
+                    "Clear the date range",
+                    ignored -> {
+                        anyTime = true;
+                        loadPosts(true);
+                    }));
+        }
+        actions.add(BookmarkerSheets.closeAction());
+
+        BottomSheetHelper.show(this, "filter", "Filter", actions, null);
+    }
+
+    /**
+     * The overflow: what can be done to the collections themselves.
+     *
+     * <p>It lives on the folder list, which is the only screen where a collection is a
+     * thing rather than a place, and it holds the two things it can do there — make one
+     * and name one.
+     */
+    private void showOverflowSheet() {
+        List<BottomSheetAction<String>> actions = new ArrayList<>();
+
+        actions.add(new BottomSheetAction<>(
+                BookmarkerSheets.ADD_ICON,
+                "New collection\u2026",
+                ignored -> BookmarkerSheets.promptForNewCollection(this, (slug, name) -> {
+                    // Nothing to save and nothing to move: the folder list the user is
+                    // looking at is the thing that changed, so it is refetched.
+                    showFolders();
+                })));
+
+        // Renaming is offered only for an empty collection, and only those are listed.
+        // The slug is what every bookmark row stores, so a name is a label rather than
+        // a key — but a collection that already has posts is one the user has used, and
+        // its name is a decision they have already made.
+        final List<BookmarkerApi.Collection> empty = emptyCollections();
+        if (!empty.isEmpty()) {
+            actions.add(new BottomSheetAction<>(
+                    BookmarkerSheets.RENAME_ICON,
+                    "Rename a collection\u2026",
+                    ignored -> showRenamePicker(empty)));
+        }
+
+        actions.add(BookmarkerSheets.closeAction());
+        BottomSheetHelper.show(this, "overflow", "Twitter Bookmarker", actions, null);
+    }
+
+    /** The folders holding nothing, which are the ones whose name is still free. */
+    private List<BookmarkerApi.Collection> emptyCollections() {
+        List<BookmarkerApi.Collection> out = new ArrayList<>();
+        for (BookmarkerApi.Collection collection : folders) {
+            if (collection.postCount == 0) out.add(collection);
+        }
+        return out;
+    }
+
+    /**
+     * Which of the empty folders to rename.
+     *
+     * <p>A second sheet rather than a row per folder in the overflow: the overflow is
+     * about the list, and this is about one item in it. When a single folder is empty
+     * the sheet has a single row, which is one tap and no ambiguity.
+     */
+    private void showRenamePicker(final List<BookmarkerApi.Collection> empty) {
+        List<BottomSheetAction<BookmarkerApi.Collection>> actions = new ArrayList<>();
+        for (BookmarkerApi.Collection collection : empty) {
+            actions.add(new BottomSheetAction<>(
+                    BookmarkerSheets.RENAME_ICON,
+                    collection.name,
+                    ignored -> promptForRename(collection)));
+        }
+        actions.add(BookmarkerSheets.closeAction());
+        // No item to bind: every row carries its own collection in its callback, so the
+        // sheet has nothing to hand back.
+        BottomSheetHelper.show(this, (BookmarkerApi.Collection) null,
+                "Rename which collection?", actions, null);
+    }
+
+    /** Asks for the new name, then tells the backend. */
+    private void promptForRename(final BookmarkerApi.Collection collection) {
+        if (collection == null) return;
+
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        input.setSingleLine(true);
+        input.setText(collection.name);
+        input.setSelection(input.getText().length());
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Rename collection")
+                .setView(input)
+                .setPositiveButton("Rename", (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) {
+                        Utils.showToastShort("Twitter Bookmarker: give the collection a name");
+                        return;
+                    }
+                    rename(collection, name);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void rename(final BookmarkerApi.Collection collection, final String name) {
+        Utils.runOnBackgroundThread(() -> {
+            try {
+                final BookmarkerApi.Collection renamed = BookmarkerApi.renameCollection(
+                        BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(),
+                        collection.slug, name);
+                // The cache first: the picker and the gallery read the name from there,
+                // and a rename the picker has not seen is a save into the old name.
+                BookmarkerCache.updateName(renamed.slug, renamed.name);
+                Utils.runOnMainThread(() -> {
+                    if (opened != null && opened.slug.equals(renamed.slug)) {
+                        opened = renamed;
+                        titleView.setText(renamed.name);
+                    }
+                    // The folder list is where the rename happened, so it is the screen
+                    // that has to show it.
+                    showFolders();
+                    Utils.showToastShort("Twitter Bookmarker: renamed to \u201c"
+                            + renamed.name + "\u201d");
+                });
+            } catch (Exception e) {
+                Logger.printInfo(() -> "twb: could not rename the collection: " + e);
+                final String reason = e.getMessage() == null
+                        ? "could not rename it" : e.getMessage();
+                Utils.runOnMainThread(() ->
+                        Utils.showToastLong("Twitter Bookmarker: " + reason));
+            }
+        });
+    }
+
+    /** The active option's tick, and the padding that keeps the ticks in line. */
+    private static String tick(String label, boolean active) {
+        return active ? label + "  \u2713" : label;
+    }
+
+    /** A range, worded the way the chip used to word it. */
+    private String rangeLabel() {
+        java.text.DateFormat format =
+                java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM);
+        return format.format(new Date(rangeFromMs)) + " \u2013 " + format.format(new Date(rangeToMs));
+    }
+
+    private void setStatus(String message) {
+        statusView.setText(message == null ? "" : message);
+        statusView.setVisibility(message == null || message.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    /** The card and body colour, for the rows that draw their own background. */
+    int cardColor() {
+        return dark ? COLOR_CARD_DARK : COLOR_CARD_LIGHT;
+    }
+
+    /** The window's own background: X is white or black, not a card. */
+    int backgroundColor() {
+        return dark ? 0xFF000000 : 0xFFFFFFFF;
+    }
+
+    /** What an image that has not arrived yet is drawn as. */
+    int placeholderColor() {
+        return dark ? COLOR_PLACEHOLDER_DARK : COLOR_PLACEHOLDER_LIGHT;
+    }
+
+    /** The hairline between two posts, and the outline of a quoted one. */
+    int borderColor() {
+        return dark ? COLOR_BORDER_DARK : COLOR_BORDER_LIGHT;
+    }
+
+    /** The body text colour, so a row can match the screen it sits on. */
+    int textColor() {
+        return dark ? COLOR_TEXT_DARK : COLOR_TEXT_LIGHT;
+    }
+
+    /** The secondary colour, for counts and dates. */
+    int mutedColor() {
+        return dark ? COLOR_MUTED_DARK : COLOR_MUTED_LIGHT;
+    }
+
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density);
+    }
+
+    private static String reason(Exception e) {
+        String message = e == null ? null : e.getMessage();
+        return message == null || message.isEmpty() ? "unknown error" : message;
+    }
+}

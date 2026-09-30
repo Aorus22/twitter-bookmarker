@@ -1,13 +1,12 @@
 // Storage contract tests: drive `src/shared/storage.ts` against an in-memory
 // stand-in for `chrome.storage.local` and a `fetch` spy.
 //
-// These prove the extension-side invariants the popup depends on:
+// These prove the extension-side invariants the popup and the worker depend on:
 //   - first run yields the documented defaults (false / "popover");
-//   - every CRUD operation persists under ONE chrome.storage.local key;
-//   - rename recomputes `slug` without touching storage keys or the backend;
-//   - delete removes the category only and renumbers order;
-//   - reorder rewrites `order` to 0..n-1;
-//   - NO category operation performs a network request (PRD §9, §10, §45–§49).
+//   - settings persist under {@link STORAGE_KEY} and the collection cache under a
+//     second key, so a category refresh cannot overwrite a setting;
+//   - the category list is read from the cache and never written by a reader;
+//   - NO function in this module performs a network request (PRD §7, §9, §50).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -55,174 +54,18 @@ globalThis.fetch = (...args) => {
   return Promise.reject(new Error("fetch must never be called by the storage module"));
 };
 
-const { STORAGE_KEY, DEFAULT_CATEGORY_COLOR } = await import("../src/shared/constants.ts");
+const { STORAGE_KEY, COLLECTIONS_CACHE_KEY } = await import("../src/shared/constants.ts");
 const storage = await import("../src/shared/storage.ts");
 
 function resetStorage() {
   for (const key of Object.keys(storageData)) delete storageData[key];
 }
 
-function stored() {
+function storedSettings() {
   return storageData[STORAGE_KEY];
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-test("first run yields PRD defaults under the single storage key", async () => {
-  resetStorage();
-
-  const store = await storage.getStore();
-  // A non-numeric version is discarded in favour of the current one; nothing reads
-  // the stored version to decide how to migrate.
-  assert.equal(store.version, 2);
-  assert.deepEqual(store.settings, {
-    unbookmarkAfterSave: false,
-    displayMode: "popover",
-    backendMode: "localhost",
-    backendUrl: "http://127.0.0.1:43121",
-    backendToken: "",
-  });
-  assert.deepEqual(store.categories, []);
-  assert.deepEqual(await storage.getSettings(), {
-    unbookmarkAfterSave: false,
-    displayMode: "popover",
-    backendMode: "localhost",
-    backendUrl: "http://127.0.0.1:43121",
-    backendToken: "",
-  });
-  assert.deepEqual(await storage.getCategories(), []);
-  assert.equal(stored(), undefined, "reads never write");
-});
-
-test("addCategory generates an id, a derived slug, and an appended order", async () => {
-  resetStorage();
-
-  const linux = await storage.addCategory({ name: "Linux", color: "#4f46e5" });
-  assert.match(linux.id, /^[0-9a-f-]{36}$/);
-  assert.equal(linux.name, "Linux");
-  assert.equal(linux.slug, "linux");
-  assert.equal(linux.color, "#4f46e5");
-  assert.equal(linux.order, 0);
-
-  const ai = await storage.addCategory({ name: "AI & LLM", color: "#0ea5e9" });
-  const readLater = await storage.addCategory({ name: "Read Later", color: "not-a-color" });
-  assert.equal(ai.slug, "ai-llm");
-  assert.equal(ai.order, 1);
-  assert.equal(readLater.slug, "read-later");
-  assert.equal(readLater.order, 2);
-  assert.equal(readLater.color, DEFAULT_CATEGORY_COLOR, "invalid colors fall back to the default");
-
-  const store = await storage.getStore();
-  assert.deepEqual(
-    store.categories.map((c) => c.id),
-    [linux.id, ai.id, readLater.id],
-  );
-  assert.equal(Object.keys(storageData).length, 1, "everything lives under one key");
-  assert.equal(Object.keys(storageData)[0], STORAGE_KEY);
-});
-
-test("addCategory rejects empty and duplicate names without writing", async () => {
-  resetStorage();
-  await storage.addCategory({ name: "Linux", color: "#4f46e5" });
-  const before = JSON.stringify(stored());
-
-  await assert.rejects(() => storage.addCategory({ name: "   ", color: "#000000" }), /required/);
-  await assert.rejects(() => storage.addCategory({ name: "  linux ", color: "#000000" }), /already exists/);
-
-  assert.equal(JSON.stringify(stored()), before, "rejected adds leave storage untouched");
-});
-
-test("rename recomputes the slug, keeps the id, and never touches the backend", async () => {
-  resetStorage();
-  fetchCalls.length = 0;
-
-  const linux = await storage.addCategory({ name: "Linux", color: "#4f46e5" });
-  const renamed = await storage.updateCategoryName(linux.id, "Linux Stuff");
-
-  assert.equal(renamed.id, linux.id, "id is stable across renames");
-  assert.equal(renamed.name, "Linux Stuff");
-  assert.equal(renamed.slug, "linux-stuff");
-
-  const [persisted] = (await storage.getCategories()).filter((c) => c.id === linux.id);
-  assert.equal(persisted.slug, "linux-stuff");
-  assert.equal(fetchCalls.length, 0, "no backend request during rename");
-
-  // Still a single key. The old slug is not renamed anywhere: it simply stops
-  // being used, and the next save creates a new collection under the new slug.
-  assert.equal(Object.keys(storageData).length, 1);
-});
-
-test("rename rejects duplicates and unknown ids", async () => {
-  resetStorage();
-  await storage.addCategory({ name: "Linux", color: "#4f46e5" });
-  const ai = await storage.addCategory({ name: "AI", color: "#4f46e5" });
-
-  await assert.rejects(() => storage.updateCategoryName(ai.id, "linux"), /already exists/);
-  await assert.rejects(() => storage.updateCategoryName("does-not-exist", "Whatever"), /not found/);
-});
-
-test("updateCategoryColor only changes the UI colour", async () => {
-  resetStorage();
-  const linux = await storage.addCategory({ name: "Linux", color: "#4f46e5" });
-
-  const updated = await storage.updateCategoryColor(linux.id, "#ABCDEF");
-  assert.equal(updated.color, "#abcdef");
-  assert.equal(updated.slug, "linux", "colour never affects the slug");
-
-  const missing = await storage.updateCategoryColor("nope", "#000000");
-  assert.equal(missing, null);
-});
-
-test("reorderCategories rewrites order to 0..n-1 and persists it", async () => {
-  resetStorage();
-  const a = await storage.addCategory({ name: "Apple", color: "#4f46e5" });
-  const b = await storage.addCategory({ name: "Banana", color: "#4f46e5" });
-  const c = await storage.addCategory({ name: "Cherry", color: "#4f46e5" });
-
-  const reordered = await storage.reorderCategories([c.id, a.id, b.id]);
-  assert.deepEqual(
-    reordered.map((category) => [category.name, category.order]),
-    [
-      ["Cherry", 0],
-      ["Apple", 1],
-      ["Banana", 2],
-    ],
-  );
-
-  const persisted = await storage.getCategories();
-  assert.deepEqual(
-    persisted.map((category) => [category.name, category.order]),
-    [
-      ["Cherry", 0],
-      ["Apple", 1],
-      ["Banana", 2],
-    ],
-  );
-});
-
-test("deleteCategory removes only that category and renumbers the rest", async () => {
-  resetStorage();
-  fetchCalls.length = 0;
-
-  const a = await storage.addCategory({ name: "Apple", color: "#4f46e5" });
-  const b = await storage.addCategory({ name: "Banana", color: "#4f46e5" });
-  const c = await storage.addCategory({ name: "Cherry", color: "#4f46e5" });
-
-  await storage.deleteCategory(b.id);
-
-  const remaining = await storage.getCategories();
-  assert.deepEqual(
-    remaining.map((category) => [category.name, category.order]),
-    [
-      ["Apple", 0],
-      ["Cherry", 1],
-    ],
-  );
-  assert.ok(!remaining.some((category) => category.id === b.id));
-  assert.equal(fetchCalls.length, 0, "delete performs no backend call");
-  assert.equal(Object.keys(storageData).length, 1, "no second storage key is introduced");
-  assert.ok(a.id && c.id);
-});
 
 const PRD_DEFAULT_SETTINGS = {
   unbookmarkAfterSave: false,
@@ -232,6 +75,39 @@ const PRD_DEFAULT_SETTINGS = {
   backendToken: "",
 };
 
+test("first run yields defaults and writes nothing", async () => {
+  resetStorage();
+
+  const store = await storage.getStore();
+  assert.equal(store.version, 3);
+  assert.deepEqual(store.settings, PRD_DEFAULT_SETTINGS);
+  assert.deepEqual(store.categories, []);
+  assert.deepEqual(await storage.getSettings(), PRD_DEFAULT_SETTINGS);
+  assert.deepEqual(await storage.getCategories(), []);
+  assert.deepEqual(await storage.getCollectionsCache(), { categories: [], fetchedAt: 0 });
+  assert.deepEqual(Object.keys(storageData), [], "reads never write");
+});
+
+test("setSettings writes only the settings key", async () => {
+  resetStorage();
+
+  await storage.writeCollectionsCache([{ id: "linux", slug: "linux", name: "Linux", color: "#bf3f2e", order: 0 }], 1234);
+  const settings = await storage.setSettings({ unbookmarkAfterSave: true, displayMode: "inline" });
+
+  assert.equal(settings.unbookmarkAfterSave, true);
+  assert.equal(settings.displayMode, "inline");
+  assert.deepEqual(await storage.getSettings(), settings, "the write is persisted, not just returned");
+
+  // Two keys, two owners. Saving a setting must not disturb the cached list, or a
+  // popup write would look like a category change to every open timeline.
+  assert.deepEqual(Object.keys(storageData).sort(), [COLLECTIONS_CACHE_KEY, STORAGE_KEY].sort());
+  assert.equal(storedSettings().version, 3);
+  const cache = await storage.getCollectionsCache();
+  assert.equal(cache.fetchedAt, 1234);
+  assert.deepEqual(cache.categories.map((c) => c.slug), ["linux"]);
+  assert.equal(fetchCalls.length, 0, "persistence never performs a network request");
+});
+
 test("setSettings merges partial updates over the defaults", async () => {
   resetStorage();
 
@@ -239,97 +115,126 @@ test("setSettings merges partial updates over the defaults", async () => {
     ...PRD_DEFAULT_SETTINGS,
     unbookmarkAfterSave: true,
   });
-
   assert.deepEqual(await storage.setSettings({ displayMode: "inline" }), {
     ...PRD_DEFAULT_SETTINGS,
     unbookmarkAfterSave: true,
     displayMode: "inline",
   });
-
-  assert.deepEqual(await storage.getSettings(), {
-    ...PRD_DEFAULT_SETTINGS,
-    unbookmarkAfterSave: true,
-    displayMode: "inline",
-  });
-
   // An unknown mode cannot corrupt storage.
   assert.equal((await storage.setSettings({ displayMode: "bogus" })).displayMode, "popover");
 });
 
-test("setSettings stores a normalized custom backend URL", async () => {
+test("setSettings stores a normalized custom backend URL and a trimmed token", async () => {
   resetStorage();
 
   const settings = await storage.setSettings({
     backendMode: "custom",
     backendUrl: "  192.168.1.10:8080/  ",
+    backendToken: "  Bearer paste-from-a-header  ",
   });
-  assert.equal(settings.backendMode, "custom");
   assert.equal(settings.backendUrl, "http://192.168.1.10:8080", "scheme is defaulted and the slash dropped");
-  assert.deepEqual(await storage.getSettings(), settings, "the write is persisted, not just returned");
+  assert.equal(settings.backendToken, "paste-from-a-header", "trimmed, with the pasted prefix dropped");
+  assert.deepEqual(await storage.getSettings(), settings);
 
   // Back to Localhost: the custom URL is remembered but no longer used.
   const loopback = await storage.setSettings({ backendMode: "localhost" });
   assert.equal(loopback.backendMode, "localhost");
   assert.equal(loopback.backendUrl, "http://192.168.1.10:8080");
 
-  // An unusable URL keeps the previous value rather than clearing it.
+  // An unusable URL keeps the previous value rather than clearing it, and a
+  // partial update that says nothing about the token keeps the saved one.
   assert.equal((await storage.setSettings({ backendUrl: "ftp://nope" })).backendUrl, "http://192.168.1.10:8080");
   assert.equal((await storage.setSettings({ backendMode: "nonsense" })).backendMode, "localhost");
-});
-
-test("setSettings stores a trimmed backend token", async () => {
-  resetStorage();
-
-  const settings = await storage.setSettings({
-    backendMode: "custom",
-    backendUrl: "https://tw-bookmark.example",
-    backendToken: "  Bearer paste-from-a-header  ",
-  });
-  assert.equal(settings.backendToken, "paste-from-a-header", "trimmed, with the pasted prefix dropped");
-  assert.deepEqual(await storage.getSettings(), settings, "the write is persisted, not just returned");
-
-  // A partial update that says nothing about the token keeps the saved one.
-  const urlOnly = await storage.setSettings({ backendUrl: "https://other.example" });
-  assert.equal(urlOnly.backendToken, "paste-from-a-header");
+  assert.equal((await storage.setSettings({})).backendToken, "paste-from-a-header");
 
   // An empty string is a real value: it means "send no Authorization header".
   assert.equal((await storage.setSettings({ backendToken: "   " })).backendToken, "");
 });
 
+test("writeCollectionsCache stores the mapped list and its timestamp", async () => {
+  resetStorage();
+
+  await storage.writeCollectionsCache(
+    [
+      { id: "read-later", slug: "read-later", name: "Read Later", color: "", order: 1 },
+      { id: "linux", slug: "linux", name: "Linux", color: "#bf3f2e", order: 0 },
+    ],
+    99,
+  );
+
+  const cache = await storage.getCollectionsCache();
+  assert.equal(cache.fetchedAt, 99);
+  assert.deepEqual(
+    cache.categories.map((category) => [category.slug, category.order]),
+    [
+      ["linux", 0],
+      ["read-later", 1],
+    ],
+  );
+
+  const store = await storage.getStore();
+  assert.deepEqual(store.categories.map((category) => category.slug), ["linux", "read-later"]);
+  // The cache is not a place settings hide: reading it must not have created the
+  // settings key.
+  assert.equal(storedSettings(), undefined);
+});
+
 test("getStore tolerates malformed storage instead of throwing", async () => {
   resetStorage();
   storageData[STORAGE_KEY] = { version: "one", settings: "nope", categories: [{ name: "orphan" }] };
+  storageData[COLLECTIONS_CACHE_KEY] = "not an object";
 
   const store = await storage.getStore();
-  // A non-numeric version is discarded in favour of the current one; nothing reads
-  // the stored version to decide how to migrate.
-  assert.equal(store.version, 2);
+  assert.equal(store.version, 3);
   assert.deepEqual(store.settings, PRD_DEFAULT_SETTINGS);
-  assert.deepEqual(store.categories, [], "entries without an id are dropped, not crashed on");
+  assert.deepEqual(store.categories, []);
 });
 
-test("onStoreChanged fires only for the local area and only for the store key", async () => {
+test("a cache missing its timestamp reads as stale rather than fresh", async () => {
+  resetStorage();
+  storageData[COLLECTIONS_CACHE_KEY] = {
+    collections: [{ slug: "linux", name: "Linux", color: "#bf3f2e", order: 0 }],
+  };
+
+  const cache = await storage.getCollectionsCache();
+  assert.equal(cache.categories.length, 1, "a usable list is still rendered");
+  assert.equal(cache.fetchedAt, 0, "but it is treated as needing a refetch");
+});
+
+test("onStoreChanged fires for either key in the local area only", async () => {
   resetStorage();
   const seen = [];
   const unsubscribe = storage.onStoreChanged((store) => seen.push(store));
   assert.equal(changeListeners.length, 1);
 
-  // Wrong area.
-  for (const listener of changeListeners) listener({ [STORAGE_KEY]: { newValue: {} } }, "sync");
+  const fire = (changes, area) => {
+    for (const listener of changeListeners) listener(changes, area);
+  };
+
+  fire({ [STORAGE_KEY]: { newValue: {} } }, "sync");
   await tick();
   assert.equal(seen.length, 0, "sync-area changes are ignored");
 
-  // Wrong key in the local area.
-  for (const listener of changeListeners) listener({ somethingElse: { newValue: 1 } }, "local");
+  fire({ somethingElse: { newValue: 1 } }, "local");
   await tick();
   assert.equal(seen.length, 0, "unrelated keys are ignored");
 
-  // Real change.
   await storage.setSettings({ unbookmarkAfterSave: true });
-  for (const listener of changeListeners) listener({ [STORAGE_KEY]: { newValue: stored() } }, "local");
+  fire({ [STORAGE_KEY]: { newValue: storedSettings() } }, "local");
   await tick();
   assert.equal(seen.length, 1);
   assert.equal(seen[0].settings.unbookmarkAfterSave, true);
+
+  // A refreshed collection list is a render trigger too: the injected category
+  // buttons have to pick up a category added on the phone without a reload.
+  await storage.writeCollectionsCache(
+    [{ id: "linux", slug: "linux", name: "Linux", color: "#bf3f2e", order: 0 }],
+    7,
+  );
+  fire({ [COLLECTIONS_CACHE_KEY]: { newValue: storageData[COLLECTIONS_CACHE_KEY] } }, "local");
+  await tick();
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen[1].categories.map((category) => category.slug), ["linux"]);
 
   unsubscribe();
   assert.equal(changeListeners.length, 0, "unsubscribe removes the listener");

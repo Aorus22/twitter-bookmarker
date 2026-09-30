@@ -11,6 +11,7 @@ import (
 	"twitter-bookmarker/internal/config"
 	"twitter-bookmarker/internal/logging"
 	"twitter-bookmarker/internal/model"
+	"twitter-bookmarker/internal/storage"
 )
 
 // maxBodyBytes caps the request body (PRD: strict, bounded payloads).
@@ -35,6 +36,24 @@ type BookmarkStore interface {
 	Index() (map[string]model.IndexEntry, error)
 	Delete(tweetID string) error
 	Reassign(tweetID, slug string) error
+}
+
+// CollectionStore is the category surface.
+//
+// It is separate from BookmarkStore, and the server reaches it with a type
+// assertion, so a store assembled for the bookmark routes alone keeps compiling.
+// The concrete *storage.Store implements both; the assertion in collections.go
+// makes that a compile-time fact rather than a hope.
+//
+// This is the *explicit* half of category management. A save still creates a
+// collection on first use, so the archive keeps working for a client that never
+// calls these endpoints, but only these routes can create a category with nothing
+// in it, rename one, colour one, or move one.
+type CollectionStore interface {
+	ListCollections() ([]model.Collection, error)
+	CreateCollection(slug, name, color string) (model.Collection, error)
+	UpdateCollection(slug string, patch storage.CollectionPatch) (model.Collection, error)
+	ReorderCollections(slugs []string) ([]model.Collection, error)
 }
 
 type server struct {
@@ -81,6 +100,14 @@ func NewServer(store BookmarkStore, log *logging.Logger) http.Handler {
 	// matched.
 	mux.HandleFunc("/v1/bookmarks/{tweet_id}", methodGate(http.MethodDelete, s.handleDeleteBookmark))
 	mux.HandleFunc("/v1/bookmarks/{tweet_id}/collection", methodGate(http.MethodPut, s.handleReassignBookmark))
+	// The collection resource (categories). Registered before the /v1/ catch-all
+	// so an unknown /v1/collections/... path is a real 404 from the API rather
+	// than the SPA shell. The exact /order pattern and the {slug} pattern do not
+	// overlap — Go's ServeMux prefers the literal segment — so "order" can never
+	// be read as a collection slug.
+	mux.HandleFunc("/v1/collections", methodGateAll([]string{http.MethodGet, http.MethodPost}, s.handleCollectionsRoute))
+	mux.HandleFunc("/v1/collections/order", methodGate(http.MethodPut, s.handleReorderCollections))
+	mux.HandleFunc("/v1/collections/{slug}", methodGate(http.MethodPut, s.handleUpdateCollection))
 	// Read-only gallery API (PRD-2 §36). A non-GET method on either pattern is
 	// answered with 405, so the gallery API can never be written to. Curation is
 	// on /v1/bookmarks above, which keeps this guarantee intact rather than

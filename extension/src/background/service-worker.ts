@@ -1,9 +1,10 @@
 /**
  * Extension service worker (Manifest V3).
  *
- * The worker is the extension's single backend HTTP client (PRD §25, §53):
- * every `HEALTH_CHECK` / `GET_SAVED_INDEX` / `SAVE_TWEET` message is answered
- * here and the corresponding request is issued through `shared/api.ts`.
+ * The worker is the extension's single backend HTTP client (PRD §25, §53): every
+ * message is answered here and the corresponding request is issued through
+ * `shared/api.ts`. It is also the only writer of the collection cache, so the
+ * list the popup and the injected controls render has one origin.
  *
  * The target base URL is resolved from `chrome.storage.local` on every message
  * (PRD §50): the popup can switch between the loopback default and a custom URL
@@ -13,17 +14,30 @@
  *  - the listener always resolves to one of the documented response shapes and
  *    never throws out of `chrome.runtime.onMessage` (XI/PRD §39);
  *  - the worker holds **no** state between messages — the per-page saved cache
- *    lives in the content script (PRD §34);
+ *    lives in the content script (PRD §34), and the collection cache lives in
+ *    `chrome.storage.local`;
  *  - network failure is reported as `{ ok: false, error: "backend_unavailable" }`,
- *    never as a rejected message channel.
+ *    never as a rejected message channel;
+ *  - a collection mutation that succeeded but could not be re-read answers
+ *    `ok: true` with `collections: null`: the change happened, and saying
+ *    otherwise would invite the user to repeat it.
  */
 
-import { bgErrorFrom, checkHealth, fetchSavedIndex, postBookmark } from "../shared/api.ts";
+import {
+  bgErrorFrom,
+  checkHealth,
+  createCollection,
+  fetchCollections,
+  fetchSavedIndex,
+  postBookmark,
+  reorderCollections,
+  updateCollection,
+} from "../shared/api.ts";
 import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
 import { resolveBackendToken } from "../shared/backend-token.ts";
 import { isExtensionMessage } from "../shared/messages.ts";
-import type { ExtensionMessage, ExtensionResponse } from "../shared/messages.ts";
-import { getSettings } from "../shared/storage.ts";
+import type { CollectionsResponse, ExtensionMessage, ExtensionResponse } from "../shared/messages.ts";
+import { getSettings, writeCollectionsCache } from "../shared/storage.ts";
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info("[twitter-bookmarker] service worker installed");
@@ -38,6 +52,67 @@ chrome.runtime.onInstalled.addListener(() => {
 async function activeTarget(): Promise<{ baseUrl: string; token: string }> {
   const settings = await getSettings();
   return { baseUrl: resolveBackendBaseUrl(settings), token: resolveBackendToken(settings) };
+}
+
+/** Fetch the list and refresh the cache; the answer every collection message carries. */
+async function listAndCache(baseUrl: string, token: string): Promise<CollectionsResponse> {
+  try {
+    const collections = await fetchCollections(baseUrl, token);
+    await writeCollectionsCache(collections);
+    return { ok: true, collections };
+  } catch (error) {
+    return { ok: false, collections: null, error: bgErrorFrom(error) };
+  }
+}
+
+/**
+ * Apply one collection mutation, then re-read the list.
+ *
+ * The follow-up read is not optional politeness: a create appends to the order and
+ * a rename changes the slug, so the only honest answer is the list the backend now
+ * holds — and the cache every open surface renders from.
+ */
+async function mutateThenList(
+  baseUrl: string,
+  token: string,
+  mutate: () => Promise<unknown>,
+): Promise<CollectionsResponse> {
+  try {
+    await mutate();
+  } catch (error) {
+    return { ok: false, collections: null, error: bgErrorFrom(error) };
+  }
+
+  try {
+    const collections = await fetchCollections(baseUrl, token);
+    await writeCollectionsCache(collections);
+    return { ok: true, collections };
+  } catch (error) {
+    // The change stands; only the refresh failed. `collections: null` says so
+    // without pretending the mutation did not happen.
+    console.warn("[twitter-bookmarker] collection change applied but the list could not be refreshed", error);
+    return { ok: true, collections: null };
+  }
+}
+
+/**
+ * Write a new order and cache the renumbered list the backend answers with.
+ *
+ * No follow-up read: the reorder response *is* the whole list, already in the
+ * order that was just written.
+ */
+async function reorderThenCache(
+  baseUrl: string,
+  token: string,
+  slugs: string[],
+): Promise<CollectionsResponse> {
+  try {
+    const collections = await reorderCollections(slugs, baseUrl, token);
+    await writeCollectionsCache(collections);
+    return { ok: true, collections };
+  } catch (error) {
+    return { ok: false, collections: null, error: bgErrorFrom(error) };
+  }
 }
 
 /** Resolve one validated message to a response. Never rejects. */
@@ -64,6 +139,27 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       } catch (error) {
         return { ok: false, error: bgErrorFrom(error) };
       }
+
+    case "LIST_COLLECTIONS":
+      return listAndCache(baseUrl, token);
+
+    case "CREATE_COLLECTION":
+      return mutateThenList(baseUrl, token, () =>
+        createCollection({ name: message.name, color: message.color }, baseUrl, token),
+      );
+
+    case "UPDATE_COLLECTION":
+      return mutateThenList(baseUrl, token, () =>
+        updateCollection(
+          message.slug,
+          { name: message.name, color: message.color, order: message.order },
+          baseUrl,
+          token,
+        ),
+      );
+
+    case "REORDER_COLLECTIONS":
+      return reorderThenCache(baseUrl, token, message.slugs);
 
     default:
       // `isExtensionMessage` guarantees this is unreachable, but a response is

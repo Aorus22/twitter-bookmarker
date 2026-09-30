@@ -55,6 +55,11 @@
           <span id="categories-count" class="count">0</span>
         </div>
 
+        <p class="field-hint">
+          Categories live in the backend, so the popup, the timeline buttons, the phone and the
+          gallery all read the same list in the same order.
+        </p>
+
         <p id="categories-empty" class="empty-state" hidden>No categories yet</p>
         <ul id="category-list" class="category-list"></ul>
 
@@ -211,7 +216,7 @@
             <path d="m15 5 4 4" />
           </svg>
         </button>
-        <button class="icon-button category-delete" type="button" aria-label="Delete category" title="Delete">
+        <button class="icon-button category-up" type="button" aria-label="Move category up" title="Move up">
           <svg
             width="14"
             height="14"
@@ -223,11 +228,22 @@
             stroke-linejoin="round"
             aria-hidden="true"
           >
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-            <path d="M3 6h18" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="m18 15-6-6-6 6" />
+          </svg>
+        </button>
+        <button class="icon-button category-down" type="button" aria-label="Move category down" title="Move down">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m6 9 6 6 6-6" />
           </svg>
         </button>
       </li>

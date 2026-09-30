@@ -345,17 +345,21 @@ curl -s http://127.0.0.1:43121/v1/collections | python3 -m json.tool
 1. In the popup, give **Linux** the green swatch and move it to the top with ↑.
 2. Read the list back over HTTP; read it again from the database.
 3. Open the phone's gallery screen (see `morphe/README.md#the-gallery-screen`).
-4. Clear the colour (`#000000`… then use the custom field to empty it) and reload
-   the popup.
+4. Clear the colour. The popup's swatch is a colour input and cannot express
+   "none", so do it over HTTP — this is also what the phone's **New collection…**
+   leaves behind, since a name is the only thing it sends:
+   `curl -s -X PUT http://127.0.0.1:43121/v1/collections/linux -H 'Content-Type: application/json' -d '{"color":""}'`
+5. Reload the popup and pull the phone screen's folder list again.
 
 **Expected**
 - `PUT /v1/collections/linux` carries `{"color":"#10b981"}`, and
   `PUT /v1/collections/order` carries **every** slug, not just the moved one.
 - HTTP, the database and the phone agree on the order, and the phone shows the
   same green bar for Linux.
-- An empty colour is stored as `''` and painted as the shared default
-  `#bf3f2e` — it is not rewritten to the default in the database, because "no
-  colour chosen" and "chose the default" are different answers.
+- After step 4 the database holds `''` — **not** `#bf3f2e`, because "no colour
+  chosen" and "chose the default" are different answers — while the popup's
+  swatch and the phone's bar both paint the shared default red. A colour the
+  server cannot parse (`#12345`, `red`) is the `400`.
 
 **Inspect on disk**
 ```bash

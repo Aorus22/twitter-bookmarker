@@ -1028,6 +1028,13 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
    account (or turn the phone's network off and scroll a fresh collection).
 9. Open a collection containing a post with **four photos**, one with a **video**,
    one that **quotes** another post, and one with a **poll**.
+10. Watch the first frame of a fresh collection, before any request can have
+    answered: is every row's avatar a grey circle of the full 40 dp, and every media
+    cell a grey box, with the text starting at the same x on every row?
+11. Compare the strip under a post that has counts with X's own: replies, reposts,
+    likes and views, glyph and figure, spread across the width.
+12. Tap **Refresh** while the "Twitter is not answering" line is showing (step 8's
+    offline case is the reliable way to get it there).
 
 **Expected**
 - The folder order is the backend's, and each row's bar is that collection's
@@ -1046,9 +1053,25 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
   com.twitter.deeplink.implementation.UrlInterpreterActivity` is the pass, and
   `nothing in the app resolved …` is the failure.
 - Rows carry Twitter's own content: an avatar, the name and handle, a relative age
-  (`5m`, `3h`, `12 Mar`), the text, and a counts line. A verified account shows a
-  badge only if this X build has a drawable named `ic_vector_verified` — the header
-  is correct either way.
+  (`5m`, `3h`, `12 Mar`), the text, and the four counts as an action strip. A
+  verified account shows a badge only if this X build has a drawable named
+  `ic_vector_verified` — the header is correct either way.
+- The layout does not move while images arrive: a row with no avatar URL *or* an
+  avatar still downloading shows the same grey circle in the same 40 dp column, so
+  the text never starts at the screen edge, and a media cell that has not decoded
+  yet is a grey box rather than a black hole of the reserved height. Nothing about a
+  row changes size between its first frame and its last.
+- The strip under the post is four equal columns of glyph-plus-figure, and a figure
+  is omitted when it is zero and when Twitter has not answered — the glyphs are
+  never mixed, so it is either four icons or four bare numbers, never a heart among
+  numbers. (X's drawable names are not a contract: if none of the four resolve, the
+  numbers are the strip.)
+- With **no route to Twitter at all**, after roughly three rows the screen says
+  `Twitter is not answering, so these rows are the copies saved in the archive.` and
+  stops requesting — the line is a deliberate state, not an error, and **Refresh**
+  clears it and tries again.
+- Images and live posts load in parallel rather than in a queue: the avatars and
+  media of the visible rows arrive while later rows are still being asked about.
 - A post with four photos renders as a 2×2 grid, one with three as two and then a
   full-width cell, one video as a poster frame with `Video · 0:25` under it, and
   more than four as the first four plus `+N more`.
@@ -1074,7 +1097,60 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
   avatars are a second entry per URL, so a long scroll holds both.
 - One request per visible post goes to `api.fxtwitter.com`; a burst of
   `twb: could not read post …` lines in logcat means that service is refusing or
-  unreachable, which is a fallback rather than a bug.
+  unreachable, which is a fallback rather than a bug — and the screen says so in one
+  line once it has seen three in a row.
+- `twb: N posts in a row came back empty; pausing live posts for 300s` is the pause
+  starting, and the three thread pools are visible in a dump as `twb-live-*` (the
+  live posts) and `twb-image-*` (the thumbnails): if the images stall while the
+  fetches are also stalled, the split has failed and that is a bug worth reporting.
+
+### H3 — Move and remove a bookmark from the phone
+
+The two curation rows on an already-saved tweet, which are the phone's half of
+[§5 G1](#5-curation--delete-move-and-restore-g1). Both write to the same endpoints
+the web gallery uses, so the database is the check that matters.
+
+**Steps**
+1. Open any tweet that is already in the archive (`✓ Saved`) and tap our button.
+2. Tap **Change collection…**, then pick a collection that is not the current one.
+3. Tap the button again: does the information row name the collection just picked?
+4. Tap **Change collection…** again and look at the list.
+5. Tap **Close**.
+6. Tap the button, tap **Remove from Bookmarker**, and read the confirmation.
+7. Tap **Keep**; then repeat and tap **Remove**.
+8. Tap the tweet's own button again.
+9. Check the database (spot-check block in §5, `deleted_bookmarks`) and the gallery.
+10. Reopen the collection picker on a tweet that is **not** saved yet and tap
+    **Close** without choosing a collection.
+
+**Expected**
+- The picker opens with a row per collection **other than the current one**, plus
+  **New collection…** and **Close**; the current collection is absent because moving
+  a bookmark to where it already is is a request that changes nothing.
+- One `PUT /v1/bookmarks/<id>/collection` with `{"slug":"<new>"}` — `200`, and
+  logcat shows `twb: PUT /v1/bookmarks/<id>/collection -> 200`. The saved date, the
+  stored text and the media are untouched: the row moved, nothing was re-saved.
+- The sheet's information row names the new collection on the next open, and the
+  mark on X's own button follows without a reload (`BookmarkerCache.remember`).
+- **Remove from Bookmarker** asks first, in a dialog that says the bookmark goes to
+  the backend's trash rather than being destroyed, and **Keep** sends nothing at all.
+- Confirming sends one `DELETE /v1/bookmarks/<id>` → `200`; the row leaves
+  `bookmarks`, appears in `deleted_bookmarks` with a `deleted_at` stamp, and the
+  tweet's own button goes back to its unsaved glyph in the same breath
+  (`BookmarkerCache.forget`, no refetch).
+- The removed bookmark is gone from the collection in the gallery, and the collection
+  counts in the popup drop by one after its next refresh.
+- **Close** dismisses the sheet and sends nothing — the whole point of the row is
+  that the drag gesture is no longer the only way out.
+
+**Watch**
+- A `404` from either endpoint is reported as "the backend has no such bookmark or
+  collection" and changes nothing: a stale picker opened before another device moved
+  or removed the same bookmark lands there rather than corrupting anything.
+- `401` on both rows means the token, not the row: nothing is written, and the
+  message says so.
+- The trash is a log, not a claim on the Status ID: re-saving the same tweet
+  afterwards is a `201`, and the `deleted_bookmarks` row stays behind on purpose.
 
 ---
 

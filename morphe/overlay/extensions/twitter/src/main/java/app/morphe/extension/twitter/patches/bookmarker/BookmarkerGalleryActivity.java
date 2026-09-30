@@ -94,6 +94,16 @@ public final class BookmarkerGalleryActivity extends Activity {
     private static final int COLOR_CARD_DARK = 0xFF1E2732;
     private static final int COLOR_BORDER_LIGHT = 0xFFEFF3F4;
     private static final int COLOR_BORDER_DARK = 0xFF2F3336;
+    /**
+     * What an image that has not arrived yet is drawn as.
+     *
+     * <p>A box of the right size and the right colour, so the row's layout is the
+     * finished layout from the first frame: nothing shifts sideways when a picture
+     * lands, and an avatar that is missing outright still leaves the column it
+     * occupies. X's own placeholder greys.
+     */
+    private static final int COLOR_PLACEHOLDER_LIGHT = 0xFFE1E8ED;
+    private static final int COLOR_PLACEHOLDER_DARK = 0xFF2F3336;
     private static final int COLOR_ACCENT = 0xFF1D9BF0;
 
     /**
@@ -107,6 +117,23 @@ public final class BookmarkerGalleryActivity extends Activity {
     private static final long ENRICH_RETRY_GAP_MS = 60 * 1000L;
 
     /**
+     * How many rows in a row may come back empty before the screen stops asking.
+     *
+     * <p>Per-tweet backoff is not enough on its own: a collection of a hundred rows
+     * with no route to the host is a hundred timeouts, and the user is left waiting
+     * for a screen that will not change. Three in a row is the point where the
+     * problem is the network rather than any one post, so the fetches pause and the
+     * screen says so in one line instead of staying silent about it.
+     */
+    private static final int ENRICH_FAILURES_BEFORE_PAUSE = 3;
+    private static final long ENRICH_PAUSE_MS = 5 * 60 * 1000L;
+
+    /** What the screen says while the fetches are paused. */
+    private static final String ENRICH_PAUSED_MESSAGE =
+            "Twitter is not answering, so these rows are the copies saved in the archive. "
+                    + "Tap Refresh to try again.";
+
+    /**
      * Tweet ids being fetched right now, and when a failed one was last tried.
      *
      * <p>Process-wide and touched only from the main thread: a bind starts a fetch,
@@ -116,6 +143,14 @@ public final class BookmarkerGalleryActivity extends Activity {
      */
     private static final java.util.Set<String> ENRICH_IN_FLIGHT = new java.util.HashSet<>();
     private static final java.util.Map<String, Long> ENRICH_FAILED_AT = new java.util.HashMap<>();
+
+    /** See {@link BookmarkerThreads}: the fetches do not share the image loader. */
+    private static final java.util.concurrent.ExecutorService ENRICH_POOL =
+            BookmarkerThreads.fixedPool("twb-live", 3);
+
+    /** Consecutive empty answers, and how long the screen has stopped asking. */
+    private static int enrichFailures;
+    private static long enrichPausedUntil;
 
     /** Opens the gallery; usable from any context the sheet or dialog holds. */
     public static void open(android.content.Context context) {
@@ -144,6 +179,7 @@ public final class BookmarkerGalleryActivity extends Activity {
     private TextView rangeChip;
     private TextView clearRangeChip;
     private TextView statusView;
+    private TextView liveView;
     private ListView listView;
     private BookmarkerGalleryAdapter.FolderAdapter folderAdapter;
     private BookmarkerGalleryAdapter.PostAdapter postAdapter;
@@ -184,6 +220,15 @@ public final class BookmarkerGalleryActivity extends Activity {
         root.addView(buildHeader());
         controls = buildControls();
         root.addView(controls);
+
+        // Above the loading/empty line, because it is about the rows themselves
+        // rather than about this screen's own request to the backend.
+        liveView = new TextView(this);
+        liveView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        liveView.setTextColor(mutedColor());
+        liveView.setPadding(dp(12), dp(8), dp(12), dp(8));
+        liveView.setVisibility(View.GONE);
+        root.addView(liveView);
 
         statusView = new TextView(this);
         statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
@@ -251,6 +296,9 @@ public final class BookmarkerGalleryActivity extends Activity {
             if (opened == null) {
                 showFolders();
             } else {
+                // Asking again is the user's answer to "Twitter is not answering", so
+                // the pause is cleared here rather than left to expire on its own.
+                resumeEnriching();
                 loadPosts(true);
             }
         });
@@ -428,6 +476,11 @@ public final class BookmarkerGalleryActivity extends Activity {
                     hasMore = page.hasMore;
                     postAdapter.setItems(posts, hasMore);
                     setStatus(posts.isEmpty() ? emptyMessage() : "");
+                    // The pause outlives the screen: reopening the gallery while it is
+                    // in force has to say why the rows have no numbers either.
+                    if (System.currentTimeMillis() < enrichPausedUntil) {
+                        setLiveStatus(ENRICH_PAUSED_MESSAGE);
+                    }
                     updateChips();
                 });
             } catch (Exception e) {
@@ -571,12 +624,13 @@ public final class BookmarkerGalleryActivity extends Activity {
         final String id = post.tweetId;
         if (id == null || id.isEmpty()) return;
         if (ENRICH_IN_FLIGHT.contains(id)) return;
+        if (System.currentTimeMillis() < enrichPausedUntil) return;
 
         Long failedAt = ENRICH_FAILED_AT.get(id);
         if (failedAt != null && System.currentTimeMillis() - failedAt < ENRICH_RETRY_GAP_MS) return;
 
         ENRICH_IN_FLIGHT.add(id);
-        Utils.runOnBackgroundThread(() -> {
+        ENRICH_POOL.execute(() -> {
             FxTweet.Row row = null;
             try {
                 row = FxTweet.fetch(id);
@@ -588,13 +642,47 @@ public final class BookmarkerGalleryActivity extends Activity {
             Utils.runOnMainThread(() -> {
                 ENRICH_IN_FLIGHT.remove(id);
                 if (fetched == null) {
+                    // An empty answer here means the request itself failed: a post
+                    // Twitter refuses (private, deleted) still comes back as a row
+                    // with a code, and is drawn as the archive copy with a note.
                     ENRICH_FAILED_AT.put(id, System.currentTimeMillis());
+                    noteEnrichFailure();
                     return;
                 }
+                enrichFailures = 0;
+                if (enrichPausedUntil != 0) resumeEnriching();
                 post.fxRow = fetched;
                 onLanded.run();
             });
         });
+    }
+
+    /**
+     * Counts empty answers, and stops asking once the network is the obvious answer.
+     *
+     * <p>Silence was the old behaviour: every failure was logged and nothing else,
+     * which is indistinguishable from a patch that does not work. One line saying
+     * which half is missing is the honest version of the same silence.
+     */
+    private void noteEnrichFailure() {
+        enrichFailures++;
+        if (enrichFailures < ENRICH_FAILURES_BEFORE_PAUSE) return;
+        enrichPausedUntil = System.currentTimeMillis() + ENRICH_PAUSE_MS;
+        Logger.printInfo(() -> "twb: " + enrichFailures + " posts in a row came back empty; "
+                + "pausing live posts for " + (ENRICH_PAUSE_MS / 1000) + "s");
+        setLiveStatus(ENRICH_PAUSED_MESSAGE);
+    }
+
+    /** Clears the pause and the line that explains it. */
+    private void resumeEnriching() {
+        enrichFailures = 0;
+        enrichPausedUntil = 0;
+        setLiveStatus("");
+    }
+
+    private void setLiveStatus(String message) {
+        liveView.setText(message == null ? "" : message);
+        liveView.setVisibility(message == null || message.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     /**
@@ -757,6 +845,11 @@ public final class BookmarkerGalleryActivity extends Activity {
     /** The window's own background: X is white or black, not a card. */
     int backgroundColor() {
         return dark ? 0xFF000000 : 0xFFFFFFFF;
+    }
+
+    /** What an image that has not arrived yet is drawn as. */
+    int placeholderColor() {
+        return dark ? COLOR_PLACEHOLDER_DARK : COLOR_PLACEHOLDER_LIGHT;
     }
 
     /** The hairline between two posts, and the outline of a quoted one. */

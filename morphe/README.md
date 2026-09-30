@@ -31,9 +31,10 @@ bookmark state is still never read or written.
 | `GET /api/gallery/collections` + `POST /v1/bookmarks` + collection sheet | written, not yet run on a device |
 | 48 dp touch target, gap, and its own two glyphs | written, not yet run on a device |
 | Saved state from `GET /v1/index` + the "already saved" sheet | written, not yet run on a device |
+| Move and remove a bookmark from that sheet (`PUT …/collection`, `DELETE …`) | written, not yet run on a device |
 | `POST /v1/collections` from the phone, with the backend choosing the slug | written, not yet run on a device |
 | The gallery screen: folders, cards, date filter, four sorts | written, not yet run on a device |
-| Move/delete from the phone | not written (Phase 5) |
+| Live rows: skeletons, the four-stat strip, and the pause when Twitter is away | written, not yet run on a device |
 
 Two things on this list are device-only by nature and are called out again where
 they matter: the Activity's **theme** (the manifest entry deliberately does not
@@ -58,7 +59,8 @@ morphe/
     └── extensions/twitter/src/main/java/app/morphe/extension/twitter/patches/bookmarker/
         ├── SaveButton.java                    the action-bar button and the tap flow
         ├── BookmarkerCache.java               collections + saved index, in memory
-        ├── BookmarkerSheets.java              the picker, "New collection…", the gallery row
+        ├── BookmarkerSheets.java              the picker, move/remove, "New collection…", Close
+        ├── BookmarkerThreads.java             the two pools our own network work runs on
         ├── BookmarkerSettingsDialog.java      backend URL, token, "Test", gallery row
         ├── BookmarkerPrefs.java               those two values, plus the cached collections
         ├── BookmarkerApi.java                 HTTP only: health, collections, index, save, posts
@@ -111,6 +113,15 @@ button, which is the reason this is a small patch rather than research:
    marks the tweet, a `409` says where the tweet already lives (the backend names
    the owning collection, which may not be the one just picked), a `401` names the
    token, and an unreachable backend says so and saves nothing.
+5. Tapping the button on a tweet that is **already** saved opens a different sheet:
+   where it lives, **Change collection…**, **Remove from Bookmarker**, the gallery,
+   and **Close**. The two curation rows are the phone's end of the endpoints the web
+   gallery already uses — `PUT /v1/bookmarks/{tweet_id}/collection` to move it, and
+   `DELETE /v1/bookmarks/{tweet_id}` to take it out of the archive. Nothing is
+   re-saved: a move changes one column, and a removal is the backend's soft delete,
+   so the row lands in `deleted_bookmarks` and the archive's copy of the tweet is
+   untouched. Both ask nothing of the tweet itself — only its id — which is why the
+   sheet is opened with the id rather than with a draft.
 
 **Long-press** reopens the settings dialog, which also carries an **Open
 bookmarker gallery** row. **Test** inside it checks `/health` for reachability and
@@ -131,11 +142,17 @@ implies and a second Activity would need a second manifest entry for no gain.
   a row opens it.
 - **Posts.** One collection's bookmarks, drawn the way X draws a post: the author's
   avatar, the name and handle line with the post's age, the text, up to four media
-  items, a quoted post and a poll, then the reply/repost/like/view counts — and,
-  in the archive's own voice, the line saying when it was saved. Tapping anywhere in
-  a row opens the tweet in X, by naming the app's own link interpreter (see [the tap
-  target](#the-tap-target-and-why-it-is-not-a-literal)) and falling back to the
-  system's viewer only when nothing inside the app claims the link.
+  items, a quoted post and a poll, then the four counts — replies, reposts, likes
+  and views — as an action strip of glyph-plus-figure in four equal columns, which
+  is where X puts them. A figure is dropped when it is zero, and the whole strip
+  falls back to bare numbers if X's drawables cannot be found by name (see [the
+  strip](#the-counts-strip-and-what-it-refuses-to-claim)). Avatar and media boxes
+  are drawn at their final size from the first frame, whatever is in them. And, in
+  the archive's own voice, each row ends with the line saying when it was saved.
+  Tapping anywhere in a row opens the tweet in X, by naming the app's own link
+  interpreter (see [the tap target](#the-tap-target-and-why-it-is-not-a-literal))
+  and falling back to the system's viewer only when nothing inside the app claims
+  the link.
 
 The filter and the sort sit in one row of chips, and both work off the same **date
 basis**, because a bookmark has two dates and mixing them would mean filtering by
@@ -189,6 +206,48 @@ network failure says nothing at all — a message the user cannot act on is not 
 a line of the screen. Nothing here depends on our stored `media` or `text`, and
 nothing in the sort or the filters changed: which posts are in the list, and in what
 order, is still the backend's answer alone.
+
+### The boxes that are drawn before the pictures
+
+A row's layout is finished before its network work starts. That is a decision about
+the placeholder, not about the data: the avatar view is a 40 dp circle painted in the
+theme's placeholder grey, and every media cell is a grey rounded box at the size the
+picture will be — the single photo's aspect-ratio height, the grid's fixed 150 dp —
+so nothing in a row shifts or grows when an image lands. It matters most in the case
+the archive produces a lot of: a bookmark whose author picture the archive never
+stored has an avatar URL of `""`, and the first version of this row responded by
+removing the view, which put the text hard against the screen edge on exactly those
+rows and made the list look broken rather than empty.
+
+The pictures and the live posts are loaded by **separate thread pools** of our own
+(`BookmarkerThreads`), four threads for images and three for the fetches, both
+daemon and both named (`twb-image-*`, `twb-live-*`). This was a bug before it was a
+design: both used the app's shared background executor, so thirty rows scrolling
+into view meant thirty requests with a five-second connect timeout each, all queued
+ahead of the thumbnails on a pool this overlay does not size. A host that answers
+slowly — or not at all — left the screen with its layout drawn and nothing in it,
+which is exactly what a screenshot of the phone showed.
+
+### The counts strip, and what it refuses to claim
+
+X's own stat glyphs have no names this overlay can rely on. `ic_vector_heartline` is
+the one name Piko references, and the other three are guesses with fallbacks, so the
+rule is **all four or none**: if even one name fails to resolve, no glyph is drawn
+and the strip is four bare numbers. One heart beside three numbers would read as a
+different kind of row, and a missing drawable is not a design.
+
+What the strip will not do is invent a number. A post Twitter has not answered for
+has no counts to show — the archive never stored any — so its strip is the glyphs
+alone with the figures omitted, which is the shape of X's action bar and says "the
+numbers are in the app" rather than claiming a post has no likes. The numbers
+themselves are text: liking or reposting from this screen would be a lie, so the
+whole row is one tap target that opens the post.
+
+When Twitter is unreachable altogether — three empty answers in a row — the screen
+stops asking for five minutes and says so in one line above the list, because a
+strip with no numbers and a silent log are indistinguishable from a patch that does
+not work. **Refresh** clears the pause and asks again. This is also the honest
+version of an earlier behaviour, where every failure was logged and nothing else.
 
 **On tests.** Piko ships no JVM test infrastructure, so there is no automated test
 for `FxTweet` — it is the only part of the phone patch that could have one, being
@@ -390,7 +449,10 @@ Bookmarker** when patching, and install the result:
    cached list, so it appears in the same frame as the tap — the first tap after a
    fresh install is the one that has to fetch, and it says so.
 4. The saved tweet is now marked (filled bookmark, blue). Tapping a marked tweet
-   opens a sheet naming the collection that holds it instead of saving again;
+   opens a sheet naming the collection that holds it, with **Change collection…** to
+   move it (the backend's `PUT`, so nothing is re-saved), **Remove from Bookmarker**
+   to take it out of the archive (a confirmed `DELETE`, which is the backend's soft
+   delete, so the row goes to its trash), the gallery row, and **Close**;
    **long-press** reopens the settings dialog at any time.
 5. To see the archive itself: long-press the button, then tap **Open bookmarker
    gallery** in the settings dialog — or pick **Bookmarker gallery…** from the
@@ -415,6 +477,10 @@ out from the source:
 | The date pickers in a dark theme | `DatePickerDialog` is the platform's, not the app's | a light dialog on a dark screen |
 | The chips row on a narrow screen | it scrolls horizontally, but nothing was measured | the last chip is hard to reach |
 | The verified badge's drawable name | `ic_vector_verified` is a name this overlay guessed; Piko never names that glyph | verified accounts show no badge (the header still has the name) |
+| The four stat glyph names | three of the four are guesses, with the all-or-none rule above | a strip of bare numbers instead of icons — the counts are still right |
+| The placeholders before the pictures | whether a recycled row can still show a stale box for a frame is a rendering question | a grey box where a picture should be, or a row that changes height as it loads |
+| The live posts' pause | three empty answers is a judgement about a network this overlay cannot see | the "Twitter is not answering" line appears on a working network, or never appears on a broken one |
+| Moving and removing from the phone | two writes against the backend's curation endpoints, only reachable on a device | a sheet row that toasts an error, or a database row that did not change |
 | The media grid's proportions | one photo uses the API's aspect ratio, a grid uses fixed 150dp cells | a tall photo that squashes the row, or a grid that clips |
 | Avatar and media memory together | the circular avatars are a second cache entry per URL | an OOM on a long collection, or blank avatars after a scroll |
 

@@ -139,6 +139,22 @@ public final class BookmarkerCache {
     }
 
     /**
+     * Drops a bookmark this phone just removed from the archive.
+     *
+     * <p>The other direction of {@link #remember}, and needed for the same reason:
+     * the mark on the tweet's button is read from here, so a delete that only
+     * reached the backend would leave the icon claiming the tweet is still saved
+     * until the next index refresh — up to {@link #TTL_MS} of a lie.
+     */
+    public static void forget(String tweetId) {
+        if (tweetId == null || tweetId.isEmpty()) return;
+        synchronized (LOCK) {
+            SAVED.remove(tweetId);
+        }
+        notifyListeners();
+    }
+
+    /**
      * Records a collection the backend just created, verbatim.
      *
      * <p>{@code POST /v1/collections} answers with the slug it derived, the colour

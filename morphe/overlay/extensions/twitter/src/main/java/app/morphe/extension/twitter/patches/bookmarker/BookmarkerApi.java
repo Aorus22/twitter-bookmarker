@@ -587,6 +587,86 @@ public final class BookmarkerApi {
         }
     }
 
+    /**
+     * Moves a bookmark into another collection:
+     * {@code PUT /v1/bookmarks/{tweet_id}/collection}.
+     *
+     * <p>The body names the collection and nothing else, because that path sets
+     * exactly one thing. The backend owns whether the slug exists, so a 404 is
+     * reported in its own words rather than pre-checked against the cached list of
+     * collections — which can be minutes old.
+     */
+    public static Result move(String baseUrl, String token, String tweetId, String slug) {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) return new Result(false, false, null, "no backend URL set");
+        if (tweetId == null || tweetId.isEmpty()) {
+            return new Result(false, false, null, "could not work out which tweet this is");
+        }
+
+        try {
+            JSONObject body = new JSONObject();
+            body.put("slug", slug == null ? "" : slug);
+            Response response = request(base,
+                    "/v1/bookmarks/" + encode(tweetId) + "/collection",
+                    token, "PUT", body.toString());
+
+            switch (response.status) {
+                case HttpURLConnection.HTTP_OK:
+                    return new Result(true, false, slug, "moved to " + slug);
+                case HttpURLConnection.HTTP_UNAUTHORIZED:
+                    return new Result(false, false, null, "the backend rejected the token (401)");
+                case HttpURLConnection.HTTP_NOT_FOUND:
+                    return new Result(false, false, null,
+                            "the backend has no such bookmark or collection");
+                case HttpURLConnection.HTTP_BAD_REQUEST:
+                    return new Result(false, false, null,
+                            "the backend refused the move: " + reasonOf(response.body));
+                default:
+                    return new Result(false, false, null,
+                            "the backend returned " + response.status + ": " + reasonOf(response.body));
+            }
+        } catch (Exception e) {
+            return new Result(false, false, null, "cannot reach the backend: " + shortReason(e));
+        }
+    }
+
+    /**
+     * Takes a bookmark out of the archive: {@code DELETE /v1/bookmarks/{tweet_id}}.
+     *
+     * <p>Named {@code remove} rather than {@code delete} for the reason the backend
+     * spells out in its own answer: the row moves to the trash and is still
+     * recoverable, so nothing the user saved is actually gone. The phone has no
+     * restore flow yet, which is why the caller asks before calling this at all.
+     */
+    public static Result remove(String baseUrl, String token, String tweetId) {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) return new Result(false, false, null, "no backend URL set");
+        if (tweetId == null || tweetId.isEmpty()) {
+            return new Result(false, false, null, "could not work out which tweet this is");
+        }
+
+        try {
+            Response response = request(base, "/v1/bookmarks/" + encode(tweetId), token,
+                    "DELETE", null);
+
+            switch (response.status) {
+                case HttpURLConnection.HTTP_OK:
+                    // The backend answers with {"status":"deleted","recoverable":true},
+                    // so the wording here can promise what it promises.
+                    return new Result(true, false, null, "removed; still in the trash");
+                case HttpURLConnection.HTTP_UNAUTHORIZED:
+                    return new Result(false, false, null, "the backend rejected the token (401)");
+                case HttpURLConnection.HTTP_NOT_FOUND:
+                    return new Result(false, false, null, "that bookmark is not in the archive");
+                default:
+                    return new Result(false, false, null,
+                            "the backend returned " + response.status + ": " + reasonOf(response.body));
+            }
+        } catch (Exception e) {
+            return new Result(false, false, null, "cannot reach the backend: " + shortReason(e));
+        }
+    }
+
     /** The {@code POST /v1/bookmarks} body, field for field what the extension sends. */
     private static String saveBody(String slug, String name, Draft draft) throws JSONException {
         JSONObject tweet = new JSONObject();

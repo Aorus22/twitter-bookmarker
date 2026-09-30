@@ -42,6 +42,10 @@ public final class BookmarkerSheets {
     private static final String COLLECTION_ICON = "ic_vector_book_stroke_on";
     private static final String NEW_COLLECTION_ICON = "ic_vector_compose_dm";
     private static final String GALLERY_ICON = "ic_vector_bookmark_stroke_on";
+    private static final String MOVE_ICON = "ic_vector_layers_stroke";
+    private static final String REMOVE_ICON = "ic_vector_trashcan_stroke";
+    /** Every sheet ends with this row: see {@link #closeAction}. */
+    private static final String CLOSE_ICON = "ic_vector_close";
 
     /** Called on the main thread with the chosen collection. */
     public interface PickCallback {
@@ -78,6 +82,7 @@ public final class BookmarkerSheets {
                 GALLERY_ICON,
                 "Bookmarker gallery\u2026",
                 ignored -> BookmarkerGalleryActivity.open(context)));
+        actions.add(closeAction());
 
         BottomSheetHelper.show(context, draft, "Save to Twitter Bookmarker", actions, null);
     }
@@ -85,30 +90,184 @@ public final class BookmarkerSheets {
     /**
      * What a tap means once the tweet is already in the archive.
      *
-     * <p>One row, and no collection rows: the tweet is in exactly one collection,
-     * and offering to save it again would only produce a 409. Moving a tweet
-     * between collections needs the backend's move endpoint, which the web
-     * curation flow has ({@code PUT /v1/bookmarks/{id}/collection}) but this screen
-     * does not use yet — the Phase 5 row in {@code morphe/README.md}.
+     * <p>One information row and three things to do with it: move the bookmark to
+     * another collection, take it out of the archive, or go look at the archive.
+     * The tweet is in exactly one collection, so there are no collection rows here
+     * — offering to save it again would only produce a 409.
+     *
+     * <p>The removal is a soft delete on the backend, but "recoverable" is not the
+     * same as "reversible from this phone", so it asks first and says what it did:
+     * see {@link BookmarkerApi#remove}.
+     *
+     * @param tweetId the tweet the sheet is about; every row that writes needs it.
      */
-    public static void showSavedInfo(Context context, String name, String slug) {
+    public static void showSavedInfo(Context context, String tweetId, String name, String slug) {
         if (context == null) return;
         String where = name == null || name.isEmpty() ? slug : name;
         if (where == null || where.isEmpty()) return;
 
-        // The bound item is a String here rather than a Draft: this sheet only has
-        // to say where the tweet lives, and its row needs no tweet data at all.
+        // The bound item is a String rather than a Draft: the rows below that open
+        // another sheet need the tweet id, which is captured here, and none of them
+        // needs the tweet's own fields.
         List<BottomSheetAction<String>> actions = new ArrayList<>();
         actions.add(new BottomSheetAction<>(
                 COLLECTION_ICON,
-                "Already saved in " + where,
+                "Saved in " + where,
                 ignored -> {}));
+        actions.add(new BottomSheetAction<>(
+                MOVE_ICON,
+                "Change collection\u2026",
+                ignored -> withCollections(context, collections ->
+                        showMovePicker(context, tweetId, slug, collections))));
+        actions.add(new BottomSheetAction<>(
+                REMOVE_ICON,
+                "Remove from Bookmarker",
+                ignored -> confirmRemove(context, tweetId, where)));
         actions.add(new BottomSheetAction<>(
                 GALLERY_ICON,
                 "Bookmarker gallery\u2026",
                 ignored -> BookmarkerGalleryActivity.open(context)));
+        actions.add(closeAction());
 
         BottomSheetHelper.show(context, where, "Twitter Bookmarker", actions, null);
+    }
+
+    /**
+     * The collection picker again, this time for a bookmark that already exists.
+     *
+     * <p>The current collection is left out: a row that moves a bookmark to where it
+     * already is would be a request that changes nothing, and the answer would have
+     * to explain that. What the user picks is sent as the new slug, and the backend
+     * moves the row — nothing is re-saved, so the saved date and the archive's copy
+     * of the tweet are untouched.
+     */
+    public static void showMovePicker(Context context, final String tweetId, final String currentSlug,
+                                      List<BookmarkerApi.Collection> collections) {
+        if (context == null) return;
+
+        List<BottomSheetAction<String>> actions = new ArrayList<>();
+        for (final BookmarkerApi.Collection collection : collections) {
+            if (collection.slug.equals(currentSlug)) continue;
+            actions.add(new BottomSheetAction<>(
+                    COLLECTION_ICON,
+                    collection.toString(),
+                    ignored -> move(context, tweetId, collection)));
+        }
+        if (actions.isEmpty()) {
+            Utils.showToastShort("Twitter Bookmarker: there is nowhere else to move it");
+            return;
+        }
+        actions.add(new BottomSheetAction<>(
+                NEW_COLLECTION_ICON,
+                "New collection\u2026",
+                ignored -> promptForNewCollection(context, (slug, name) -> {
+                    // The collection now exists on the backend; moving into it is the
+                    // same request the rows above make, with the slug just created.
+                    move(context, tweetId,
+                            new BookmarkerApi.Collection(slug, name, "", 0, 0));
+                })));
+        actions.add(closeAction());
+
+        BottomSheetHelper.show(context, tweetId, "Move to", actions, null);
+    }
+
+    /** The row that only closes the sheet; every sheet gets one. */
+    private static <T> BottomSheetAction<T> closeAction() {
+        // Piko's helper dismisses on any tap and runs the callback after, so a row
+        // that does nothing *is* a close button — and it is the only way out that
+        // does not require the drag gesture to be fast enough to register as a fling.
+        return new BottomSheetAction<>(CLOSE_ICON, "Close", ignored -> {});
+    }
+
+    /** Runs the callback on the main thread with a usable list of collections. */
+    private static void withCollections(Context context, CollectionsCallback onReady) {
+        List<BookmarkerApi.Collection> cached = BookmarkerCache.collectionsOrNull();
+        if (cached != null) {
+            onReady.onCollections(cached);
+            return;
+        }
+        if (!BookmarkerPrefs.isConfigured()) {
+            Utils.showToastShort("Twitter Bookmarker: set the backend URL first");
+            BookmarkerSettingsDialog.show(Utils.getContext(), null);
+            return;
+        }
+
+        Utils.runOnBackgroundThread(() -> {
+            try {
+                final List<BookmarkerApi.Collection> fetched = BookmarkerApi.collections(
+                        BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken());
+                Utils.runOnMainThread(() -> onReady.onCollections(fetched));
+            } catch (Exception e) {
+                Logger.printException(() -> "twb: could not list collections", e);
+                Utils.runOnMainThread(() -> Utils.showToastLong(
+                        "Twitter Bookmarker: could not list the collections"));
+            }
+        });
+    }
+
+    /** One move, off the main thread, reported in the backend's own words. */
+    private static void move(Context context, String tweetId, BookmarkerApi.Collection target) {
+        Utils.showToastShort("Twitter Bookmarker: moving to \u201c" + target.name + "\u201d\u2026");
+        Utils.runOnBackgroundThread(() -> {
+            BookmarkerApi.Result result = BookmarkerApi.move(
+                    BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(),
+                    tweetId, target.slug);
+            Utils.runOnMainThread(() -> {
+                if (result.ok) {
+                    // The mark on the tweet's own button reads the collection from
+                    // here, so this is what makes it say the new name immediately.
+                    BookmarkerCache.remember(tweetId, target.slug, target.name);
+                    Utils.showToastShort("Twitter Bookmarker: " + result.message);
+                } else {
+                    Utils.showToastLong("Twitter Bookmarker: " + result.message);
+                }
+            });
+        });
+    }
+
+    /**
+     * Asks before removing, then removes.
+     *
+     * <p>The dialog is the point: the backend's delete is recoverable, but only
+     * through something that can call the restore, and the phone has no such screen
+     * yet. So it says where the bookmark goes rather than pretending nothing is lost.
+     */
+    private static void confirmRemove(Context context, final String tweetId, String where) {
+        if (!BookmarkerPrefs.isConfigured()) {
+            Utils.showToastShort("Twitter Bookmarker: set the backend URL first");
+            BookmarkerSettingsDialog.show(Utils.getContext(), null);
+            return;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle("Remove from Bookmarker?")
+                .setMessage("\u201c" + where + "\u201d will not show it any more. The backend "
+                        + "moves the bookmark to its trash rather than deleting it, so nothing "
+                        + "the archive holds is lost.")
+                .setPositiveButton("Remove", (dialog, which) -> remove(tweetId))
+                .setNegativeButton("Keep", null)
+                .show();
+    }
+
+    private static void remove(String tweetId) {
+        Utils.runOnBackgroundThread(() -> {
+            BookmarkerApi.Result result = BookmarkerApi.remove(
+                    BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(), tweetId);
+            Utils.runOnMainThread(() -> {
+                if (result.ok) {
+                    // Drops the mark on the tweet's button in the same breath, so the
+                    // icon stops claiming the tweet is saved the moment the toast does.
+                    BookmarkerCache.forget(tweetId);
+                    Utils.showToastShort("Twitter Bookmarker: " + result.message);
+                } else {
+                    Utils.showToastLong("Twitter Bookmarker: " + result.message);
+                }
+            });
+        });
+    }
+
+    /** Called on the main thread with the collections to choose from. */
+    private interface CollectionsCallback {
+        void onCollections(List<BookmarkerApi.Collection> collections);
     }
 
     /**

@@ -768,6 +768,14 @@ of turning it into a list of exceptions.
 > a "move to folder" is `PUT …/collection` with `{"slug":"…"}`. Expect both words
 > in the same conversation.
 
+Both routes have three callers now, and none of them is the gallery API: the web
+app's curation menu, the extension's popup, and — since the phone's saved-tweet
+sheet gained a **Change collection…** row and a **Remove from Bookmarker** row —
+the Morphe patch. That is the point of putting them here rather than under
+`/api/gallery/`: the phone moves a bookmark by writing one column and takes one out
+by asking for the soft delete, so neither client needs the archive's read-only
+guarantee to be relaxed for it.
+
 ### `DELETE /v1/bookmarks/{tweet_id}`
 
 ```http

@@ -235,6 +235,45 @@ final class BookmarkerGalleryAdapter {
 
         /** How tall a cell of a two-column media grid is. */
         private static final int GRID_HEIGHT_DP = 150;
+
+        /** Replies, reposts, likes, views — the four numbers X puts under a post. */
+        private static final int STAT_COUNT = 4;
+        private static final int STAT_REPLIES = 0;
+        private static final int STAT_REPOSTS = 1;
+        private static final int STAT_LIKES = 2;
+        private static final int STAT_VIEWS = 3;
+
+        /**
+         * The names each stat's glyph has gone by, tried in order.
+         *
+         * <p>None of these is a contract — X renames its own drawables like it
+         * renames everything else — and unlike the verified badge Piko references
+         * only one of the four ({@code ic_vector_heartline}), so the other three are
+         * guesses with fallbacks. The strip is therefore all four glyphs or none:
+         * one heart beside three bare numbers would read as a different kind of row,
+         * and a drawable that moved must not look like a design decision. The numbers
+         * are the information, and they are drawn either way.
+         */
+        private static final String[][] STAT_ICONS = {
+                {"ic_vector_reply", "ic_vector_reply_stroke", "ic_vector_comment",
+                        "ic_vector_chat_stroke"},
+                {"ic_vector_retweet", "ic_vector_retweet_stroke", "ic_vector_repost"},
+                {"ic_vector_heartline", "ic_vector_heart", "ic_vector_heart_stroke",
+                        "ic_vector_like", "ic_vector_favorite"},
+                {"ic_vector_views", "ic_vector_view", "ic_vector_analytics",
+                        "ic_vector_chart_stroke"},
+        };
+
+        /**
+         * What those names resolved to, once.
+         *
+         * <p>Static rather than per row: the answer is a property of the installed
+         * build, it cannot change while the process lives, and a name lookup is not
+         * free — a row is constructed every time one scrolls into view.
+         */
+        private static final int[] STAT_GLYPHS = resolveStatGlyphs();
+        private static final boolean STAT_GLYPHS_COMPLETE = allResolved(STAT_GLYPHS);
+
         /** Bounds for a lone photo, so neither a panorama nor a sticker looks broken. */
         private static final int SINGLE_MIN_DP = 120;
         private static final int SINGLE_MAX_DP = 320;
@@ -252,7 +291,9 @@ final class BookmarkerGalleryAdapter {
         private final TextView quoteHeaderView;
         private final TextView quoteTextView;
         private final LinearLayout pollBox;
-        private final TextView statsView;
+        private final LinearLayout actionBar;
+        private final ImageView[] statIcons = new ImageView[STAT_COUNT];
+        private final TextView[] statCounts = new TextView[STAT_COUNT];
         private final TextView noteView;
         private final TextView footerView;
 
@@ -277,6 +318,11 @@ final class BookmarkerGalleryAdapter {
 
             avatarView = new ImageView(activity);
             avatarView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            // The circle is the view's background, not the bitmap's job: an avatar
+            // that is still loading, or that the archive never recorded, still
+            // occupies its 40 dp and still looks like a face-sized hole rather than
+            // letting the whole column slide left against the screen edge.
+            avatarView.setBackground(circle(activity.placeholderColor()));
             LayoutParams avatarParams = new LayoutParams(dp(activity, 40), dp(activity, 40));
             avatarParams.setMargins(0, 0, dp(activity, 10), 0);
             avatarView.setLayoutParams(avatarParams);
@@ -347,6 +393,10 @@ final class BookmarkerGalleryAdapter {
                 for (int cell = 0; cell < 2; cell++) {
                     ImageView view = new ImageView(activity);
                     view.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    // Same idea as the avatar: a photo that has not arrived is a grey
+                    // box of exactly the size it will be, so the row does not grow a
+                    // black hole that later turns into a picture.
+                    view.setBackground(rounded(activity.placeholderColor(), dp(activity, 8)));
                     view.setLayoutParams(gridCellParams(activity, row * 2 + cell, false));
                     view.setVisibility(GONE);
                     mediaCells[row * 2 + cell] = view;
@@ -403,12 +453,43 @@ final class BookmarkerGalleryAdapter {
             pollBox.setVisibility(GONE);
             column.addView(pollBox);
 
-            statsView = new TextView(activity);
-            statsView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            statsView.setTextColor(activity.mutedColor());
-            statsView.setPadding(0, dp(activity, 8), 0, 0);
-            statsView.setVisibility(GONE);
-            column.addView(statsView);
+            actionBar = new LinearLayout(activity);
+            actionBar.setOrientation(HORIZONTAL);
+            LayoutParams actionParams = new LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            actionParams.setMargins(0, dp(activity, 8), 0, 0);
+            actionBar.setLayoutParams(actionParams);
+            actionBar.setVisibility(GONE);
+            for (int stat = 0; stat < STAT_COUNT; stat++) {
+                LinearLayout item = new LinearLayout(activity);
+                item.setOrientation(HORIZONTAL);
+                item.setGravity(Gravity.CENTER_VERTICAL);
+                // Equal shares of the width, which is how X spreads them: the four
+                // columns line up from one post to the next down the list.
+                item.setLayoutParams(new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                statIcons[stat] = new ImageView(activity);
+                int size = dp(activity, 16);
+                LayoutParams iconParams = new LayoutParams(size, size);
+                iconParams.setMargins(0, 0, dp(activity, 5), 0);
+                statIcons[stat].setLayoutParams(iconParams);
+                statIcons[stat].setColorFilter(activity.mutedColor());
+                if (STAT_GLYPHS_COMPLETE) {
+                    statIcons[stat].setImageResource(STAT_GLYPHS[stat]);
+                } else {
+                    statIcons[stat].setVisibility(GONE);
+                }
+                item.addView(statIcons[stat]);
+
+                statCounts[stat] = new TextView(activity);
+                statCounts[stat].setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                statCounts[stat].setTextColor(activity.mutedColor());
+                statCounts[stat].setSingleLine(true);
+                item.addView(statCounts[stat]);
+
+                actionBar.addView(item);
+            }
+            column.addView(actionBar);
 
             noteView = new TextView(activity);
             noteView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
@@ -460,12 +541,7 @@ final class BookmarkerGalleryAdapter {
             layoutQuote(live ? fx.quote : null);
             layoutPoll(live && fx != null ? fx.poll : Collections.<FxTweet.PollChoice>emptyList());
 
-            if (live) {
-                statsView.setText(stats(fx));
-                statsView.setVisibility(VISIBLE);
-            } else {
-                statsView.setVisibility(GONE);
-            }
+            layoutActionBar(live ? fx : null);
 
             noteView.setText(note(fx));
             noteView.setVisibility(noteView.getText().length() == 0 ? GONE : VISIBLE);
@@ -481,15 +557,14 @@ final class BookmarkerGalleryAdapter {
 
         private void layoutAvatar(String url) {
             if (url == null || url.isEmpty()) {
-                // No picture to show — which is the normal case for a post drawn from
-                // the archive alone — so the column is dropped rather than left blank.
+                // No picture to show — the normal case for a post drawn from the
+                // archive alone. The view keeps its size and its placeholder circle,
+                // so the text beside it starts where it starts in every other row.
                 avatarTag = "";
                 avatarView.setTag("");
                 avatarView.setImageDrawable(null);
-                avatarView.setVisibility(GONE);
                 return;
             }
-            avatarView.setVisibility(VISIBLE);
             if (url.equals(avatarTag) && avatarView.getDrawable() != null) return;
             avatarTag = url;
             avatarView.setTag(url);
@@ -591,6 +666,86 @@ final class BookmarkerGalleryAdapter {
             return Math.max(dp(activity, 120), screen - dp(activity, 12 + 40 + 10 + 12));
         }
 
+        /**
+         * The four numbers, as icons and figures rather than a sentence.
+         *
+         * <p>When the live post never arrived there are no numbers to show, and the
+         * row does not invent zeroes: the glyphs stay, greyed and without a figure,
+         * which is the shape of X's own action bar and says "the numbers are in the
+         * app" instead of claiming the post has no likes. A row where not one glyph
+         * resolved has nothing to draw at all, and draws nothing.
+         */
+        private void layoutActionBar(FxTweet.Row fx) {
+            int[] counts = new int[STAT_COUNT];
+            boolean[] known = new boolean[STAT_COUNT];
+            if (fx != null) {
+                counts[STAT_REPLIES] = fx.replies;
+                counts[STAT_REPOSTS] = fx.retweets;
+                counts[STAT_LIKES] = fx.likes;
+                counts[STAT_VIEWS] = fx.views;
+                known[STAT_REPLIES] = true;
+                known[STAT_REPOSTS] = true;
+                known[STAT_LIKES] = true;
+                // A negative view count is the API saying it does not have one; the
+                // other three are always numbers, zero included.
+                known[STAT_VIEWS] = fx.views >= 0;
+            }
+
+            boolean anything = false;
+            for (int stat = 0; stat < STAT_COUNT; stat++) {
+                boolean hasGlyph = statIcons[stat].getVisibility() == VISIBLE;
+                boolean hasNumber = known[stat] && counts[stat] > 0;
+                if (hasNumber) {
+                    statCounts[stat].setText(NumberFormat.getIntegerInstance(Locale.getDefault())
+                            .format(counts[stat]));
+                } else {
+                    statCounts[stat].setText("");
+                }
+                statCounts[stat].setVisibility(hasNumber ? VISIBLE : GONE);
+                if (hasGlyph || hasNumber) anything = true;
+            }
+            actionBar.setVisibility(anything ? VISIBLE : GONE);
+        }
+
+        /** Every glyph in a resolved set, so the strip can be all or nothing. */
+        private static boolean allResolved(int[] glyphs) {
+            for (int glyph : glyphs) {
+                if (glyph == 0) return false;
+            }
+            return true;
+        }
+
+        private static int[] resolveStatGlyphs() {
+            int[] glyphs = new int[STAT_COUNT];
+            for (int stat = 0; stat < STAT_COUNT; stat++) glyphs[stat] = statIconId(stat);
+            return glyphs;
+        }
+
+        /** The first drawable name from a stat's list that this build actually has. */
+        private static int statIconId(int stat) {
+            for (String name : STAT_ICONS[stat]) {
+                int id = ResourceUtils.getIdentifier(ResourceType.DRAWABLE, name);
+                if (id != 0) return id;
+            }
+            return 0;
+        }
+
+        /** A filled circle of one colour: the avatar's placeholder. */
+        private static GradientDrawable circle(int color) {
+            GradientDrawable shape = new GradientDrawable();
+            shape.setShape(GradientDrawable.OVAL);
+            shape.setColor(color);
+            return shape;
+        }
+
+        /** A filled rounded rectangle: a media cell's placeholder. */
+        private static GradientDrawable rounded(int color, int radius) {
+            GradientDrawable shape = new GradientDrawable();
+            shape.setCornerRadius(radius);
+            shape.setColor(color);
+            return shape;
+        }
+
         private void layoutQuote(FxTweet.Quote quote) {
             if (quote == null) {
                 quoteBox.setVisibility(GONE);
@@ -690,26 +845,6 @@ final class BookmarkerGalleryAdapter {
             return "";
         }
 
-        /** "12 replies · 3 reposts · 46 likes · 342 views", minus what is unknown. */
-        private static String stats(FxTweet.Row fx) {
-            StringBuilder builder = new StringBuilder();
-            append(builder, fx.replies, "reply", "replies");
-            append(builder, fx.retweets, "repost", "reposts");
-            append(builder, fx.likes, "like", "likes");
-            if (fx.views >= 0) {
-                if (builder.length() > 0) builder.append(" \u00b7 ");
-                builder.append(NumberFormat.getIntegerInstance(Locale.getDefault()).format(fx.views));
-                builder.append(fx.views == 1 ? " view" : " views");
-            }
-            return builder.toString();
-        }
-
-        private static void append(StringBuilder builder, int count, String one, String many) {
-            if (builder.length() > 0) builder.append(" \u00b7 ");
-            builder.append(NumberFormat.getIntegerInstance(Locale.getDefault()).format(count));
-            builder.append(' ').append(count == 1 ? one : many);
-        }
-
         /**
          * When a post was published, the way a timeline says it: minutes and hours
          * for today, a date after that.
@@ -756,6 +891,18 @@ final class BookmarkerGalleryAdapter {
 
         private static final int MAX_BYTES = 2 * 1024 * 1024;
 
+        /**
+         * The images' own threads, four of them.
+         *
+         * <p>Separate from both the live-post fetches and the app's shared background
+         * executor, so a slow host on either side cannot hold up the other: four
+         * downloads at once is what fills a screen of thumbnails while the scroll is
+         * still moving, and a queue that never grows past four is what keeps a long
+         * collection from opening a connection per row.
+         */
+        private static final java.util.concurrent.ExecutorService POOL =
+                BookmarkerThreads.fixedPool("twb-image", 4);
+
         private static final LruCache<String, Bitmap> CACHE = new LruCache<String, Bitmap>(
                 (int) (Runtime.getRuntime().maxMemory() / 1024 / 8)) {
             @Override
@@ -781,7 +928,7 @@ final class BookmarkerGalleryAdapter {
                 return;
             }
 
-            Utils.runOnBackgroundThread(() -> {
+            POOL.execute(() -> {
                 final Bitmap bitmap = download(url, maxWidthPx);
                 if (bitmap == null) return;
                 CACHE.put(key, bitmap);
@@ -807,7 +954,7 @@ final class BookmarkerGalleryAdapter {
                 return;
             }
 
-            Utils.runOnBackgroundThread(() -> {
+            POOL.execute(() -> {
                 Bitmap source = download(url, 128);
                 if (source == null) return;
                 final Bitmap round = circular(source);

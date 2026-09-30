@@ -11,9 +11,12 @@ package app.morphe.extension.twitter.patches.bookmarker;
 import android.app.Activity;
 import android.app.DatePickerDialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -67,8 +70,19 @@ public final class BookmarkerGalleryActivity extends Activity {
     /** How many bookmarks a page asks for. The backend caps this at 100. */
     private static final int PAGE_LIMIT = 30;
 
-    /** X's own handler for an x.com link, which opens the tweet in the app. */
-    private static final String URL_INTERPRETER_ACTIVITY = "com.twitter.android.UrlInterpreterActivity";
+    /**
+     * The names X's link handler has answered to, newest first.
+     *
+     * <p>The first is what the pinned Piko commit names in its own fingerprints and
+     * builds its settings shortcut against, and the second is what older builds
+     * called the same activity. Neither is a contract: X renames its own classes
+     * whenever it likes, which is why this list is only the fast path and
+     * {@link #handlerInApp} exists to ask the app what it registers today.
+     */
+    private static final String[] POST_HANDLER_CANDIDATES = {
+            "com.twitter.deeplink.implementation.UrlInterpreterActivity",
+            "com.twitter.android.UrlInterpreterActivity",
+    };
 
     private static final String ISO_UTC = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
@@ -587,22 +601,96 @@ public final class BookmarkerGalleryActivity extends Activity {
      * Opens a tweet inside X, falling back to whatever handles the URL.
      *
      * <p>X's own URL interpreter is the activity that turns an {@code x.com} link
-     * into the tweet screen, and naming it explicitly keeps the user in the app
-     * instead of handing them to a browser. The name is a literal Piko's own
-     * deep-link patch already relies on, so it is inside the same compatibility
-     * contract — and if it is ever wrong, the exception is caught and
-     * {@link Utils#openLink} does the external thing rather than the tap doing
-     * nothing.
+     * into the tweet screen, and naming it explicitly is what keeps the user in the
+     * app instead of handing them to a browser — a link the launcher resolves
+     * normally would let the user's default browser win.
+     *
+     * <p>Naming it is also how this broke once: the name was a lone literal, wrong
+     * for the installed X build, and every tap quietly ended in a browser. So the
+     * name is now a list of candidates that are checked against the package manager
+     * rather than started blindly, and behind that list is a question to the app
+     * itself ({@link #handlerInApp}), which still answers after a rename. The
+     * external viewer remains the last resort, and says so in the log.
      */
     private void openInApp(String url) {
+        Uri target = Uri.parse(url);
+
+        for (String candidate : POST_HANDLER_CANDIDATES) {
+            Intent intent = viewIntent(target);
+            intent.setClassName(getPackageName(), candidate);
+            // resolveActivity, not a try/catch: a class that does not exist in this
+            // build is an expected answer here, not an exception.
+            if (intent.resolveActivity(getPackageManager()) == null) continue;
+            if (start(intent)) {
+                Logger.printInfo(() -> "twb: opened a post with " + candidate);
+                return;
+            }
+        }
+
+        String handler = handlerInApp(target);
+        if (handler != null) {
+            Intent intent = viewIntent(target);
+            intent.setClassName(getPackageName(), handler);
+            if (start(intent)) {
+                Logger.printInfo(() -> "twb: opened a post with " + handler);
+                return;
+            }
+        }
+
+        Logger.printInfo(() -> "twb: nothing in the app resolved " + url
+                + ", so the system had to; a tap landing in a browser is this line");
+        Utils.openLink(url);
+    }
+
+    /**
+     * Whatever this app registers for one of its own links.
+     *
+     * <p>The package filter is doing two jobs: it keeps the answer inside X, so a
+     * browser can never win, and it sidesteps package visibility, which only ever
+     * restricts looking at other applications.
+     *
+     * <p>The name preference picks out the link interpreter when the app registers
+     * more than one handler. A wrong pick here is still a screen inside X, and the
+     * caller logs which one it was.
+     */
+    private String handlerInApp(Uri target) {
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
-            intent.setClassName(getPackageName(), URL_INTERPRETER_ACTIVITY);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
+            List<ResolveInfo> handlers = getPackageManager().queryIntentActivities(
+                    viewIntent(target).setPackage(getPackageName()), 0);
+            if (handlers == null || handlers.isEmpty()) return null;
+
+            ResolveInfo chosen = handlers.get(0);
+            for (ResolveInfo handler : handlers) {
+                String name = handler.activityInfo == null ? "" : handler.activityInfo.name;
+                if (name != null && name.contains("UrlInterpreter")) {
+                    chosen = handler;
+                    break;
+                }
+            }
+            return chosen.activityInfo == null ? null : chosen.activityInfo.name;
         } catch (Exception e) {
-            Logger.printInfo(() -> "twb: fell back to an external viewer for " + url + ": " + e);
-            Utils.openLink(url);
+            Logger.printInfo(() -> "twb: could not ask the app for a link handler: " + e);
+            return null;
+        }
+    }
+
+    /** The intent both resolution paths start from. */
+    private static Intent viewIntent(Uri target) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, target);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }
+
+    /** True when the tap did something; a wrong guess must not swallow the tap. */
+    private boolean start(Intent intent) {
+        try {
+            startActivity(intent);
+            return true;
+        } catch (Exception e) {
+            Logger.printInfo(() -> "twb: could not open a post with "
+                    + (intent.getComponent() == null ? "?" : intent.getComponent().getClassName())
+                    + ": " + e);
+            return false;
         }
     }
 

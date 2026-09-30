@@ -133,8 +133,9 @@ implies and a second Activity would need a second manifest entry for no gain.
   avatar, the name and handle line with the post's age, the text, up to four media
   items, a quoted post and a poll, then the reply/repost/like/view counts — and,
   in the archive's own voice, the line saying when it was saved. Tapping anywhere in
-  a row opens the tweet in X (`com.twitter.android.UrlInterpreterActivity`, falling
-  back to the system's viewer if that class is ever not the handler).
+  a row opens the tweet in X, by naming the app's own link interpreter (see [the tap
+  target](#the-tap-target-and-why-it-is-not-a-literal)) and falling back to the
+  system's viewer only when nothing inside the app claims the link.
 
 The filter and the sort sit in one row of chips, and both work off the same **date
 basis**, because a bookmark has two dates and mixing them would mean filtering by
@@ -225,6 +226,31 @@ drawer turns one into a tap target — so the attempt would be a guess that can 
 the drawer on a device, and the failure mode is the whole app's navigation. Two
 taps from the save button is the honest alternative until the drawer's model is
 read out of an APK, which is a separate piece of work.
+
+### The tap target, and why it is not a literal
+
+This one broke on a phone before it was written down, so it is worth the paragraph.
+A tap on a post has to end up inside X, and the only way to guarantee that is to name
+the activity: an ordinary `ACTION_VIEW` for an `x.com` link is a link like any other,
+and the user's default browser is entitled to win it. So the row names the app's link
+interpreter — and naming it is exactly what went wrong. The first version named
+`com.twitter.android.UrlInterpreterActivity`, which does not exist in this build;
+`setClassName` threw, the `catch` did its job, and every tap landed in a browser
+without a word about why. The class the pinned Piko commit uses is
+`com.twitter.deeplink.implementation.UrlInterpreterActivity` — it is the value of
+`URL_INTERPRETER_ACTIVITY_CLASS` in Piko's own fingerprints, and Piko's settings
+shortcut launches it with `ACTION_VIEW` and an `https://x.com/i/piko/` URI, which is
+the same shape of start this row needs.
+
+The literal is a fast path now, not the answer. A tap tries the known names against
+`Intent.resolveActivity`, so a name that does not exist in the installed build is a
+null check instead of an exception; behind that it asks the package manager which of
+*this app's* activities claims the link and prefers one named `UrlInterpreter`; and
+only when neither answers does `Utils.openLink` hand the tweet to the system, with a
+log line saying that is what happened. The package filter on the query is doing two
+jobs — a browser can never be the answer, and looking at our own package cannot run
+into Android's package-visibility rules. Every successful tap logs the class it used,
+which is what turns the next report about this into a fact instead of a guess.
 
 ### The button, and why it looks like that
 
@@ -384,7 +410,7 @@ out from the source:
 | What | Why it is a device question | What a failure looks like |
 |---|---|---|
 | The Activity's theme | the manifest entry inherits the app's theme on purpose | a duplicated title bar, or text the theme makes unreadable |
-| `UrlInterpreterActivity` as the card's tap target | the class name is a literal, not a fingerprint | the tap opens the system browser instead of X (the fallback) |
+| The post's tap target across X versions | it is resolved at runtime against the package manager, never measured against a renamed class | the tap opens the system browser; logcat names the candidates that were tried |
 | Thumbnail memory over a long list | `LruCache` at heap/8 with `inSampleSize`, never measured | slow scrolling, or an OOM on a collection of thousands |
 | The date pickers in a dark theme | `DatePickerDialog` is the platform's, not the app's | a light dialog on a dark screen |
 | The chips row on a narrow screen | it scrolls horizontally, but nothing was measured | the last chip is hard to reach |

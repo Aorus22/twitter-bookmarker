@@ -73,6 +73,16 @@ grep -q "$gallery_activity" "$gallery_manifest" ||
 [ -f "$gallery_source" ] || die "the gallery Activity source is missing: $gallery_source"
 grep -q "class BookmarkerGalleryActivity" "$gallery_source" ||
     die "$(basename "$gallery_source") no longer declares BookmarkerGalleryActivity"
+
+# The tap target for a post is a class name from X's own build, and that name was
+# wrong once: every tap fell through to a browser, which only a phone could show.
+# The two needles below keep the fix in place — the name Piko's fingerprints use
+# for the link interpreter, and the package-manager check that keeps the browser
+# from being reached by a name that no longer exists.
+grep -q "com.twitter.deeplink.implementation.UrlInterpreterActivity" "$gallery_source" ||
+    die "$(basename "$gallery_source") no longer lists X's link interpreter"
+grep -q "resolveActivity" "$gallery_source" ||
+    die "$(basename "$gallery_source") no longer checks its intent before starting it"
 unset gallery_activity gallery_manifest gallery_source
 
 if [ -z "${ANDROID_HOME:-}" ] && [ -z "${ANDROID_SDK_ROOT:-}" ]; then

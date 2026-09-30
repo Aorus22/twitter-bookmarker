@@ -1038,8 +1038,13 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
   dropped rather than appended (the list does not jump back).
 - A picked day bounds the range inclusively at both ends, in the **phone's**
   timezone, against whichever date basis is selected.
-- Tapping a row opens the tweet in X; if the Activity name is wrong for this X
-  build, it opens the system browser instead and logs one line.
+- Tapping a row opens the post **in X**, on the tweet screen with its replies.
+  Opening in a browser is a failure, not the expected fallback: the row tries the
+  known names for X's link interpreter, then asks the app which of its own
+  activities claims the link, and only then gives up on the app. `adb logcat | grep
+  "twb:"` says which class it used — `opened a post with
+  com.twitter.deeplink.implementation.UrlInterpreterActivity` is the pass, and
+  `nothing in the app resolved …` is the failure.
 - Rows carry Twitter's own content: an avatar, the name and handle, a relative age
   (`5m`, `3h`, `12 Mar`), the text, and a counts line. A verified account shows a
   badge only if this X build has a drawable named `ic_vector_verified` — the header

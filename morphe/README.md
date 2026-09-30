@@ -154,16 +154,46 @@ implies and a second Activity would need a second manifest entry for no gain.
   and falling back to the system's viewer only when nothing inside the app claims
   the link.
 
-The filter and the sort sit in one row of chips, and both work off the same **date
-basis**, because a bookmark has two dates and mixing them would mean filtering by
-one and ordering by the other:
+### The header, and where the filters went
 
-| Chip | Wire |
+The header is X's: a back arrow on the left, the title, and two actions on the right
+— a filter button and an overflow. The first version of this screen had a row of
+capsule chips under the header for the filters, and it was wrong twice over: X does
+not put its filters in the header of a list, and six chips on a phone scroll
+sideways off the screen. The filters are now one tap below the filter button, in a
+bottom sheet — which is where X puts them too.
+
+The filter button carries the whole state of the screen in its colour: accent when
+the list on screen is not the whole collection in its default order, muted when it
+is. What the sheet says is the same thing in words, one row per option, with the
+active one ticked — and because a row dismisses the sheet when it is tapped, the
+tick is what makes a change visible after the sheet has gone.
+
+Both the sort and the filter work off the same **date basis**, because a bookmark has
+two dates and mixing them would mean filtering by one and ordering by the other:
+
+| Row in the filter sheet | Wire |
 |---|---|
 | **Saved date** / **Posted date** | chooses which pair of bounds and which sort family is used |
-| **Newest** / **Oldest** | `saved_desc` / `saved_asc`, or `tweet_desc` / `tweet_asc` |
-| **Any time**, or a picked range | `saved_from`/`saved_to` or `tweet_from`/`tweet_to`, RFC 3339 |
-| **Clear range** | drops the bounds and refetches |
+| **Newest first** / **Oldest first** | `saved_desc` / `saved_asc`, or `tweet_desc` / `tweet_asc` |
+| **Date range: any time** | no bounds |
+| **Date range: 3 Mar \u2013 9 Mar** | `saved_from`/`saved_to` or `tweet_from`/`tweet_to`, RFC 3339 |
+| **Clear the date range** | only present once a range is set; drops the bounds and refetches |
+
+There is deliberately no **Refresh** button. It existed to refetch the list and to
+clear the live-posts pause, and neither needs chrome: a filter tap and reopening a
+collection already refetch, and the pause is cleared by tapping the line that
+reports it (see below). One fewer button, and no dead end.
+
+The overflow holds what changes the collections rather than the list: **New
+collection…**, which is `POST /v1/collections` with the backend deriving the slug,
+and **Rename this collection…**, which is `PUT /v1/collections/{slug}` with a new
+name. The rename row appears only while the open collection is **empty** — the slug
+is what every bookmark row stores, so the name is a label rather than a key, and an
+empty collection is where a name is still free to be wrong. There is no delete row
+anywhere: the backend has none for a collection, by decision, and the two mutating
+rows this overlay does offer (move and remove, for a *bookmark*) are in the saved
+sheet, not here.
 
 A picked day is converted to an inclusive instant range in the **user's** timezone
 (the backend compares instants), paging is 30 rows at a time through
@@ -246,8 +276,10 @@ whole row is one tap target that opens the post.
 When Twitter is unreachable altogether — three empty answers in a row — the screen
 stops asking for five minutes and says so in one line above the list, because a
 strip with no numbers and a silent log are indistinguishable from a patch that does
-not work. **Refresh** clears the pause and asks again. This is also the honest
-version of an earlier behaviour, where every failure was logged and nothing else.
+not work. Tapping that line clears the pause and asks again, which is why the line
+is clickable rather than the screen growing a Refresh button. This is also the
+honest version of an earlier behaviour, where every failure was logged and nothing
+else.
 
 **On tests.** Piko ships no JVM test infrastructure, so there is no automated test
 for `FxTweet` — it is the only part of the phone patch that could have one, being
@@ -475,7 +507,8 @@ out from the source:
 | The post's tap target across X versions | it is resolved at runtime against the package manager, never measured against a renamed class | the tap opens the system browser; logcat names the candidates that were tried |
 | Thumbnail memory over a long list | `LruCache` at heap/8 with `inSampleSize`, never measured | slow scrolling, or an OOM on a collection of thousands |
 | The date pickers in a dark theme | `DatePickerDialog` is the platform's, not the app's | a light dialog on a dark screen |
-| The chips row on a narrow screen | it scrolls horizontally, but nothing was measured | the last chip is hard to reach |
+| The filter and overflow glyphs | two of the three names are guesses (`ic_vector_arrow_left` is the one Piko references); each falls back to a word, drawn dots or a chip | a word where an icon belongs, or a chip where the arrow belongs |
+| The window's status and navigation bars | set in code from the app's own dark/light choice; the theme is the app's | blue bars on a dark screen, or icons the same colour as the bar |
 | The verified badge's drawable name | `ic_vector_verified` is a name this overlay guessed; Piko never names that glyph | verified accounts show no badge (the header still has the name) |
 | The four stat glyph names | three of the four are guesses, with the all-or-none rule above | a strip of bare numbers instead of icons — the counts are still right |
 | The placeholders before the pictures | whether a recycled row can still show a stale box for a frame is a rendering question | a grey box where a picture should be, or a row that changes height as it loads |

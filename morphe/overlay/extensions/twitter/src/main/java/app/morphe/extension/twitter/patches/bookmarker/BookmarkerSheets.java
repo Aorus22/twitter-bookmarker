@@ -45,7 +45,10 @@ public final class BookmarkerSheets {
     private static final String MOVE_ICON = "ic_vector_layers_stroke";
     private static final String REMOVE_ICON = "ic_vector_trashcan_stroke";
     /** Every sheet ends with this row: see {@link #closeAction}. */
-    private static final String CLOSE_ICON = "ic_vector_close";
+    static final String CLOSE_ICON = "ic_vector_close";
+    /** The gallery's overflow: a collection that does not exist yet, and a rename. */
+    static final String ADD_ICON = NEW_COLLECTION_ICON;
+    static final String RENAME_ICON = "ic_vector_pencil_stroke";
 
     /** Called on the main thread with the chosen collection. */
     public interface PickCallback {
@@ -172,7 +175,7 @@ public final class BookmarkerSheets {
     }
 
     /** The row that only closes the sheet; every sheet gets one. */
-    private static <T> BottomSheetAction<T> closeAction() {
+    static <T> BottomSheetAction<T> closeAction() {
         // Piko's helper dismisses on any tap and runs the callback after, so a row
         // that does nothing *is* a close button — and it is the only way out that
         // does not require the drag gesture to be fast enough to register as a fling.

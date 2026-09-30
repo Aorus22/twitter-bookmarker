@@ -324,6 +324,63 @@ public final class BookmarkerApi {
         }
     }
 
+    /**
+     * Renames a collection: {@code PUT /v1/collections/{slug}} with a new name.
+     *
+     * <p>The body carries one field, and the endpoint takes three — name, colour and
+     * position — which is why they are all pointers on the backend's side: omitting
+     * one leaves it alone, and this call must not touch a colour the user chose
+     * somewhere else. The slug cannot change: it is what every bookmark row in the
+     * collection stores, so a rename that moved it would have to rewrite them all.
+     */
+    public static Collection renameCollection(String baseUrl, String token, String slug, String name)
+            throws IOException {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) throw new IOException("no backend URL set");
+        if (slug == null || slug.isEmpty()) throw new IOException("no collection to rename");
+        if (name == null || name.trim().isEmpty()) throw new IOException("a name is required");
+
+        JSONObject body = new JSONObject();
+        try {
+            body.put("name", name.trim());
+        } catch (Exception e) {
+            throw new IOException("could not build the request: " + e);
+        }
+
+        Response response = request(base, "/v1/collections/" + encode(slug), token,
+                "PUT", body.toString());
+        switch (response.status) {
+            case HttpURLConnection.HTTP_OK:
+                break;
+            case HttpURLConnection.HTTP_CONFLICT:
+                throw new IOException("a collection with that name already exists");
+            case HttpURLConnection.HTTP_UNAUTHORIZED:
+                throw new IOException("the backend rejected the token (401)");
+            case HttpURLConnection.HTTP_NOT_FOUND:
+                throw new IOException("the backend has no such collection");
+            case HttpURLConnection.HTTP_BAD_REQUEST:
+                throw new IOException("the backend refused the name: " + reasonOf(response.body));
+            default:
+                throw new IOException("the backend returned " + response.status);
+        }
+
+        try {
+            JSONObject updated = new JSONObject(response.body).optJSONObject("collection");
+            if (updated == null) throw new IOException("the reply carried no collection");
+            String stored = updated.optString("name", "");
+            return new Collection(
+                    slug,
+                    stored.isEmpty() ? name.trim() : stored,
+                    updated.optString("color", ""),
+                    updated.optInt("order", 0),
+                    updated.optInt("post_count", 0));
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("could not read the renamed collection: " + e);
+        }
+    }
+
     /** One bookmark row as {@code /api/gallery/collections/{slug}/posts} reports it. */
     public static final class Post {
         public final String tweetId;

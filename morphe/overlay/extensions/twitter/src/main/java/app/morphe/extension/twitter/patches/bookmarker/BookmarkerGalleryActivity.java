@@ -23,7 +23,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -37,7 +37,11 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 import app.morphe.extension.shared.Logger;
+import app.morphe.extension.shared.ResourceType;
+import app.morphe.extension.shared.ResourceUtils;
 import app.morphe.extension.shared.Utils;
+import app.morphe.extension.twitter.patches.nativeFeatures.shareMenu.BottomSheetAction;
+import app.morphe.extension.twitter.patches.nativeFeatures.shareMenu.BottomSheetHelper;
 
 /**
  * The phone's own bookmark gallery: the archive as the backend holds it, in two
@@ -86,6 +90,22 @@ public final class BookmarkerGalleryActivity extends Activity {
 
     private static final String ISO_UTC = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
+    /**
+     * Names for the sliders glyph X uses for a filter, tried in order.
+     *
+     * <p>Piko references none of these, so none is a contract; the button falls back
+     * to the word "Filter" if they all miss, and the sheet behind it is the same
+     * either way.
+     */
+    private static final String[] FILTER_ICONS = {
+            "ic_vector_filter", "ic_vector_filter_stroke", "ic_vector_tune",
+            "ic_vector_sliders", "ic_vector_search_filter",
+    };
+
+    /** Row glyphs for the filter sheet: both names are Piko-referenced, so certain. */
+    private static final String OPTION_ICON = "ic_vector_bulleted_list";
+    private static final String RANGE_ICON = "ic_vector_timeline_stroke";
+
     private static final int COLOR_TEXT_LIGHT = 0xFF0F1419;
     private static final int COLOR_TEXT_DARK = 0xFFE7E9EA;
     private static final int COLOR_MUTED_LIGHT = 0xFF536471;
@@ -128,10 +148,10 @@ public final class BookmarkerGalleryActivity extends Activity {
     private static final int ENRICH_FAILURES_BEFORE_PAUSE = 3;
     private static final long ENRICH_PAUSE_MS = 5 * 60 * 1000L;
 
-    /** What the screen says while the fetches are paused. */
+    /** What the screen says while the fetches are paused; the line is also the retry. */
     private static final String ENRICH_PAUSED_MESSAGE =
             "Twitter is not answering, so these rows are the copies saved in the archive. "
-                    + "Tap Refresh to try again.";
+                    + "Tap here to try again.";
 
     /**
      * Tweet ids being fetched right now, and when a failed one was last tried.
@@ -170,14 +190,15 @@ public final class BookmarkerGalleryActivity extends Activity {
     private boolean dark;
 
     private TextView titleView;
-    private TextView backView;
-    private LinearLayout controls;
-    private TextView basisSavedChip;
-    private TextView basisPostedChip;
-    private TextView newestChip;
-    private TextView oldestChip;
-    private TextView rangeChip;
-    private TextView clearRangeChip;
+    /**
+     * The filter button, as one of its two possible renderings.
+     *
+     * <p>An icon if one of the names below resolves, otherwise the word: a header
+     * with a blank square where a filter should be is worse than a word, and the
+     * names are guesses (see {@link #FILTER_ICONS}).
+     */
+    private ImageView filterIcon;
+    private TextView filterLabel;
     private TextView statusView;
     private TextView liveView;
     private ListView listView;
@@ -217,9 +238,20 @@ public final class BookmarkerGalleryActivity extends Activity {
         // themselves instead.
         root.setPadding(0, dp(8), 0, 0);
 
+        // The window's own bars, in the screen's own colour. Without this the
+        // Activity inherits X's theme and paints its status and navigation bars in
+        // the app's blue, which is visible against a dark gallery on every edge of
+        // the screen. The flags are the light/dark *icons* on those bars; an OS that
+        // does not know one of them ignores the bit, so no version check is needed.
+        getWindow().setStatusBarColor(backgroundColor());
+        getWindow().setNavigationBarColor(backgroundColor());
+        // The flags go on the decor view: on any other view they describe that view's
+        // visibility in the window rather than the window's own chrome.
+        getWindow().getDecorView().setSystemUiVisibility(dark
+                ? 0
+                : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+
         root.addView(buildHeader());
-        controls = buildControls();
-        root.addView(controls);
 
         // Above the loading/empty line, because it is about the rows themselves
         // rather than about this screen's own request to the backend.
@@ -228,6 +260,14 @@ public final class BookmarkerGalleryActivity extends Activity {
         liveView.setTextColor(mutedColor());
         liveView.setPadding(dp(12), dp(8), dp(12), dp(8));
         liveView.setVisibility(View.GONE);
+        // The line is a retry as well as an explanation: the pause it describes is
+        // this screen's guess about the network, and the user is the one who knows
+        // whether the network came back.
+        liveView.setClickable(true);
+        liveView.setOnClickListener(v -> {
+            resumeEnriching();
+            if (opened != null) loadPosts(true);
+        });
         root.addView(liveView);
 
         statusView = new TextView(this);
@@ -276,9 +316,7 @@ public final class BookmarkerGalleryActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(12), dp(4), dp(12), dp(8));
 
-        backView = chip("Close");
-        backView.setOnClickListener(v -> onBackPressed());
-        header.addView(backView);
+        header.addView(buildBackButton());
 
         titleView = new TextView(this);
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
@@ -291,80 +329,130 @@ public final class BookmarkerGalleryActivity extends Activity {
         titleView.setLayoutParams(titleParams);
         header.addView(titleView);
 
-        TextView refresh = chip("Refresh");
-        refresh.setOnClickListener(v -> {
-            if (opened == null) {
-                showFolders();
-            } else {
-                // Asking again is the user's answer to "Twitter is not answering", so
-                // the pause is cleared here rather than left to expire on its own.
-                resumeEnriching();
-                loadPosts(true);
-            }
-        });
-        header.addView(refresh);
+        // A filter button and an overflow, which is what X's own headers carry and
+        // what took the place of the chip row: the filters themselves live one tap
+        // below, in a sheet, instead of in a capsule each.
+        header.addView(buildFilterButton());
+        header.addView(buildOverflowButton());
         return header;
     }
 
     /**
-     * The filter and sort row: which date, which direction, and which range.
+     * The back arrow.
      *
-     * <p>One date basis drives both the filter and the sort, which is why there is
-     * one pair of chips rather than two. "Saved" and "Posted" are the two dates a
-     * bookmark has, and mixing them would mean a range on one and an order on the
-     * other — expressible on the wire, meaningless to a reader.
+     * <p>{@code ic_vector_arrow_left} is a name Piko's own patches reference, so the
+     * arrow is what a device with this build sees; the chip is the fallback for a
+     * build where it moved, and keeps the screen navigable with a word instead of an
+     * empty gap.
      */
-    private LinearLayout buildControls() {
-        HorizontalScrollView scroller = new HorizontalScrollView(this);
-        scroller.setHorizontalScrollBarEnabled(false);
+    private View buildBackButton() {
+        int arrow = firstDrawable("ic_vector_arrow_left", "ic_vector_arrow_back", "ic_vector_back");
+        if (arrow == 0) {
+            TextView fallback = chip("Close");
+            fallback.setOnClickListener(v -> onBackPressed());
+            return fallback;
+        }
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, 0, 0, dp(6));
+        ImageView icon = new ImageView(this);
+        int size = dp(20);
+        icon.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        icon.setImageResource(arrow);
+        icon.setColorFilter(textColor());
+        icon.setContentDescription("Back");
+        return touchTarget(icon);
+    }
 
-        basisSavedChip = chip("Saved date");
-        basisPostedChip = chip("Posted date");
-        newestChip = chip("Newest");
-        oldestChip = chip("Oldest");
-        rangeChip = chip("Any time");
-        clearRangeChip = chip("Clear range");
+    /**
+     * The filter button.
+     *
+     * <p>Its colour is its state: accent when a filter that changes the list is on,
+     * muted when the list is unfiltered. The old chips said the same thing by being
+     * filled, and this is the one piece of that information worth keeping visible.
+     */
+    private View buildFilterButton() {
+        int glyph = firstDrawable(FILTER_ICONS);
+        if (glyph != 0) {
+            filterIcon = new ImageView(this);
+            int size = dp(20);
+            filterIcon.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+            filterIcon.setImageResource(glyph);
+            filterIcon.setContentDescription("Filter");
+            View view = touchTarget(filterIcon);
+            view.setOnClickListener(v -> showFilterSheet());
+            return view;
+        }
 
-        basisSavedChip.setOnClickListener(v -> {
-            basisPosted = false;
-            loadPosts(true);
-        });
-        basisPostedChip.setOnClickListener(v -> {
-            basisPosted = true;
-            loadPosts(true);
-        });
-        newestChip.setOnClickListener(v -> {
-            oldestFirst = false;
-            loadPosts(true);
-        });
-        oldestChip.setOnClickListener(v -> {
-            oldestFirst = true;
-            loadPosts(true);
-        });
-        rangeChip.setOnClickListener(v -> pickRange());
-        clearRangeChip.setOnClickListener(v -> {
-            anyTime = true;
-            loadPosts(true);
-        });
+        filterLabel = new TextView(this);
+        filterLabel.setText("Filter");
+        filterLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        filterLabel.setPadding(dp(10), dp(6), dp(10), dp(6));
+        View view = touchTarget(filterLabel);
+        view.setOnClickListener(v -> showFilterSheet());
+        return view;
+    }
 
-        row.addView(basisSavedChip);
-        row.addView(basisPostedChip);
-        row.addView(newestChip);
-        row.addView(oldestChip);
-        row.addView(rangeChip);
-        row.addView(clearRangeChip);
+    /**
+     * The overflow, drawn rather than looked up.
+     *
+     * <p>Three dots are three circles: X's own overflow glyph is not a name Piko
+     * references, and a font glyph for "⋮" is missing from some builds, so this is
+     * the one piece of chrome that is cheaper to draw than to find.
+     */
+    private View buildOverflowButton() {
+        final int dotColor = textColor();
+        final float radius = dp(2);
+        View dots = new View(this) {
+            private final android.graphics.Paint paint = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
 
-        LinearLayout holder = new LinearLayout(this);
-        holder.setOrientation(LinearLayout.VERTICAL);
-        holder.setPadding(dp(12), 0, dp(12), 0);
-        holder.addView(scroller);
-        scroller.addView(row);
-        return holder;
+            @Override
+            protected void onDraw(android.graphics.Canvas canvas) {
+                paint.setColor(dotColor);
+                float cx = getWidth() / 2f;
+                float cy = getHeight() / 2f;
+                float gap = radius * 2.6f;
+                canvas.drawCircle(cx, cy - gap, radius, paint);
+                canvas.drawCircle(cx, cy, radius, paint);
+                canvas.drawCircle(cx, cy + gap, radius, paint);
+            }
+        };
+        dots.setContentDescription("More options");
+        View view = touchTarget(dots);
+        view.setOnClickListener(v -> showOverflowSheet());
+        return view;
+    }
+
+    /**
+     * A 44 dp square around whatever is inside it.
+     *
+     * <p>The icons in this header are 20 dp because that is how big X draws them, and
+     * 20 dp is not a tap target. The wrapper is: the icon is centred and the touch
+     * area around it carries the click.
+     */
+    private View touchTarget(View content) {
+        android.widget.FrameLayout wrapper = new android.widget.FrameLayout(this);
+        android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(
+                dp(44), dp(44));
+        wrapper.setLayoutParams(params);
+        android.widget.FrameLayout.LayoutParams inner =
+                new android.widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        inner.gravity = Gravity.CENTER;
+        content.setLayoutParams(inner);
+        content.setClickable(false);
+        wrapper.addView(content);
+        wrapper.setClickable(true);
+        wrapper.setFocusable(true);
+        return wrapper;
+    }
+
+    /** The first of these drawable names this build actually has, or 0. */
+    private static int firstDrawable(String... names) {
+        for (String name : names) {
+            int id = ResourceUtils.getIdentifier(ResourceType.DRAWABLE, name);
+            if (id != 0) return id;
+        }
+        return 0;
     }
 
     /* ---------------------------------------------------------------------- */
@@ -378,10 +466,11 @@ public final class BookmarkerGalleryActivity extends Activity {
         postAdapter.notifyDataSetChanged();
 
         titleView.setText("Twitter Bookmarker");
-        backView.setText("Close");
-        controls.setVisibility(View.GONE);
         listView.setAdapter(folderAdapter);
-        setStatus("Loading folders\u2026");
+        // Deliberately no "Loading folders…": the line sits above the list, so
+        // clearing it moves every row up by its height — under a finger that is
+        // already reaching for a folder. The list is simply empty until it is not.
+        setStatus("");
 
         final int request = ++generation;
         Utils.runOnBackgroundThread(() -> {
@@ -411,12 +500,11 @@ public final class BookmarkerGalleryActivity extends Activity {
         if (collection == null) return;
         opened = collection;
         titleView.setText(collection.name);
-        backView.setText("\u2039 Back");
-        controls.setVisibility(View.VISIBLE);
+
         listView.setAdapter(postAdapter);
-        // Painted before the request, not after: the chips are the screen's only
-        // statement of the current filter, and a slow request should not leave them
-        // describing the previous one.
+        // Painted before the request, not after: the button is the screen's only
+        // statement that a filter is on, and a slow request should not leave it
+        // describing the previous state.
         updateChips();
         loadPosts(true);
     }
@@ -451,7 +539,6 @@ public final class BookmarkerGalleryActivity extends Activity {
             hasMore = true;
             posts.clear();
             postAdapter.notifyDataSetChanged();
-            setStatus("Loading bookmarks\u2026");
             generation++;
         }
 
@@ -786,22 +873,21 @@ public final class BookmarkerGalleryActivity extends Activity {
     /* View plumbing                                                          */
     /* ---------------------------------------------------------------------- */
 
+    /**
+     * Repaints the filter button for the state it now describes.
+     *
+     * <p>Which filters are on is the only thing the old chip row conveyed that has
+     * to survive: the values themselves are read in the sheet, one tap away.
+     */
     private void updateChips() {
-        paintChip(basisSavedChip, !basisPosted);
-        paintChip(basisPostedChip, basisPosted);
-        paintChip(newestChip, !oldestFirst);
-        paintChip(oldestChip, oldestFirst);
-        paintChip(clearRangeChip, !anyTime);
+        int color = filtered() ? COLOR_ACCENT : mutedColor();
+        if (filterIcon != null) filterIcon.setColorFilter(color);
+        if (filterLabel != null) filterLabel.setTextColor(color);
+    }
 
-        if (anyTime) {
-            rangeChip.setText("Any time");
-            paintChip(rangeChip, false);
-        } else {
-            java.text.DateFormat format = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM);
-            rangeChip.setText(format.format(new Date(rangeFromMs)) + " \u2013 " + format.format(new Date(rangeToMs)));
-            paintChip(rangeChip, true);
-        }
-        clearRangeChip.setVisibility(anyTime ? View.GONE : View.VISIBLE);
+    /** True when the list on screen is not the whole collection in its default order. */
+    private boolean filtered() {
+        return basisPosted || oldestFirst || !anyTime;
     }
 
     /** Paint a chip as selected (accent) or not (outline). */
@@ -830,6 +916,182 @@ public final class BookmarkerGalleryActivity extends Activity {
         chip.setLayoutParams(params);
         paintChip(chip, false);
         return chip;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* The filter sheet and the overflow                                        */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Every filter, in one drawer under the header button.
+     *
+     * <p>The rows carry their own state — the active option is the one with the tick
+     * — because a sheet that closes on every tap has to say what it did before it
+     * goes. Each row applies immediately: there is no "Apply" to forget, and the row
+     * the user did not pick is still there when they open it again.
+     *
+     * <p>This sheet is built here rather than in {@link BookmarkerSheets} because the
+     * filter state lives in this Activity and nothing else reads it; the save and
+     * curation sheets are shared, this one has exactly one caller.
+     */
+    private void showFilterSheet() {
+        List<BottomSheetAction<String>> actions = new ArrayList<>();
+
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Saved date", !basisPosted),
+                ignored -> {
+                    basisPosted = false;
+                    loadPosts(true);
+                }));
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Posted date", basisPosted),
+                ignored -> {
+                    basisPosted = true;
+                    loadPosts(true);
+                }));
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Newest first", !oldestFirst),
+                ignored -> {
+                    oldestFirst = false;
+                    loadPosts(true);
+                }));
+        actions.add(new BottomSheetAction<>(
+                OPTION_ICON,
+                tick("Oldest first", oldestFirst),
+                ignored -> {
+                    oldestFirst = true;
+                    loadPosts(true);
+                }));
+
+        // The range row states the range and opens the pickers, so one row covers both
+        // "set one" and "change it"; clearing is its own row, and only exists once
+        // there is something to clear.
+        actions.add(new BottomSheetAction<>(
+                RANGE_ICON,
+                anyTime ? "Date range: any time" : "Date range: " + rangeLabel(),
+                ignored -> pickRange()));
+        if (!anyTime) {
+            actions.add(new BottomSheetAction<>(
+                    BookmarkerSheets.CLOSE_ICON,
+                    "Clear the date range",
+                    ignored -> {
+                        anyTime = true;
+                        loadPosts(true);
+                    }));
+        }
+        actions.add(BookmarkerSheets.closeAction());
+
+        BottomSheetHelper.show(this, "filter", "Filter", actions, null);
+    }
+
+    /** The overflow: what can be done to the collection list itself. */
+    private void showOverflowSheet() {
+        List<BottomSheetAction<String>> actions = new ArrayList<>();
+
+        actions.add(new BottomSheetAction<>(
+                BookmarkerSheets.ADD_ICON,
+                "New collection\u2026",
+                ignored -> BookmarkerSheets.promptForNewCollection(this, (slug, name) -> {
+                    // Nothing to save and nothing to move: the folder list the user is
+                    // looking at is the thing that changed, so it is refetched.
+                    showFolders();
+                })));
+
+        // Renaming is offered only for an empty collection. It is the one case where
+        // the name is not load-bearing: every bookmark row stores the slug, and the
+        // name is what the user typed — which they can still get wrong on a folder
+        // that is about to be filled, hence the limit rather than a prohibition.
+        if (opened != null && emptyCollection()) {
+            actions.add(new BottomSheetAction<>(
+                    BookmarkerSheets.RENAME_ICON,
+                    "Rename this collection\u2026",
+                    ignored -> promptForRename()));
+        }
+
+        actions.add(BookmarkerSheets.closeAction());
+        BottomSheetHelper.show(this, "overflow", "Twitter Bookmarker", actions, null);
+    }
+
+    /**
+     * True when the open collection holds nothing.
+     *
+     * <p>Two answers, either of which is enough: the count the folder list carried,
+     * and the list itself after it has finished loading. The first is a snapshot, the
+     * second is the truth, and an empty collection is the case where both agree.
+     */
+    private boolean emptyCollection() {
+        if (opened == null) return false;
+        if (opened.postCount > 0) return false;
+        // Both halves matter: the count says what the folder list knew, and the loaded
+        // list says what is true now. Renaming is offered only when they agree that
+        // there is nothing in the collection yet.
+        return !loading && posts.isEmpty();
+    }
+
+    /** Asks for the new name, then tells the backend. */
+    private void promptForRename() {
+        final BookmarkerApi.Collection collection = opened;
+        if (collection == null) return;
+
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        input.setSingleLine(true);
+        input.setText(collection.name);
+        input.setSelection(input.getText().length());
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Rename collection")
+                .setView(input)
+                .setPositiveButton("Rename", (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) {
+                        Utils.showToastShort("Twitter Bookmarker: give the collection a name");
+                        return;
+                    }
+                    rename(collection, name);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void rename(final BookmarkerApi.Collection collection, final String name) {
+        Utils.runOnBackgroundThread(() -> {
+            try {
+                final BookmarkerApi.Collection renamed = BookmarkerApi.renameCollection(
+                        BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken(),
+                        collection.slug, name);
+                // The cache first: the picker and the gallery read the name from there,
+                // and a rename the picker has not seen is a save into the old name.
+                BookmarkerCache.updateName(renamed.slug, renamed.name);
+                Utils.runOnMainThread(() -> {
+                    opened = renamed;
+                    titleView.setText(renamed.name);
+                    Utils.showToastShort("Twitter Bookmarker: renamed to \u201c"
+                            + renamed.name + "\u201d");
+                });
+            } catch (Exception e) {
+                Logger.printInfo(() -> "twb: could not rename the collection: " + e);
+                final String reason = e.getMessage() == null
+                        ? "could not rename it" : e.getMessage();
+                Utils.runOnMainThread(() ->
+                        Utils.showToastLong("Twitter Bookmarker: " + reason));
+            }
+        });
+    }
+
+    /** The active option's tick, and the padding that keeps the ticks in line. */
+    private static String tick(String label, boolean active) {
+        return active ? label + "  \u2713" : label;
+    }
+
+    /** A range, worded the way the chip used to word it. */
+    private String rangeLabel() {
+        java.text.DateFormat format =
+                java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM);
+        return format.format(new Date(rangeFromMs)) + " \u2013 " + format.format(new Date(rangeToMs));
     }
 
     private void setStatus(String message) {

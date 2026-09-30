@@ -1018,8 +1018,10 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
 2. Note the folder list: does it match the popup's order and colours? Is there an
    X title bar above our own header?
 3. Open a collection with at least 40 bookmarks. Scroll to the bottom.
-4. Change **Posted date** / **Newest** / **Oldest**, then pick a **range** with
-   both date pickers, then **Clear range**.
+4. Tap the **filter** button in the header, then **Posted date**, then
+   **Oldest first**, then the **Date range** row and pick both dates, then
+   **Clear the date range**. Reopen the sheet after each tap: is the tick on the
+   option that is now in force?
 5. While a page is loading, tap another sort immediately.
 6. Tap a row.
 7. Watch the rows fill in: the avatar appears, and for a post saved without media
@@ -1033,8 +1035,11 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
     cell a grey box, with the text starting at the same x on every row?
 11. Compare the strip under a post that has counts with X's own: replies, reposts,
     likes and views, glyph and figure, spread across the width.
-12. Tap **Refresh** while the "Twitter is not answering" line is showing (step 8's
-    offline case is the reliable way to get it there).
+12. Tap the "Twitter is not answering" line itself while it is showing (step 8's
+    offline case is the reliable way to get it there), and — with an empty
+    collection open — open the **overflow** (the three dots): is **Rename this
+    collection…** there? Then open the same overflow from the **folder list**: is it
+    gone?
 
 **Expected**
 - The folder order is the backend's, and each row's bar is that collection's
@@ -1043,6 +1048,19 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
   exists; the list never shows two pages twice.
 - The sort the user picked last wins: a page that arrives after the change is
   dropped rather than appended (the list does not jump back).
+- The header is the app's, not ours: a **back arrow** (not a chip) on the left, the
+  title, a **filter** button and the **overflow** on the right, and no **Refresh**
+  anywhere. The filter button is accent-coloured exactly while a filter or a
+  non-default sort is in force, and muted otherwise.
+- The filters live in the bottom sheet the filter button opens — not in a row of
+  capsules under the header — and every option is present there: both date bases,
+  both directions, and the date range with its pickers.
+- No **Loading…** text ever appears above the list: the folders and the rows simply
+  appear. Nothing above the list changes height while the user is looking at it, so
+  a finger already moving towards a folder lands on the folder it aimed at.
+- The status bar and the navigation bar are the screen's own colour (black in
+  **Lights out**, white in light mode) with icons that are readable on it — not the
+  app's blue.
 - A picked day bounds the range inclusively at both ends, in the **phone's**
   timezone, against whichever date basis is selected.
 - Tapping a row opens the post **in X**, on the tweet screen with its replies.
@@ -1068,8 +1086,8 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
   numbers are the strip.)
 - With **no route to Twitter at all**, after roughly three rows the screen says
   `Twitter is not answering, so these rows are the copies saved in the archive.` and
-  stops requesting — the line is a deliberate state, not an error, and **Refresh**
-  clears it and tries again.
+  stops requesting — the line is a deliberate state, not an error, and **tapping the
+  line** clears it and tries again.
 - Images and live posts load in parallel rather than in a queue: the avatars and
   media of the visible rows arrive while later rows are still being asked about.
 - A post with four photos renders as a 2×2 grid, one with three as two and then a

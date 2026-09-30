@@ -185,6 +185,29 @@ public final class BookmarkerCache {
     }
 
 
+    /**
+     * Takes a collection's new name, after the backend accepted a rename.
+     *
+     * <p>Replaces the entry rather than adding one: the picker and the gallery both
+     * read the name from here, and a second entry with the same slug would leave the
+     * old name reachable depending on which one a caller found first.
+     */
+    public static void updateName(String slug, String name) {
+        if (slug == null || slug.isEmpty() || name == null || name.isEmpty()) return;
+        synchronized (LOCK) {
+            for (int i = 0; i < COLLECTIONS.size(); i++) {
+                BookmarkerApi.Collection existing = COLLECTIONS.get(i);
+                if (!existing.slug.equals(slug)) continue;
+                COLLECTIONS.set(i, new BookmarkerApi.Collection(
+                        slug, name, existing.color, existing.order, existing.postCount));
+                BookmarkerPrefs.saveCachedCollections(
+                        collectionsToJson(COLLECTIONS), BookmarkerPrefs.backendUrl());
+                break;
+            }
+        }
+        notifyListeners();
+    }
+
     /** Register a listener; it runs on the main thread and may be called often. */
     public static void addListener(Runnable listener) {
         synchronized (LISTENERS) {

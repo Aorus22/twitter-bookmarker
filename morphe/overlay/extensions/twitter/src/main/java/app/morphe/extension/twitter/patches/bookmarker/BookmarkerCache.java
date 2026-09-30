@@ -120,33 +120,54 @@ public final class BookmarkerCache {
      * Records a save made from this phone: the mark appears as soon as the toast
      * does, with no refetch, and a collection the user just created is usable for
      * the next tap too.
+     *
+     * <p>A collection the response names but the cache has never seen is added with
+     * the shared default colour and the last position: a save never chooses a
+     * colour, and the backend appends a new collection, so the cached copy says what
+     * the server would have said.
      */
     public static void remember(String tweetId, String slug, String name) {
         if (tweetId == null || tweetId.isEmpty() || slug == null || slug.isEmpty()) return;
 
         synchronized (LOCK) {
             SAVED.put(tweetId, slug);
-            if (!name.isEmpty()) {
-                boolean known = false;
-                for (BookmarkerApi.Collection collection : COLLECTIONS) {
-                    if (collection.slug.equals(slug)) {
-                        known = true;
-                        break;
-                    }
-                }
-                if (!known) {
-                    // A save is how a collection is created, so the response's slug
-                    // and name are the only place this collection will be announced.
-                    // It belongs to the backend the save went to, which is the one in
-                    // the preferences at this moment.
-                    COLLECTIONS.add(new BookmarkerApi.Collection(slug, name, 0));
-                    BookmarkerPrefs.saveCachedCollections(
-                            collectionsToJson(COLLECTIONS), BookmarkerPrefs.backendUrl());
-                }
+            if (!name.isEmpty() && !hasCollection(slug)) {
+                add(new BookmarkerApi.Collection(slug, name, "", COLLECTIONS.size(), 0));
             }
         }
         notifyListeners();
     }
+
+    /**
+     * Records a collection the backend just created, verbatim.
+     *
+     * <p>{@code POST /v1/collections} answers with the slug it derived, the colour
+     * it stored and the position it assigned, so unlike a save this needs no
+     * defaults filled in — the answer is the list entry.
+     */
+    public static void rememberCollection(BookmarkerApi.Collection collection) {
+        if (collection == null || collection.slug.isEmpty()) return;
+        synchronized (LOCK) {
+            if (!hasCollection(collection.slug)) add(collection);
+        }
+        notifyListeners();
+    }
+
+    /** Caller holds {@link #LOCK}. */
+    private static boolean hasCollection(String slug) {
+        for (BookmarkerApi.Collection collection : COLLECTIONS) {
+            if (collection.slug.equals(slug)) return true;
+        }
+        return false;
+    }
+
+    /** Caller holds {@link #LOCK}: append and persist in one step. */
+    private static void add(BookmarkerApi.Collection collection) {
+        COLLECTIONS.add(collection);
+        BookmarkerPrefs.saveCachedCollections(
+                collectionsToJson(COLLECTIONS), BookmarkerPrefs.backendUrl());
+    }
+
 
     /** Register a listener; it runs on the main thread and may be called often. */
     public static void addListener(Runnable listener) {
@@ -286,6 +307,8 @@ public final class BookmarkerCache {
                 JSONObject item = new JSONObject();
                 item.put("slug", collection.slug);
                 item.put("name", collection.name);
+                item.put("color", collection.color);
+                item.put("order", collection.order);
                 item.put("post_count", collection.postCount);
                 array.put(item);
             }
@@ -314,6 +337,8 @@ public final class BookmarkerCache {
                 out.add(new BookmarkerApi.Collection(
                         slug,
                         name.isEmpty() ? slug : name,
+                        item.optString("color", ""),
+                        item.optInt("order", i),
                         item.optInt("post_count", 0)));
             }
         } catch (Exception e) {

@@ -11,6 +11,7 @@ package app.morphe.extension.twitter.patches.bookmarker;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.text.InputType;
+import android.util.TypedValue;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -20,7 +21,7 @@ import android.widget.TextView;
 import app.morphe.extension.shared.Utils;
 
 /**
- * The backend address and token, edited in place.
+ * The backend address and token, edited in place, plus the way into the gallery.
  *
  * <p>Opened by the first tap (when nothing is configured yet) and by a long
  * press afterwards, so there is no hidden menu to find: a tap that cannot save
@@ -29,8 +30,17 @@ import app.morphe.extension.shared.Utils;
  * <p>"Test connection" is a separate button because the two failures worth
  * telling apart — an address that does not answer and a token that is refused —
  * are invisible from the save flow until a save fails.
+ *
+ * <p>The gallery row is here rather than in X's navigation drawer, which cannot
+ * take an item of ours: Piko's sidebar hook only filters the list of X's own nav
+ * objects, and building one of those reflectively would be a guess about a class
+ * this overlay cannot see. A long press is already the screen's "settings" gesture,
+ * so the archive is one tap from it.
  */
 public final class BookmarkerSettingsDialog {
+
+    /** X's accent blue; the dialog's theme supplies neither a link colour nor a hint. */
+    private static final int COLOR_ACCENT = 0xFF1D9BF0;
 
     private static final String HINT_URL = "http://192.168.1.13:43121 or a tunnel URL";
     private static final String HINT_TOKEN = "leave empty when the backend needs none";
@@ -78,6 +88,17 @@ public final class BookmarkerSettingsDialog {
         tokenInput.setText(BookmarkerPrefs.backendToken());
         layout.addView(tokenInput);
 
+        // A link rather than a field: it is the only row here that does something
+        // instead of holding a value, and X's accent blue reads on both of its
+        // themes. Clickable so a tap anywhere on the line opens the screen.
+        TextView galleryRow = new TextView(context);
+        galleryRow.setText("Open bookmarker gallery \u203a");
+        galleryRow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        galleryRow.setTextColor(COLOR_ACCENT);
+        galleryRow.setClickable(true);
+        galleryRow.setPadding(0, dp(context, 14), 0, dp(context, 4));
+        layout.addView(galleryRow);
+
         AlertDialog dialog = new AlertDialog.Builder(context)
                 .setTitle("Twitter Bookmarker")
                 .setView(layout)
@@ -89,6 +110,11 @@ public final class BookmarkerSettingsDialog {
         // Set after show(), otherwise the buttons close the dialog before the
         // fields have been read and a wrong address would look like a save.
         dialog.setOnShowListener(ignored -> {
+            galleryRow.setOnClickListener(v -> {
+                dialog.dismiss();
+                BookmarkerGalleryActivity.open(context);
+            });
+
             Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             save.setOnClickListener(v -> {
                 BookmarkerPrefs.save(

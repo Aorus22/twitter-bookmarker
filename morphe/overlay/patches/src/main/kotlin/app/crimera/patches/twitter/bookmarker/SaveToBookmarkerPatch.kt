@@ -72,6 +72,10 @@ private object SetTweetFingerprint : Fingerprint(
  * collections in a native sheet, and posts the tweet to the chosen one. The app's
  * own bookmark action is untouched: this never reads or writes the account's real
  * bookmarks.
+ *
+ * It also registers [bookmarkerGalleryResourcePatch], which is the manifest entry
+ * for the gallery screen: the button saves, the screen shows what was saved, and
+ * both belong to the same patch as far as the user is concerned.
  */
 @Suppress("unused")
 val saveToBookmarkerPatch =
@@ -87,8 +91,16 @@ val saveToBookmarkerPatch =
         // how SaveButton turns the raw tweet object into a URL, a handle and a date.
         // The shared extension is what loads our Java code and provides Utils/Logger,
         // so it is named here rather than inherited from whichever patches happen to
-        // be selected alongside this one.
-        dependsOn(saveToBookmarkerResourcePatch, entityGenerator, sharedExtensionPatch)
+        // be selected alongside this one. The gallery's resource patch is a
+        // dependency rather than a patch of its own: the screen is part of this
+        // feature, and making the user tick a second box to get a manifest entry
+        // would be a way for a correct install to have a dead menu item.
+        dependsOn(
+            saveToBookmarkerResourcePatch,
+            bookmarkerGalleryResourcePatch,
+            entityGenerator,
+            sharedExtensionPatch,
+        )
 
         execute {
             // Hand every inflated action bar to the extension class, right before

@@ -1,10 +1,11 @@
 # Twitter Bookmarker — Morphe patch for X
 
 Adds a **Save to Twitter Bookmarker** button to X's tweet action bar, next to the
-native bookmark action. This is the phone-side client of the backend the browser
-extension already talks to: the tweet is read *inside* the app, and the app's own
-bookmark state is never touched, so X's bookmark and a Twitter Bookmarker
-collection stay independent of each other.
+native bookmark action, and a screen that shows the archive it saves into. This is
+the phone-side client of the backend the browser extension already talks to: the
+tweet is read *inside* the app, the collections come from the backend rather than
+from a list of the phone's own, and the app's bookmark state is never touched, so
+X's bookmark and a Twitter Bookmarker collection stay independent of each other.
 
 This directory is an **additive overlay** on [Piko](https://github.com/crimera/piko),
 not a fork. `build.sh` checks out Piko at a pinned commit and copies `overlay/`
@@ -13,11 +14,13 @@ the pin.
 
 ## Status
 
-Phase 3: the button saves into a collection. Tapping it reads the tweet out of
-the action bar, opens the collection picker from cache, and posts the tweet to the
-chosen one; long-pressing it edits the backend address and token. A tweet that is
-already in the archive is marked, and tapping it says which collection holds it.
-The app's own bookmark state is still never read or written.
+Phase 4: the button saves into a collection, and a second screen shows them.
+Tapping the button reads the tweet out of the action bar, opens the collection
+picker from cache, and posts the tweet to the chosen one; **New collection…**
+creates it on the backend and then saves into it; long-pressing the button opens
+the settings dialog, which also opens the gallery. A tweet that is already in the
+archive is marked, and tapping it says which collection holds it. The app's own
+bookmark state is still never read or written.
 
 | Step | State |
 |---|---|
@@ -28,7 +31,14 @@ The app's own bookmark state is still never read or written.
 | `GET /api/gallery/collections` + `POST /v1/bookmarks` + collection sheet | written, not yet run on a device |
 | 48 dp touch target, gap, and its own two glyphs | written, not yet run on a device |
 | Saved state from `GET /v1/index` + the "already saved" sheet | written, not yet run on a device |
-| Move/delete from the phone | not written (Phase 4) |
+| `POST /v1/collections` from the phone, with the backend choosing the slug | written, not yet run on a device |
+| The gallery screen: folders, cards, date filter, four sorts | written, not yet run on a device |
+| Move/delete from the phone | not written (Phase 5) |
+
+Two things on this list are device-only by nature and are called out again where
+they matter: the Activity's **theme** (the manifest entry deliberately does not
+override the app's) and the **gallery's memory behaviour** with a long list of
+media thumbnails.
 
 ## Layout
 
@@ -39,20 +49,22 @@ morphe/
 ├── NOTICE                   Piko's NOTICE, kept per GPLv3 §7(b)
 └── overlay/                 copied verbatim onto the pinned checkout
     ├── patches/src/main/kotlin/app/crimera/patches/twitter/bookmarker/
-    │   ├── SaveToBookmarkerPatch.kt           the bytecode patch
-    │   └── SaveToBookmarkerResourcePatch.kt   ships the button icons
+    │   ├── SaveToBookmarkerPatch.kt             the bytecode patch
+    │   ├── SaveToBookmarkerResourcePatch.kt     ships the button icons
+    │   └── BookmarkerGalleryResourcePatch.kt    adds the gallery <activity>
     ├── patches/src/main/resources/twitter/bookmarker/drawable/
     │   ├── ic_twb_bookmark.xml                outlined bookmark + plus (not saved)
     │   └── ic_twb_bookmark_saved.xml          filled bookmark + tick (saved)
     └── extensions/twitter/src/main/java/app/morphe/extension/twitter/patches/bookmarker/
         ├── SaveButton.java                    the action-bar button and the tap flow
         ├── BookmarkerCache.java               collections + saved index, in memory
-        ├── BookmarkerSheets.java              the collection picker and the saved notice
-        ├── BookmarkerSettingsDialog.java      backend URL, token, "Test"
+        ├── BookmarkerSheets.java              the picker, "New collection…", the gallery row
+        ├── BookmarkerSettingsDialog.java      backend URL, token, "Test", gallery row
         ├── BookmarkerPrefs.java               those two values, plus the cached collections
-        ├── BookmarkerApi.java                 HTTP only: health, collections, index, save
-        ├── TweetDraft.java                    tweet object -> the backend's fields
-        └── Slug.java                          name -> slug, mirroring the browser extension
+        ├── BookmarkerApi.java                 HTTP only: health, collections, index, save, posts
+        ├── BookmarkerGalleryActivity.java     the gallery screen: folders, then cards
+        ├── BookmarkerGalleryAdapter.java      its two lists and the thumbnail loader
+        └── TweetDraft.java                    tweet object -> the backend's fields
 ```
 
 ## How the hook works
@@ -89,21 +101,80 @@ button, which is the reason this is a small patch rather than research:
    profile name, the `@handle`, the text, the media URLs, and the date — see
    below for where the date comes from.
 3. The collection picker is a native bottom sheet, one row per collection, plus
-   **New collection…** — drawn from `BookmarkerCache`, not from a request, so it
-   appears in the same frame as the tap. The **New collection…** row is not a
-   nicety: collections exist only once something has been saved into them, so
-   without it a phone with an empty database could never save anything. The name
-   is slugged locally (`Slug.java`, mirroring `extension/src/shared/slug.ts`)
-   before it is sent.
+   **New collection…** and **Bookmarker gallery…** — drawn from
+   `BookmarkerCache`, not from a request, so it appears in the same frame as the
+   tap. **New collection…** posts the name to `POST /v1/collections` and saves
+   into the collection the backend answers with; the *backend* derives the slug,
+   because it owns the list and a second derivation here would be free to disagree
+   with the server and with the browser.
 4. The chosen slug goes to `POST /v1/bookmarks`. A `201` toasts the collection and
    marks the tweet, a `409` says where the tweet already lives (the backend names
    the owning collection, which may not be the one just picked), a `401` names the
    token, and an unreachable backend says so and saves nothing.
 
-**Long-press** reopens the settings dialog. **Test** inside it checks `/health`
-for reachability and then `/v1/index` for the token, because those are two
-different failures: a tunnel that is up with a wrong token looks like a working
-setup until a save fails.
+**Long-press** reopens the settings dialog, which also carries an **Open
+bookmarker gallery** row. **Test** inside it checks `/health` for reachability and
+then `/v1/index` for the token, because those are two different failures: a tunnel
+that is up with a wrong token looks like a working setup until a save fails.
+
+### The gallery screen
+
+Three taps from anywhere: long-press the save button, or open the collection
+picker, and choose **Bookmarker gallery…**.
+
+The screen has two levels in one Activity, because that is what a folder list
+implies and a second Activity would need a second manifest entry for no gain.
+
+- **Folders.** `GET /api/gallery/collections`, in the order the backend returns,
+  each row carrying the collection's own colour bar. The colour comes from the
+  stored `color`; an empty one is painted as the shared default `#bf3f2e`. Tapping
+  a row opens it.
+- **Cards.** One collection's bookmarks, as a card each: author and handle, the
+  posted date, the text, the first media thumbnail, and when the archive saved it.
+  Tapping a card opens the tweet in X (`com.twitter.android.UrlInterpreterActivity`,
+  falling back to the system's viewer if that class is ever not the handler).
+
+The filter and the sort sit in one row of chips, and both work off the same **date
+basis**, because a bookmark has two dates and mixing them would mean filtering by
+one and ordering by the other:
+
+| Chip | Wire |
+|---|---|
+| **Saved date** / **Posted date** | chooses which pair of bounds and which sort family is used |
+| **Newest** / **Oldest** | `saved_desc` / `saved_asc`, or `tweet_desc` / `tweet_asc` |
+| **Any time**, or a picked range | `saved_from`/`saved_to` or `tweet_from`/`tweet_to`, RFC 3339 |
+| **Clear range** | drops the bounds and refetches |
+
+A picked day is converted to an inclusive instant range in the **user's** timezone
+(the backend compares instants), paging is 30 rows at a time through
+`next_cursor`, and the list fetches the next page two rows before the end.
+
+Every load carries a generation number. If the user changes the sort while a page
+is in flight, the answer that arrives afterwards is dropped rather than appended
+to a list it no longer describes — and the same guard covers the folders screen.
+
+**Why an Activity of our own, and not a sheet:** the share sheet's rows are one
+line each, and a bookmark card is not. **Why no layout XML:** the overlay is
+additive and ships no `res/` of its own, so the views are built in code and there
+is no resource id for the patcher to allocate. `BookmarkerGalleryResourcePatch.kt`
+adds exactly one thing to the app: the `<activity>` entry, in `finalize`, the same
+way Piko registers Instagram's settings screen.
+
+### Where the screen is reached from — and where it is not
+
+There are three entry points: the **gallery row** in the settings dialog (reached
+by long-pressing the save button), the **gallery row** in the collection picker,
+and the saved-notice sheet.
+
+It is deliberately **not** in X's navigation drawer. Piko's `Customise.sideBar(List)`
+hook runs on the drawer's own list of nav items and can only *remove* entries: each
+element is one of X's internal nav objects, and the hook compares their
+`toString()` against a list of names. Adding a row means constructing one of those
+objects, and nothing in this overlay can see the class, its fields or how the
+drawer turns one into a tap target — so the attempt would be a guess that can crash
+the drawer on a device, and the failure mode is the whole app's navigation. Two
+taps from the save button is the honest alternative until the drawer's model is
+read out of an APK, which is a separate piece of work.
 
 ### The button, and why it looks like that
 
@@ -245,9 +316,28 @@ Bookmarker** when patching, and install the result:
 4. The saved tweet is now marked (filled bookmark, blue). Tapping a marked tweet
    opens a sheet naming the collection that holds it instead of saving again;
    **long-press** reopens the settings dialog at any time.
+5. To see the archive itself: long-press the button, then tap **Open bookmarker
+   gallery** in the settings dialog — or pick **Bookmarker gallery…** from the
+   collection picker. That screen is [above](#the-gallery-screen).
 
 If the button does not appear, the hook did not land — check Morphe's patch log
-for the patch name rather than guessing from the UI.
+for the patch name rather than guessing from the UI. If the gallery opens with a
+title bar of X's own above our header, the app theme supplies one; the manifest
+entry deliberately does not pin a theme (see `BookmarkerGalleryResourcePatch.kt`),
+and the fix is one attribute once a device confirms which way it goes.
+
+## Device checks this patch still needs
+
+Everything below is unverifiable without a phone, and none of it can be reasoned
+out from the source:
+
+| What | Why it is a device question | What a failure looks like |
+|---|---|---|
+| The Activity's theme | the manifest entry inherits the app's theme on purpose | a duplicated title bar, or text the theme makes unreadable |
+| `UrlInterpreterActivity` as the card's tap target | the class name is a literal, not a fingerprint | the tap opens the system browser instead of X (the fallback) |
+| Thumbnail memory over a long list | `LruCache` at heap/8 with `inSampleSize`, never measured | slow scrolling, or an OOM on a collection of thousands |
+| The date pickers in a dark theme | `DatePickerDialog` is the platform's, not the app's | a light dialog on a dark screen |
+| The chips row on a narrow screen | it scrolls horizontally, but nothing was measured | the last chip is hard to reach |
 
 ### Without Manager
 

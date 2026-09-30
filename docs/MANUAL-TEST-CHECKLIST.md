@@ -1036,10 +1036,11 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
 11. Compare the strip under a post that has counts with X's own: replies, reposts,
     likes and views, glyph and figure, spread across the width.
 12. Tap the "Twitter is not answering" line itself while it is showing (step 8's
-    offline case is the reliable way to get it there), and — with an empty
-    collection open — open the **overflow** (the three dots): is **Rename this
-    collection…** there? Then open the same overflow from the **folder list**: is it
-    gone?
+    offline case is the reliable way to get it there). Then, from the **folder list**
+    (the overflow is only there), open the three dots: is **Rename a collection…**
+    absent while every folder has posts, and present — listing only the empty ones —
+    after creating a new collection? Is the **filter** button gone from this screen,
+    and the **overflow** gone once a collection is open?
 
 **Expected**
 - The folder order is the backend's, and each row's bar is that collection's
@@ -1049,12 +1050,26 @@ sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN c
 - The sort the user picked last wins: a page that arrives after the change is
   dropped rather than appended (the list does not jump back).
 - The header is the app's, not ours: a **back arrow** (not a chip) on the left, the
-  title, a **filter** button and the **overflow** on the right, and no **Refresh**
-  anywhere. The filter button is accent-coloured exactly while a filter or a
-  non-default sort is in force, and muted otherwise.
+  title, and **one** action on the right — the **overflow** on the folder list, the
+  **filter** inside a collection. Both are drawn glyphs, not words, and there is no
+  **Refresh** anywhere. The filter button is accent-coloured exactly while a filter
+  or a non-default sort is in force, and muted otherwise.
 - The filters live in the bottom sheet the filter button opens — not in a row of
   capsules under the header — and every option is present there: both date bases,
   both directions, and the date range with its pickers.
+- Every row shows four icons under the post (**reply, repost, heart, chart**), drawn
+  by the overlay, whether or not the live post arrived — and the numbers only appear
+  when it did. The filter button's sliders are the same kind of drawn glyph.
+- A row whose live post has not arrived shows **grey skeleton bars** — one where the
+  name goes, two where the text goes — and never the archive's saved name, handle,
+  date or text. Nothing in the row changes height when the answer lands, and no row
+  ever shows our stored copy of the tweet.
+- Rows ahead of the scroll are already loaded: scroll a collection slowly and the next
+  screenful should arrive with its pictures and numbers in place rather than filling
+  in behind the scroll. The next page is fetched eight rows before the end of the
+  current one.
+- Profile pictures are **circles**, including the ones that load late, and handles
+  read as `@name` with one `@` — the stored value sometimes carries its own.
 - No **Loading…** text ever appears above the list: the folders and the rows simply
   appear. Nothing above the list changes height while the user is looking at it, so
   a finger already moving towards a folder lands on the folder it aimed at.

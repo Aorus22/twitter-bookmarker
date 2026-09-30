@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import app.morphe.extension.shared.Logger;
+import app.morphe.extension.shared.ResourceType;
+import app.morphe.extension.shared.ResourceUtils;
 import app.morphe.extension.shared.Utils;
 import app.morphe.extension.twitter.patches.nativeFeatures.shareMenu.BottomSheetAction;
 import app.morphe.extension.twitter.patches.nativeFeatures.shareMenu.BottomSheetHelper;
@@ -41,9 +43,21 @@ public final class BookmarkerSheets {
     /** X drawables that Piko's own sheets already use, so they are present. */
     private static final String COLLECTION_ICON = "ic_vector_book_stroke_on";
     private static final String NEW_COLLECTION_ICON = "ic_vector_compose_dm";
-    private static final String GALLERY_ICON = "ic_vector_bookmark_stroke_on";
     private static final String MOVE_ICON = "ic_vector_layers_stroke";
     private static final String REMOVE_ICON = "ic_vector_trashcan_stroke";
+
+    /**
+     * The gallery row's glyph, as the first of these names this build actually has.
+     *
+     * <p>{@code ic_vector_bookmark_stroke_on} was the name it used, and on a real
+     * device that row was the one icon-less row in the sheet: the name is not one
+     * Piko references, and a name that misses resolves to nothing rather than to a
+     * near-enough icon. The fallbacks are names Piko does reference, so the chain
+     * ends on one that is present.
+     */
+    static final String[] GALLERY_ICON_CANDIDATES = {
+            "ic_vector_bookmark_stroke_on", "ic_vector_book_stroke_on", "ic_vector_bulleted_list"};
+    private static final String GALLERY_ICON = firstOf(GALLERY_ICON_CANDIDATES);
     /** Every sheet ends with this row: see {@link #closeAction}. */
     static final String CLOSE_ICON = "ic_vector_close";
     /** The gallery's overflow: a collection that does not exist yet, and a rename. */
@@ -56,6 +70,22 @@ public final class BookmarkerSheets {
     }
 
     private BookmarkerSheets() {}
+
+    /**
+     * The first of these drawable names this build has.
+     *
+     * <p>The last name is returned whether or not it exists: a row with a missing icon
+     * is what the caller sees when the lookup fails anyway, and a name is what
+     * {@code BottomSheetAction} takes.
+     */
+    static String firstOf(String... names) {
+        for (int i = 0; i < names.length - 1; i++) {
+            if (ResourceUtils.getIdentifier(ResourceType.DRAWABLE, names[i]) != 0) {
+                return names[i];
+            }
+        }
+        return names[names.length - 1];
+    }
 
     /**
      * @param draft the tweet being saved, bound to every row's callback.

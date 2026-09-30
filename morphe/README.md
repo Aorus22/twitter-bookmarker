@@ -185,19 +185,26 @@ clear the live-posts pause, and neither needs chrome: a filter tap and reopening
 collection already refetch, and the pause is cleared by tapping the line that
 reports it (see below). One fewer button, and no dead end.
 
-The overflow holds what changes the collections rather than the list: **New
-collection…**, which is `POST /v1/collections` with the backend deriving the slug,
-and **Rename this collection…**, which is `PUT /v1/collections/{slug}` with a new
-name. The rename row appears only while the open collection is **empty** — the slug
-is what every bookmark row stores, so the name is a label rather than a key, and an
-empty collection is where a name is still free to be wrong. There is no delete row
-anywhere: the backend has none for a collection, by decision, and the two mutating
+The two actions are not shown together: the **folder list** has the overflow and the
+**collection** has the filter, because that is what each screen has something to do
+with. The overflow's rows are about collections as things (make one, name one), so
+offering it while one is open suggests they act on that one; a filter has nothing to
+filter in a list of folders.
+
+The overflow holds **New collection…**, which is `POST /v1/collections` with the
+backend deriving the slug, and **Rename a collection…**, which is
+`PUT /v1/collections/{slug}` with a new name — a second sheet then lists the folders
+that are **empty**, and only those. The slug is what every bookmark row stores, so a
+name is a label rather than a key; but a folder that already has posts is one the user
+has used, and its name is a decision they have already made. A folder the user has
+just made is exactly the one whose name they may still want to fix. There is no delete
+row anywhere: the backend has none for a collection, by decision, and the two mutating
 rows this overlay does offer (move and remove, for a *bookmark*) are in the saved
 sheet, not here.
 
 A picked day is converted to an inclusive instant range in the **user's** timezone
 (the backend compares instants), paging is 30 rows at a time through
-`next_cursor`, and the list fetches the next page two rows before the end.
+`next_cursor`, and the list fetches the next page eight rows before the end.
 
 Every load carries a generation number. If the user changes the sort while a page
 is in flight, the answer that arrives afterwards is dropped rather than appended
@@ -223,19 +230,49 @@ gone.
 That ordering is deliberate. The id is the only field about a bookmark that cannot
 go stale: an archive's `text`, `media` and `author` columns are what the tweet said
 when it was saved, and the API may also know an avatar, a quoted post, a poll and
-view counts that this database never stored. So the row is painted **first** from
-the archive — the list never waits on a third party — and then upgraded in place
-when the answer lands. Only the rows the user actually scrolls to are fetched, one
-request per post, with results kept in memory and a 60-second backoff after a
-failure, because the API's own documentation asks callers not to flood it and the
-gallery identifies itself with a `User-Agent` saying so.
+view counts that this database never stored.
 
-The archive is still what the row falls back to, and the fallback is a normal state,
-not an error: a private post says so in one muted line, a deleted one says so, and a
-network failure says nothing at all — a message the user cannot act on is not worth
-a line of the screen. Nothing here depends on our stored `media` or `text`, and
-nothing in the sort or the filters changed: which posts are in the list, and in what
-order, is still the backend's answer alone.
+**The row does not draw the archive at all.** It did, briefly, and the effect was
+the opposite of a fast list: the saved name, the saved handle, the saved date and the
+saved text appeared first and every one of them was then replaced by Twitter's answer,
+so each row blinked and the row grew or shrank under the finger that was already
+aiming at it. The archive's copy of a tweet is what the backend is *for* — it is what
+the browser gallery and the search are built on — and it is not what this list shows.
+A row that has no answer yet shows a **skeleton**: a grey bar where the name will be
+and two where the text will be, at the height those lines will have, plus the action
+bar's four glyphs with no figures. It claims nothing, so nothing about it can be
+wrong, and there is nothing to replace when the answer lands except the bars.
+
+The three states are therefore: waiting (skeleton), here (the post), and refused — a
+private post says so in one muted line, a deleted one says so, and a request that
+failed outright says it could not be loaded. A message is never a substitute for the
+post if the post exists.
+
+Nothing in the sort or the filters changed by any of this: which posts are in the
+list, and in what order, is still the backend's answer alone.
+
+### Fetching ahead of the finger
+
+A row used to ask for its live post when it was drawn, which is the worst moment
+there is: the user is looking at that row. Every row scrolled into was a skeleton
+that filled in afterwards.
+
+The list now asks for the rows the user is *about to* reach. Each scroll and each new
+page walks the list from the top to twelve rows past the last visible one and queues
+whatever has not been asked for yet, so an answer is normally on its way before the
+row is on screen. Twelve rather than the whole page because thirty requests at once is
+what gets a client rate-limited, and the rows past that window have their own scroll to
+arrive in. Paging was moved the same way, from two rows before the end to eight, so the
+next page is in the list — and already fetched from Twitter — before the last row of
+this one is reachable.
+
+The queue behind all of this is the same three named threads, and `enrich` drops
+anything already in flight, so prefetching cannot turn one post into two requests.
+
+Both limits are deliberate: results are kept in memory, a failure is not retried
+inside 60 seconds, and three failures in a row pause the fetching for five minutes —
+because the API's own documentation asks callers not to flood it and the gallery
+identifies itself with a `User-Agent` saying so.
 
 ### The boxes that are drawn before the pictures
 
@@ -249,6 +286,13 @@ stored has an avatar URL of `""`, and the first version of this row responded by
 removing the view, which put the text hard against the screen edge on exactly those
 rows and made the list look broken rather than empty.
 
+The avatar is round twice over. `Thumbnails.loadAvatar` draws the downloaded bitmap
+into a circle with a `DST_IN` mask on a software canvas, and the view itself is
+clipped to an oval outline as well — the first version relied on the mask alone and a
+square profile picture is what the phone showed, so the clip is the part that cannot
+fail. The placeholder circle behind it is the same colour either way, which is why an
+avatar that never arrives still looks like a face-sized hole rather than a gap.
+
 The pictures and the live posts are loaded by **separate thread pools** of our own
 (`BookmarkerThreads`), four threads for images and three for the fetches, both
 daemon and both named (`twb-image-*`, `twb-live-*`). This was a bug before it was a
@@ -258,20 +302,28 @@ ahead of the thumbnails on a pool this overlay does not size. A host that answer
 slowly — or not at all — left the screen with its layout drawn and nothing in it,
 which is exactly what a screenshot of the phone showed.
 
-### The counts strip, and what it refuses to claim
+### The glyphs, and why they are drawn
 
-X's own stat glyphs have no names this overlay can rely on. `ic_vector_heartline` is
-the one name Piko references, and the other three are guesses with fallbacks, so the
-rule is **all four or none**: if even one name fails to resolve, no glyph is drawn
-and the strip is four bare numbers. One heart beside three numbers would read as a
-different kind of row, and a missing drawable is not a design.
+The strip under a post needs a reply, a repost, a heart and a chart, and X's names
+for them are not knowable from here. That was learned the hard way: the four were
+looked up by guesswork with fallbacks and an **all four or none** rule to keep a
+half-resolved strip from looking like a design decision — and on the phone the answer
+was none, so a row of bare numbers with no icons at all is what a real device showed.
 
-What the strip will not do is invent a number. A post Twitter has not answered for
-has no counts to show — the archive never stored any — so its strip is the glyphs
-alone with the figures omitted, which is the shape of X's action bar and says "the
-numbers are in the app" rather than claiming a post has no likes. The numbers
-themselves are text: liking or reposting from this screen would be a lie, so the
-whole row is one tap target that opens the post.
+`BookmarkerGlyphs` draws them instead, and the filter button's sliders with them. Each
+glyph is a handful of `Path` and `Canvas` calls in the units of a 24 dp box, scaled to
+whatever bounds it is given, so the same code fills a 17 dp action-bar slot and a
+20 dp header button. A shape drawn here cannot be missing, cannot be renamed by an app
+update, and costs nothing at runtime. The verified badge is still borrowed from the
+app when the name resolves, because a real badge is the one glyph whose *shape* is
+evidence of identity.
+
+What the strip will not do is invent a number. A post Twitter has not answered for has
+no counts to show — the archive never stored any — so its strip is the glyphs alone
+with the figures omitted, which is the shape of X's action bar and says "the numbers
+are in the app" rather than claiming a post has no likes. The numbers themselves are
+text: liking or reposting from this screen would be a lie, so the whole row is one tap
+target that opens the post.
 
 When Twitter is unreachable altogether — three empty answers in a row — the screen
 stops asking for five minutes and says so in one line above the list, because a
@@ -507,10 +559,10 @@ out from the source:
 | The post's tap target across X versions | it is resolved at runtime against the package manager, never measured against a renamed class | the tap opens the system browser; logcat names the candidates that were tried |
 | Thumbnail memory over a long list | `LruCache` at heap/8 with `inSampleSize`, never measured | slow scrolling, or an OOM on a collection of thousands |
 | The date pickers in a dark theme | `DatePickerDialog` is the platform's, not the app's | a light dialog on a dark screen |
-| The filter and overflow glyphs | two of the three names are guesses (`ic_vector_arrow_left` is the one Piko references); each falls back to a word, drawn dots or a chip | a word where an icon belongs, or a chip where the arrow belongs |
+| The back arrow's name | `ic_vector_arrow_left` is the one Piko references; the chip is the fallback | a "Close" chip where the arrow belongs |
 | The window's status and navigation bars | set in code from the app's own dark/light choice; the theme is the app's | blue bars on a dark screen, or icons the same colour as the bar |
 | The verified badge's drawable name | `ic_vector_verified` is a name this overlay guessed; Piko never names that glyph | verified accounts show no badge (the header still has the name) |
-| The four stat glyph names | three of the four are guesses, with the all-or-none rule above | a strip of bare numbers instead of icons — the counts are still right |
+| The hand-drawn glyphs | shapes drawn in code, so the risk is proportion rather than existence | a heart or a chart that reads wrong at 17 dp, or a strip that looks unlike X's |
 | The placeholders before the pictures | whether a recycled row can still show a stale box for a frame is a rendering question | a grey box where a picture should be, or a row that changes height as it loads |
 | The live posts' pause | three empty answers is a judgement about a network this overlay cannot see | the "Twitter is not answering" line appears on a working network, or never appears on a broken one |
 | Moving and removing from the phone | two writes against the backend's curation endpoints, only reachable on a device | a sheet row that toasts an error, or a database row that did not change |

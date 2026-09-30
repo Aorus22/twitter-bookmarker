@@ -243,37 +243,6 @@ final class BookmarkerGalleryAdapter {
         private static final int STAT_LIKES = 2;
         private static final int STAT_VIEWS = 3;
 
-        /**
-         * The names each stat's glyph has gone by, tried in order.
-         *
-         * <p>None of these is a contract — X renames its own drawables like it
-         * renames everything else — and unlike the verified badge Piko references
-         * only one of the four ({@code ic_vector_heartline}), so the other three are
-         * guesses with fallbacks. The strip is therefore all four glyphs or none:
-         * one heart beside three bare numbers would read as a different kind of row,
-         * and a drawable that moved must not look like a design decision. The numbers
-         * are the information, and they are drawn either way.
-         */
-        private static final String[][] STAT_ICONS = {
-                {"ic_vector_reply", "ic_vector_reply_stroke", "ic_vector_comment",
-                        "ic_vector_chat_stroke"},
-                {"ic_vector_retweet", "ic_vector_retweet_stroke", "ic_vector_repost"},
-                {"ic_vector_heartline", "ic_vector_heart", "ic_vector_heart_stroke",
-                        "ic_vector_like", "ic_vector_favorite"},
-                {"ic_vector_views", "ic_vector_view", "ic_vector_analytics",
-                        "ic_vector_chart_stroke"},
-        };
-
-        /**
-         * What those names resolved to, once.
-         *
-         * <p>Static rather than per row: the answer is a property of the installed
-         * build, it cannot change while the process lives, and a name lookup is not
-         * free — a row is constructed every time one scrolls into view.
-         */
-        private static final int[] STAT_GLYPHS = resolveStatGlyphs();
-        private static final boolean STAT_GLYPHS_COMPLETE = allResolved(STAT_GLYPHS);
-
         /** Bounds for a lone photo, so neither a panorama nor a sticker looks broken. */
         private static final int SINGLE_MIN_DP = 120;
         private static final int SINGLE_MAX_DP = 320;
@@ -294,7 +263,18 @@ final class BookmarkerGalleryAdapter {
         private final LinearLayout actionBar;
         private final ImageView[] statIcons = new ImageView[STAT_COUNT];
         private final TextView[] statCounts = new TextView[STAT_COUNT];
-        private final TextView noteView;
+        /**
+         * What stands where the post will be, until Twitter answers.
+         *
+         * <p>A row is drawn before its live post arrives — the list would be empty
+         * otherwise — and what it used to draw in the meantime was the archive's own
+         * copy: our saved text under our saved name and date. Then the answer landed
+         * and every one of those changed at once, which reads as a blink and moves
+         * whatever the finger was aiming at. A skeleton cannot be wrong: it claims
+         * nothing, and it is the height of the line it replaces.
+         */
+        private final View nameSkeleton;
+        private final LinearLayout textSkeleton;
         private final TextView footerView;
 
         /** X's verified glyph, if this build of the app has one under that name. */
@@ -323,6 +303,16 @@ final class BookmarkerGalleryAdapter {
             // occupies its 40 dp and still looks like a face-sized hole rather than
             // letting the whole column slide left against the screen edge.
             avatarView.setBackground(circle(activity.placeholderColor()));
+            // The bitmap is rounded before it gets here, and this rounds it again: a
+            // view clipped to an oval cannot show a square avatar whatever the loader
+            // hands it, which is the complaint this answers.
+            avatarView.setClipToOutline(true);
+            avatarView.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setOval(0, 0, view.getWidth(), view.getHeight());
+                }
+            });
             LayoutParams avatarParams = new LayoutParams(dp(activity, 40), dp(activity, 40));
             avatarParams.setMargins(0, 0, dp(activity, 10), 0);
             avatarView.setLayoutParams(avatarParams);
@@ -339,6 +329,16 @@ final class BookmarkerGalleryAdapter {
             header.setLayoutParams(new LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             column.addView(header);
+
+            // A bar where the name and the handle will be: 13 dp tall and 130 dp wide,
+            // which is what a name line measures in practice.
+            nameSkeleton = new View(activity);
+            LayoutParams nameSkeletonParams = new LayoutParams(dp(activity, 130), dp(activity, 13));
+            nameSkeletonParams.setMargins(0, dp(activity, 2), 0, dp(activity, 2));
+            nameSkeleton.setLayoutParams(nameSkeletonParams);
+            nameSkeleton.setBackground(rounded(activity.placeholderColor(), dp(activity, 6)));
+            nameSkeleton.setVisibility(GONE);
+            header.addView(nameSkeleton);
 
             nameView = new TextView(activity);
             nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
@@ -373,6 +373,19 @@ final class BookmarkerGalleryAdapter {
             textParams.setMargins(0, dp(activity, 3), 0, 0);
             textView.setLayoutParams(textParams);
             column.addView(textView);
+
+            // Two lines of the post that has not arrived: the first the width of the
+            // column, the second shorter, which is what a paragraph looks like.
+            textSkeleton = new LinearLayout(activity);
+            textSkeleton.setOrientation(VERTICAL);
+            LayoutParams skeletonParams = new LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            skeletonParams.setMargins(0, dp(activity, 5), 0, dp(activity, 3));
+            textSkeleton.setLayoutParams(skeletonParams);
+            textSkeleton.setVisibility(GONE);
+            textSkeleton.addView(skeletonBar(activity, 0));
+            textSkeleton.addView(skeletonBar(activity, dp(activity, 90)));
+            column.addView(textSkeleton);
 
             mediaBox = new LinearLayout(activity);
             mediaBox.setOrientation(VERTICAL);
@@ -469,16 +482,15 @@ final class BookmarkerGalleryAdapter {
                 item.setLayoutParams(new LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
                 statIcons[stat] = new ImageView(activity);
-                int size = dp(activity, 16);
+                int size = dp(activity, 17);
                 LayoutParams iconParams = new LayoutParams(size, size);
                 iconParams.setMargins(0, 0, dp(activity, 5), 0);
                 statIcons[stat].setLayoutParams(iconParams);
-                statIcons[stat].setColorFilter(activity.mutedColor());
-                if (STAT_GLYPHS_COMPLETE) {
-                    statIcons[stat].setImageResource(STAT_GLYPHS[stat]);
-                } else {
-                    statIcons[stat].setVisibility(GONE);
-                }
+                // Drawn, not looked up: see BookmarkerGlyphs for why the lookup was
+                // abandoned, and why every row now has its four icons whatever build
+                // of the app it is running in.
+                statIcons[stat].setImageDrawable(
+                        BookmarkerGlyphs.of(stat, activity.mutedColor()));
                 item.addView(statIcons[stat]);
 
                 statCounts[stat] = new TextView(activity);
@@ -491,13 +503,6 @@ final class BookmarkerGalleryAdapter {
             }
             column.addView(actionBar);
 
-            noteView = new TextView(activity);
-            noteView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            noteView.setTextColor(activity.mutedColor());
-            noteView.setPadding(0, dp(activity, 6), 0, 0);
-            noteView.setVisibility(GONE);
-            column.addView(noteView);
-
             footerView = new TextView(activity);
             footerView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             footerView.setTextColor(activity.mutedColor());
@@ -509,21 +514,29 @@ final class BookmarkerGalleryAdapter {
             final BookmarkerGalleryActivity activity = (BookmarkerGalleryActivity) getContext();
             FxTweet.Row fx = post.fxRow;
             boolean live = fx != null && fx.usable();
+            // Nothing of the archive is drawn any more. Either the post arrived and
+            // this is it, or the row says what it is waiting for, or Twitter refused
+            // it and the row says that. The archive's copy of the tweet is what the
+            // backend is for; it is not what this list shows.
+            boolean waiting = fx == null;
 
             nameView.setTextColor(activity.textColor());
-            textView.setTextColor(activity.textColor());
+            textView.setTextColor(live ? activity.textColor() : activity.mutedColor());
             metaView.setTextColor(activity.mutedColor());
             quoteHeaderView.setTextColor(activity.textColor());
             quoteTextView.setTextColor(activity.textColor());
 
-            String name = live && !fx.authorName.isEmpty() ? fx.authorName : post.author;
-            nameView.setText(name.isEmpty() ? "unknown" : name);
+            nameView.setVisibility(live ? VISIBLE : GONE);
+            metaView.setVisibility(live ? VISIBLE : GONE);
+            nameSkeleton.setVisibility(waiting ? VISIBLE : GONE);
 
-            String handle = live && !fx.authorUsername.isEmpty() ? fx.authorUsername : post.username;
-            String when = live && fx.createdAtMs > 0
-                    ? relativeTime(fx.createdAtMs)
-                    : shortDate(post.tweetDate);
-            metaView.setText(meta(handle, when));
+            if (live) {
+                nameView.setText(fx.authorName.isEmpty() ? "unknown" : fx.authorName);
+                metaView.setText(meta(fx.authorUsername, relativeTime(fx.createdAtMs)));
+            } else {
+                nameView.setText("");
+                metaView.setText("");
+            }
 
             // The glyph is a drawable of X's, and its name is not part of any
             // contract: when the lookup finds nothing the row simply has no badge,
@@ -533,26 +546,41 @@ final class BookmarkerGalleryAdapter {
                 verifiedView.setImageResource(verifiedBadgeId);
             }
 
-            String text = live ? fx.text : post.text;
-            textView.setText(text);
-            textView.setVisibility(text == null || text.isEmpty() ? GONE : VISIBLE);
+            // The body is the post or the reason there is not one — never our copy.
+            String body = live ? fx.text : waiting ? "" : note(fx);
+            if (waiting && activity.couldNotLoad(post.tweetId)) {
+                body = "This post could not be loaded.";
+            }
+            textView.setText(body);
+            textView.setVisibility(body.isEmpty() ? GONE : VISIBLE);
+            textSkeleton.setVisibility(body.isEmpty() && waiting ? VISIBLE : GONE);
 
-            layoutMedia(mediaOf(fx, post));
+            layoutMedia(live ? fx.media : Collections.<FxTweet.Media>emptyList());
             layoutQuote(live ? fx.quote : null);
-            layoutPoll(live && fx != null ? fx.poll : Collections.<FxTweet.PollChoice>emptyList());
+            layoutPoll(live ? fx.poll : Collections.<FxTweet.PollChoice>emptyList());
 
             layoutActionBar(live ? fx : null);
-
-            noteView.setText(note(fx));
-            noteView.setVisibility(noteView.getText().length() == 0 ? GONE : VISIBLE);
 
             footerView.setText(post.savedAt.isEmpty() ? "Saved" : "Saved " + shortDate(post.savedAt));
 
             layoutAvatar(live ? fx.avatarUrl : "");
 
-            // The archive's copy is on screen at this point; ask Twitter what the post
-            // says today and rebind once. Nothing else in the row waits on that.
+            // The row still asks for itself, even though the list prefetches ahead of
+            // the scroll: this keeps a rebind from depending on that pass having run,
+            // and enrich() drops anything already in flight.
             activity.enrich(post, onEnriched);
+        }
+
+        /** One bar of the body skeleton; the second line is inset on the right. */
+        private static View skeletonBar(Context context, int rightInset) {
+            View bar = new View(context);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 12));
+            params.setMargins(0, dp(context, 4), rightInset, 0);
+            bar.setLayoutParams(params);
+            bar.setBackground(rounded(
+                    ((BookmarkerGalleryActivity) context).placeholderColor(), dp(context, 6)));
+            return bar;
         }
 
         private void layoutAvatar(String url) {
@@ -672,8 +700,8 @@ final class BookmarkerGalleryAdapter {
          * <p>When the live post never arrived there are no numbers to show, and the
          * row does not invent zeroes: the glyphs stay, greyed and without a figure,
          * which is the shape of X's own action bar and says "the numbers are in the
-         * app" instead of claiming the post has no likes. A row where not one glyph
-         * resolved has nothing to draw at all, and draws nothing.
+         * app" instead of claiming the post has no likes. The glyphs are drawn rather
+         * than resolved, so every row has its four icons.
          */
         private void layoutActionBar(FxTweet.Row fx) {
             int[] counts = new int[STAT_COUNT];
@@ -691,9 +719,7 @@ final class BookmarkerGalleryAdapter {
                 known[STAT_VIEWS] = fx.views >= 0;
             }
 
-            boolean anything = false;
             for (int stat = 0; stat < STAT_COUNT; stat++) {
-                boolean hasGlyph = statIcons[stat].getVisibility() == VISIBLE;
                 boolean hasNumber = known[stat] && counts[stat] > 0;
                 if (hasNumber) {
                     statCounts[stat].setText(NumberFormat.getIntegerInstance(Locale.getDefault())
@@ -702,32 +728,8 @@ final class BookmarkerGalleryAdapter {
                     statCounts[stat].setText("");
                 }
                 statCounts[stat].setVisibility(hasNumber ? VISIBLE : GONE);
-                if (hasGlyph || hasNumber) anything = true;
             }
-            actionBar.setVisibility(anything ? VISIBLE : GONE);
-        }
-
-        /** Every glyph in a resolved set, so the strip can be all or nothing. */
-        private static boolean allResolved(int[] glyphs) {
-            for (int glyph : glyphs) {
-                if (glyph == 0) return false;
-            }
-            return true;
-        }
-
-        private static int[] resolveStatGlyphs() {
-            int[] glyphs = new int[STAT_COUNT];
-            for (int stat = 0; stat < STAT_COUNT; stat++) glyphs[stat] = statIconId(stat);
-            return glyphs;
-        }
-
-        /** The first drawable name from a stat's list that this build actually has. */
-        private static int statIconId(int stat) {
-            for (String name : STAT_ICONS[stat]) {
-                int id = ResourceUtils.getIdentifier(ResourceType.DRAWABLE, name);
-                if (id != 0) return id;
-            }
-            return 0;
+            actionBar.setVisibility(VISIBLE);
         }
 
         /** A filled circle of one colour: the avatar's placeholder. */
@@ -782,20 +784,14 @@ final class BookmarkerGalleryAdapter {
         }
 
         /** The archive's own media, for a post Twitter will not describe. */
-        private static List<FxTweet.Media> mediaOf(FxTweet.Row fx, BookmarkerApi.Post post) {
-            if (fx != null && fx.usable()) return fx.media;
-            if (post.media.isEmpty()) return Collections.emptyList();
-            List<FxTweet.Media> out = new ArrayList<>(post.media.size());
-            for (String url : post.media) {
-                out.add(new FxTweet.Media(url, "", 0, 0, 0, false));
-            }
-            return out;
-        }
-
         /** "{@code @handle · 3h}", or whichever half the post actually has. */
         private static String meta(String username, String when) {
             StringBuilder builder = new StringBuilder();
-            if (username != null && !username.isEmpty()) builder.append('@').append(username);
+            if (username != null && !username.isEmpty()) {
+                // The stored handle sometimes already carries its @, and "@@name" is
+                // what happens when that meets a formatter that adds one.
+                builder.append(username.startsWith("@") ? username : "@" + username);
+            }
             if (when != null && !when.isEmpty()) {
                 if (builder.length() > 0) builder.append(" \u00b7 ");
                 builder.append(when);
@@ -836,12 +832,8 @@ final class BookmarkerGalleryAdapter {
          */
         private static String note(FxTweet.Row fx) {
             if (fx == null) return "";
-            if (fx.isPrivate()) {
-                return "This post is private, so this is the copy saved in the archive.";
-            }
-            if (fx.code == FxTweet.NOT_FOUND) {
-                return "This post is no longer on X, so this is the copy saved in the archive.";
-            }
+            if (fx.isPrivate()) return "This post is private, so there is nothing to show.";
+            if (fx.code == FxTweet.NOT_FOUND) return "This post is no longer on X.";
             return "";
         }
 

@@ -90,18 +90,6 @@ public final class BookmarkerGalleryActivity extends Activity {
 
     private static final String ISO_UTC = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
-    /**
-     * Names for the sliders glyph X uses for a filter, tried in order.
-     *
-     * <p>Piko references none of these, so none is a contract; the button falls back
-     * to the word "Filter" if they all miss, and the sheet behind it is the same
-     * either way.
-     */
-    private static final String[] FILTER_ICONS = {
-            "ic_vector_filter", "ic_vector_filter_stroke", "ic_vector_tune",
-            "ic_vector_sliders", "ic_vector_search_filter",
-    };
-
     /** Row glyphs for the filter sheet: both names are Piko-referenced, so certain. */
     private static final String OPTION_ICON = "ic_vector_bulleted_list";
     private static final String RANGE_ICON = "ic_vector_timeline_stroke";
@@ -190,15 +178,11 @@ public final class BookmarkerGalleryActivity extends Activity {
     private boolean dark;
 
     private TextView titleView;
-    /**
-     * The filter button, as one of its two possible renderings.
-     *
-     * <p>An icon if one of the names below resolves, otherwise the word: a header
-     * with a blank square where a filter should be is worse than a word, and the
-     * names are guesses (see {@link #FILTER_ICONS}).
-     */
+    /** The filter button's icon: see {@link #buildFilterButton()}. */
     private ImageView filterIcon;
-    private TextView filterLabel;
+    /** The wrappers, so a screen can show one action and not the other. */
+    private View filterButton;
+    private View overflowButton;
     private TextView statusView;
     private TextView liveView;
     private ListView listView;
@@ -207,6 +191,8 @@ public final class BookmarkerGalleryActivity extends Activity {
 
     /* Browsing state. `opened == null` means the folder list is showing. */
     private BookmarkerApi.Collection opened;
+    /** The folder list as it was last loaded, for the overflow's rename picker. */
+    private final List<BookmarkerApi.Collection> folders = new ArrayList<>();
     private final List<BookmarkerApi.Post> posts = new ArrayList<>();
     private String cursor = "";
     private boolean hasMore;
@@ -293,10 +279,13 @@ public final class BookmarkerGalleryActivity extends Activity {
             @Override
             public void onScroll(android.widget.AbsListView view, int firstVisible, int visibleCount,
                                  int totalCount) {
-                // One page before the end, so a flick does not outrun the next fetch.
-                if (totalCount > 0 && firstVisible + visibleCount >= totalCount - 2) {
+                // Further from the end than the two rows this used to be, so the next
+                // page is in the list — and, through prefetchAhead(), already fetched
+                // from Twitter — before the user can reach the last row of this one.
+                if (totalCount > 0 && firstVisible + visibleCount >= totalCount - 8) {
                     loadPosts(false);
                 }
+                prefetchAhead(firstVisible, visibleCount);
             }
         });
         root.addView(listView);
@@ -332,9 +321,29 @@ public final class BookmarkerGalleryActivity extends Activity {
         // A filter button and an overflow, which is what X's own headers carry and
         // what took the place of the chip row: the filters themselves live one tap
         // below, in a sheet, instead of in a capsule each.
-        header.addView(buildFilterButton());
-        header.addView(buildOverflowButton());
+        filterButton = buildFilterButton();
+        overflowButton = buildOverflowButton();
+        header.addView(filterButton);
+        header.addView(overflowButton);
         return header;
+    }
+
+    /**
+     * X's own rule, which this screen had wrong: the folder list has an overflow and a
+     * collection has a filter.
+     *
+     * <p>It is not only a matter of taste. The overflow's rows are about the
+     * collections (a new one, a rename), so offering them while a collection is open
+     * suggests they act on it; and a filter has nothing to filter in a list of
+     * folders. One visible action per screen is also what X does with this header.
+     */
+    private void showHeaderActions(boolean inCollection) {
+        if (filterButton != null) {
+            filterButton.setVisibility(inCollection ? View.VISIBLE : View.GONE);
+        }
+        if (overflowButton != null) {
+            overflowButton.setVisibility(inCollection ? View.GONE : View.VISIBLE);
+        }
     }
 
     /**
@@ -368,25 +377,18 @@ public final class BookmarkerGalleryActivity extends Activity {
      * <p>Its colour is its state: accent when a filter that changes the list is on,
      * muted when the list is unfiltered. The old chips said the same thing by being
      * filled, and this is the one piece of that information worth keeping visible.
+     *
+     * <p>The glyph is drawn rather than looked up: the names X uses for it were
+     * guesses, none of them resolved on a real device, and a filter button showing the
+     * word "Filter" was the result.
      */
     private View buildFilterButton() {
-        int glyph = firstDrawable(FILTER_ICONS);
-        if (glyph != 0) {
-            filterIcon = new ImageView(this);
-            int size = dp(20);
-            filterIcon.setLayoutParams(new LinearLayout.LayoutParams(size, size));
-            filterIcon.setImageResource(glyph);
-            filterIcon.setContentDescription("Filter");
-            View view = touchTarget(filterIcon);
-            view.setOnClickListener(v -> showFilterSheet());
-            return view;
-        }
-
-        filterLabel = new TextView(this);
-        filterLabel.setText("Filter");
-        filterLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        filterLabel.setPadding(dp(10), dp(6), dp(10), dp(6));
-        View view = touchTarget(filterLabel);
+        filterIcon = new ImageView(this);
+        int size = dp(20);
+        filterIcon.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        filterIcon.setImageDrawable(BookmarkerGlyphs.of(BookmarkerGlyphs.FILTER, mutedColor()));
+        filterIcon.setContentDescription("Filter");
+        View view = touchTarget(filterIcon);
         view.setOnClickListener(v -> showFilterSheet());
         return view;
     }
@@ -466,6 +468,7 @@ public final class BookmarkerGalleryActivity extends Activity {
         postAdapter.notifyDataSetChanged();
 
         titleView.setText("Twitter Bookmarker");
+        showHeaderActions(false);
         listView.setAdapter(folderAdapter);
         // Deliberately no "Loading folders…": the line sits above the list, so
         // clearing it moves every row up by its height — under a finger that is
@@ -479,6 +482,8 @@ public final class BookmarkerGalleryActivity extends Activity {
                         BookmarkerPrefs.backendUrl(), BookmarkerPrefs.backendToken());
                 Utils.runOnMainThread(() -> {
                     if (request != generation) return;
+                    folders.clear();
+                    folders.addAll(collections);
                     folderAdapter.setItems(collections);
                     setStatus(collections.isEmpty()
                             ? "No folders yet. Save a tweet from its action bar to create one."
@@ -488,6 +493,7 @@ public final class BookmarkerGalleryActivity extends Activity {
                 Logger.printInfo(() -> "twb: could not list the folders: " + e);
                 Utils.runOnMainThread(() -> {
                     if (request != generation) return;
+                    folders.clear();
                     folderAdapter.setItems(new ArrayList<>());
                     setStatus("Could not load the folders: " + reason(e));
                 });
@@ -501,6 +507,7 @@ public final class BookmarkerGalleryActivity extends Activity {
         opened = collection;
         titleView.setText(collection.name);
 
+        showHeaderActions(true);
         listView.setAdapter(postAdapter);
         // Painted before the request, not after: the button is the screen's only
         // statement that a filter is on, and a slow request should not leave it
@@ -562,6 +569,7 @@ public final class BookmarkerGalleryActivity extends Activity {
                     cursor = page.nextCursor;
                     hasMore = page.hasMore;
                     postAdapter.setItems(posts, hasMore);
+                    prefetchAhead(listView.getFirstVisiblePosition(), listView.getChildCount());
                     setStatus(posts.isEmpty() ? emptyMessage() : "");
                     // The pause outlives the screen: reopening the gallery while it is
                     // in force has to say why the rows have no numbers either.
@@ -602,6 +610,43 @@ public final class BookmarkerGalleryActivity extends Activity {
                 basisPosted ? toDate : "",
                 from,
                 PAGE_LIMIT);
+    }
+
+    /** How far ahead of the last visible row the fetches are kept. */
+    private static final int PREFETCH_AHEAD = 12;
+
+    /**
+     * Asks for the rows the user is about to reach, not only the ones on screen.
+     *
+     * <p>A row used to start its own fetch when it was drawn, which is the worst
+     * moment there is: the user is already looking at it, so every row they scroll to
+     * is a skeleton that fills in afterwards. This walks from the top of the list to a
+     * dozen rows past the last visible one, so the answer for a row is usually on its
+     * way before the row is on screen — and the queue behind those is the same three
+     * workers, so nothing is fetched twice and the visible rows are still first.
+     *
+     * <p>A dozen rather than the whole page: thirty requests at once is what gets a
+     * client rate-limited, and the rows after this window have their own scroll to
+     * arrive in.
+     */
+    private void prefetchAhead(int firstVisible, int visibleCount) {
+        int until = Math.min(posts.size(), firstVisible + visibleCount + PREFETCH_AHEAD);
+        for (int index = 0; index < until; index++) {
+            BookmarkerApi.Post post = posts.get(index);
+            if (post.fxRow != null) continue;
+            enrich(post, postAdapter::notifyDataSetChanged);
+        }
+    }
+
+    /**
+     * True when the ask for this post failed outright.
+     *
+     * <p>A post Twitter *refuses* comes back as a row with a code and is drawn as
+     * such; this is the other case, where nothing came back at all. The row says so
+     * rather than waiting behind a skeleton for an answer that is not coming.
+     */
+    boolean couldNotLoad(String tweetId) {
+        return tweetId != null && ENRICH_FAILED_AT.containsKey(tweetId);
     }
 
     private String emptyMessage() {
@@ -734,6 +779,9 @@ public final class BookmarkerGalleryActivity extends Activity {
                     // with a code, and is drawn as the archive copy with a note.
                     ENRICH_FAILED_AT.put(id, System.currentTimeMillis());
                     noteEnrichFailure();
+                    // The row is sitting behind a skeleton; it has to be told that the
+                    // answer is not coming.
+                    postAdapter.notifyDataSetChanged();
                     return;
                 }
                 enrichFailures = 0;
@@ -882,7 +930,6 @@ public final class BookmarkerGalleryActivity extends Activity {
     private void updateChips() {
         int color = filtered() ? COLOR_ACCENT : mutedColor();
         if (filterIcon != null) filterIcon.setColorFilter(color);
-        if (filterLabel != null) filterLabel.setTextColor(color);
     }
 
     /** True when the list on screen is not the whole collection in its default order. */
@@ -987,7 +1034,13 @@ public final class BookmarkerGalleryActivity extends Activity {
         BottomSheetHelper.show(this, "filter", "Filter", actions, null);
     }
 
-    /** The overflow: what can be done to the collection list itself. */
+    /**
+     * The overflow: what can be done to the collections themselves.
+     *
+     * <p>It lives on the folder list, which is the only screen where a collection is a
+     * thing rather than a place, and it holds the two things it can do there — make one
+     * and name one.
+     */
     private void showOverflowSheet() {
         List<BottomSheetAction<String>> actions = new ArrayList<>();
 
@@ -1000,40 +1053,55 @@ public final class BookmarkerGalleryActivity extends Activity {
                     showFolders();
                 })));
 
-        // Renaming is offered only for an empty collection. It is the one case where
-        // the name is not load-bearing: every bookmark row stores the slug, and the
-        // name is what the user typed — which they can still get wrong on a folder
-        // that is about to be filled, hence the limit rather than a prohibition.
-        if (opened != null && emptyCollection()) {
+        // Renaming is offered only for an empty collection, and only those are listed.
+        // The slug is what every bookmark row stores, so a name is a label rather than
+        // a key — but a collection that already has posts is one the user has used, and
+        // its name is a decision they have already made.
+        final List<BookmarkerApi.Collection> empty = emptyCollections();
+        if (!empty.isEmpty()) {
             actions.add(new BottomSheetAction<>(
                     BookmarkerSheets.RENAME_ICON,
-                    "Rename this collection\u2026",
-                    ignored -> promptForRename()));
+                    "Rename a collection\u2026",
+                    ignored -> showRenamePicker(empty)));
         }
 
         actions.add(BookmarkerSheets.closeAction());
         BottomSheetHelper.show(this, "overflow", "Twitter Bookmarker", actions, null);
     }
 
+    /** The folders holding nothing, which are the ones whose name is still free. */
+    private List<BookmarkerApi.Collection> emptyCollections() {
+        List<BookmarkerApi.Collection> out = new ArrayList<>();
+        for (BookmarkerApi.Collection collection : folders) {
+            if (collection.postCount == 0) out.add(collection);
+        }
+        return out;
+    }
+
     /**
-     * True when the open collection holds nothing.
+     * Which of the empty folders to rename.
      *
-     * <p>Two answers, either of which is enough: the count the folder list carried,
-     * and the list itself after it has finished loading. The first is a snapshot, the
-     * second is the truth, and an empty collection is the case where both agree.
+     * <p>A second sheet rather than a row per folder in the overflow: the overflow is
+     * about the list, and this is about one item in it. When a single folder is empty
+     * the sheet has a single row, which is one tap and no ambiguity.
      */
-    private boolean emptyCollection() {
-        if (opened == null) return false;
-        if (opened.postCount > 0) return false;
-        // Both halves matter: the count says what the folder list knew, and the loaded
-        // list says what is true now. Renaming is offered only when they agree that
-        // there is nothing in the collection yet.
-        return !loading && posts.isEmpty();
+    private void showRenamePicker(final List<BookmarkerApi.Collection> empty) {
+        List<BottomSheetAction<BookmarkerApi.Collection>> actions = new ArrayList<>();
+        for (BookmarkerApi.Collection collection : empty) {
+            actions.add(new BottomSheetAction<>(
+                    BookmarkerSheets.RENAME_ICON,
+                    collection.name,
+                    ignored -> promptForRename(collection)));
+        }
+        actions.add(BookmarkerSheets.closeAction());
+        // No item to bind: every row carries its own collection in its callback, so the
+        // sheet has nothing to hand back.
+        BottomSheetHelper.show(this, (BookmarkerApi.Collection) null,
+                "Rename which collection?", actions, null);
     }
 
     /** Asks for the new name, then tells the backend. */
-    private void promptForRename() {
-        final BookmarkerApi.Collection collection = opened;
+    private void promptForRename(final BookmarkerApi.Collection collection) {
         if (collection == null) return;
 
         android.widget.EditText input = new android.widget.EditText(this);
@@ -1067,8 +1135,13 @@ public final class BookmarkerGalleryActivity extends Activity {
                 // and a rename the picker has not seen is a save into the old name.
                 BookmarkerCache.updateName(renamed.slug, renamed.name);
                 Utils.runOnMainThread(() -> {
-                    opened = renamed;
-                    titleView.setText(renamed.name);
+                    if (opened != null && opened.slug.equals(renamed.slug)) {
+                        opened = renamed;
+                        titleView.setText(renamed.name);
+                    }
+                    // The folder list is where the rename happened, so it is the screen
+                    // that has to show it.
+                    showFolders();
                     Utils.showToastShort("Twitter Bookmarker: renamed to \u201c"
                             + renamed.name + "\u201d");
                 });

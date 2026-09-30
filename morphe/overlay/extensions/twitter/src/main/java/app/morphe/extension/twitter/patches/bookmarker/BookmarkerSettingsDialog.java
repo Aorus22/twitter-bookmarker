@@ -12,12 +12,16 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.text.InputType;
 import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import app.morphe.extension.shared.ResourceType;
+import app.morphe.extension.shared.ResourceUtils;
 import app.morphe.extension.shared.Utils;
 
 /**
@@ -90,13 +94,31 @@ public final class BookmarkerSettingsDialog {
 
         // A link rather than a field: it is the only row here that does something
         // instead of holding a value, and X's accent blue reads on both of its
-        // themes. Clickable so a tap anywhere on the line opens the screen.
-        TextView galleryRow = new TextView(context);
-        galleryRow.setText("Open bookmarker gallery \u203a");
-        galleryRow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        galleryRow.setTextColor(COLOR_ACCENT);
+        // themes. Clickable so a tap anywhere on the line opens the screen — and it
+        // carries the gallery's own glyph, because a row that opens a screen should
+        // look like the thing it opens rather than like the two fields above it.
+        LinearLayout galleryRow = new LinearLayout(context);
+        galleryRow.setOrientation(LinearLayout.HORIZONTAL);
+        galleryRow.setGravity(Gravity.CENTER_VERTICAL);
         galleryRow.setClickable(true);
         galleryRow.setPadding(0, dp(context, 14), 0, dp(context, 4));
+
+        int galleryIcon = ResourceUtils.getIdentifier(ResourceType.DRAWABLE,
+                BookmarkerSheets.firstOf(BookmarkerSheets.GALLERY_ICON_CANDIDATES));
+        ImageView galleryGlyph = new ImageView(context);
+        LinearLayout.LayoutParams glyphParams =
+                new LinearLayout.LayoutParams(dp(context, 20), dp(context, 20));
+        glyphParams.setMargins(0, 0, dp(context, 8), 0);
+        galleryGlyph.setLayoutParams(glyphParams);
+        galleryGlyph.setImageResource(galleryIcon);
+        galleryGlyph.setColorFilter(COLOR_ACCENT);
+        galleryRow.addView(galleryGlyph);
+
+        TextView galleryLabel = new TextView(context);
+        galleryLabel.setText("Open bookmarker gallery \u203a");
+        galleryLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        galleryLabel.setTextColor(COLOR_ACCENT);
+        galleryRow.addView(galleryLabel);
         layout.addView(galleryRow);
 
         AlertDialog dialog = new AlertDialog.Builder(context)

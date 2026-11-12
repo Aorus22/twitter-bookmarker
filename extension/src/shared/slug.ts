@@ -1,64 +1,23 @@
 /**
- * Category slug generation (PRD §8) and validation.
+ * Collection slug validation.
  *
- * A slug is a collection's identifier: the extension sends it with every save and
- * the gallery uses it in URLs. It is not a filename, so it carries no extension.
+ * The extension no longer *derives* slugs. The backend owns categories now, so
+ * `POST /v1/collections` takes a name and `storage.Slugify` turns it into the
+ * key; a client that computed its own would be a second implementation of the
+ * same rules and the two would eventually disagree, which is exactly the bug
+ * this change removes.
  *
- * Rules, in order:
- *   NFKD-decompose -> strip combining marks -> lowercase -> trim
- *   -> spaces to "-" -> strip unsafe characters -> collapse "-"
- *   -> trim leading/trailing "-"
- *
- * Examples: `Linux` -> `linux`, `AI & LLM` -> `ai-llm`,
- * `Read Later` -> `read-later`.
- *
- * An empty slug falls back to `category-<short-id>`. The result of
- * {@link slugify} ALWAYS matches {@link SLUG_PATTERN}, which mirrors the
- * backend's own validation (PRD §8, §52).
+ * What remains here is the validator, and it stays for the direction that still
+ * matters: a slug arriving *from* elsewhere — a cache written by an older build,
+ * a hand-edited `chrome.storage.local`, a compromised backend — is checked before
+ * it is used in a request path. {@link SLUG_PATTERN} mirrors the backend's own
+ * `storage.SlugPattern`.
  */
 
-/** Slugs the backend will accept; the extension must only ever produce these. */
+/** Slugs the backend accepts; the extension must only ever send these. */
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
-/** Default prefix for the empty-slug fallback. */
-export const FALLBACK_PREFIX = "category";
-
-/** Characters kept in a slug after whitespace has been converted to "-". */
-const UNSAFE_CHARS = /[^a-z0-9-]/g;
-
-/** Combining marks left behind by NFD decomposition (e.g. "é" -> "e" + U+0301). */
-const COMBINING_MARKS = /[\u0300-\u036f]/g;
-
-/**
- * Deterministic, slug-safe short form of a category id.
- * `crypto.randomUUID()` output sanitizes to its first 8 alphanumerics.
- */
-export function shortId(id: string): string {
-  const cleaned = (id ?? "").toLowerCase().replace(UNSAFE_CHARS, "");
-  return cleaned.slice(0, 8) || "00000000";
-}
-
-/**
- * Convert a human category name into the slug the backend will use.
- *
- * @param name Human-readable category name, e.g. "AI & LLM".
- * @param id   Category id, used only for the empty-slug fallback.
- */
-export function slugify(name: string, id: string): string {
-  const slug = (name ?? "")
-    .normalize("NFKD")
-    .replace(COMBINING_MARKS, "")
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(UNSAFE_CHARS, "")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || `${FALLBACK_PREFIX}-${shortId(id)}`;
-}
-
-/** True when `slug` is safe to send to the backend (defense in depth). */
+/** True when `slug` is safe to use as a collection key in a request path. */
 export function isValidSlug(slug: string): boolean {
   return typeof slug === "string" && SLUG_PATTERN.test(slug);
 }

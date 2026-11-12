@@ -1,28 +1,44 @@
 /**
- * X bookmarks content script — bootstrap (Phase 4 + Phase 5).
+ * X content script — bootstrap (Phase 4 + Phase 5, plus the general-page button).
  *
- * Wires the SPA route watcher to the bookmarks-page lifecycle, supplies the real
- * save controller as `onSelect`, routes extraction failures to a toast, and
- * subscribes to `chrome.storage.onChanged` so visible controls re-render without
- * a reload (PRD §26, §40, §51).
+ * Wires the SPA route watcher to the tweet-page lifecycle, supplies the real save
+ * controller as `onSelect`, routes extraction failures to a toast, and subscribes
+ * to `chrome.storage.onChanged` so visible controls re-render without a reload
+ * (PRD §26, §40, §51).
+ *
+ * The route decides *which* button is injected, not whether the lifecycle runs: on
+ * the bookmarks timeline it is the organizer for a tweet X already holds, and on
+ * every other page it is our own bookmark button — an icon inside X's action bar,
+ * the web counterpart of the phone's action-bar button. The icon's tap opens the
+ * folder modal (or, for a tweet already in the archive, the saved sheet with move
+ * and remove); both surfaces pick from the same backend list and save through the
+ * same controller.
  *
  * `onSaved` is the one place auto-unbookmark lives (PRD §37, §38). It is invoked
  * by the save controller only after a confirmed `201`, gated on
- * `settings.unbookmarkAfterSave`, and never rolls back a confirmed save.
+ * `settings.unbookmarkAfterSave`, and never rolls back a confirmed save. It applies
+ * on both surfaces, which is consistent: `unbookmarkTweet` only clicks a control
+ * that is currently *bookmarked*, so a tweet that was never in X's list is left
+ * alone.
  */
 
+import { refreshCollectionsIfStale } from "../shared/collections-sync.ts";
 import { DEFAULT_SETTINGS } from "../shared/constants.ts";
+import { sendExtensionMessage } from "../shared/messages.ts";
+import type { MoveBookmarkResponse, RemoveBookmarkResponse } from "../shared/messages.ts";
 import { getStore, onStoreChanged } from "../shared/storage.ts";
-import type { Settings, Store } from "../shared/types.ts";
+import type { Category, Settings, Store } from "../shared/types.ts";
 import {
+  markTweetMoved,
+  markTweetUnsaved,
   refreshBookmarksPage,
   refreshSavedIndexIfStale,
   startBookmarksPage,
   stopBookmarksPage,
 } from "./bookmark-page.ts";
-import { createSaveController } from "./save-controller.ts";
+import { BACKEND_UNAVAILABLE_TOAST, createSaveController } from "./save-controller.ts";
 import type { SavedTweetContext } from "./save-controller.ts";
-import { watchRoute } from "./route.ts";
+import { tweetPageMode, watchRouteKey } from "./route.ts";
 import { showToast } from "./toast.ts";
 import type { ToastKind } from "./toast.ts";
 import { EXTRACTION_ERROR } from "./tweet-extractor.ts";
@@ -39,6 +55,18 @@ let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 export function unbookmarkFailedToast(categoryName: string): string {
   return `Saved to ${categoryName}, but failed to remove from X bookmarks`;
 }
+
+/** Success copy for a confirmed move. */
+export function movedToast(categoryName: string): string {
+  return `Moved to ${categoryName}`;
+}
+
+/** Success copy for a confirmed removal (the row is in the backend's trash). */
+export const REMOVED_TOAST = "Removed from Bookmarker";
+/** Error copy for a failed move. */
+export const MOVE_FAILED_TOAST = "Could not move tweet";
+/** Error copy for a failed removal. */
+export const REMOVE_FAILED_TOAST = "Could not remove tweet";
 
 /** Dependencies for {@link createSavedHook}; injected so the gate is unit-testable. */
 export interface SavedHookDeps {
@@ -119,6 +147,61 @@ function reportExtractionError(_article: HTMLElement, reason: string): void {
   showToast("error", EXTRACTION_ERROR);
 }
 
+/**
+ * Confirmed move — invoked by the saved modal after it has closed. The content
+ * side only relays the choice and records it: the slug travels with the saved
+ * mark, so the next open of the sheet names the new collection without a fetch.
+ */
+function onMove(category: Category, context: { tweetId: string }): void {
+  void (async () => {
+    try {
+      const response = await sendExtensionMessage<MoveBookmarkResponse>({
+        type: "MOVE_BOOKMARK",
+        tweetId: context.tweetId,
+        slug: category.slug,
+      });
+      if (response.ok) {
+        markTweetMoved(context.tweetId, category.slug);
+        showToast("success", movedToast(category.name));
+        return;
+      }
+      showToast(
+        "error",
+        response.error === "backend_unavailable" ? BACKEND_UNAVAILABLE_TOAST : MOVE_FAILED_TOAST,
+      );
+    } catch {
+      // A thrown `sendExtensionMessage` means the worker/channel is gone.
+      showToast("error", BACKEND_UNAVAILABLE_TOAST);
+    }
+  })();
+}
+
+/**
+ * Confirmed removal — the tweet drops its saved mark in the same breath, so the
+ * icon returns to the outline the moment the toast does.
+ */
+function onRemove(context: { tweetId: string }): void {
+  void (async () => {
+    try {
+      const response = await sendExtensionMessage<RemoveBookmarkResponse>({
+        type: "REMOVE_BOOKMARK",
+        tweetId: context.tweetId,
+      });
+      if (response.ok) {
+        markTweetUnsaved(context.tweetId);
+        showToast("success", REMOVED_TOAST);
+        return;
+      }
+      showToast(
+        "error",
+        response.error === "backend_unavailable" ? BACKEND_UNAVAILABLE_TOAST : REMOVE_FAILED_TOAST,
+      );
+    } catch {
+      showToast("error", BACKEND_UNAVAILABLE_TOAST);
+    }
+  })();
+}
+
 function bootstrap(): void {
   try {
     const onSelect = createSaveController({
@@ -129,16 +212,26 @@ function bootstrap(): void {
       },
     });
 
-    watchRoute(
-      () => {
-        void startBookmarksPage({ onSelect, onExtractionError: reportExtractionError });
+    watchRouteKey(
+      (pathname) => tweetPageMode(pathname),
+      (mode) => {
+        // The cached list renders immediately; this fills the gap when it is empty
+        // or old, and the refresh arrives back here as a storage change.
+        void refreshCollectionsIfStale();
+        void startBookmarksPage({
+          onSelect,
+          onMove,
+          onRemove,
+          onExtractionError: reportExtractionError,
+          variant: mode === "bookmarks" ? "organize" : "bookmark",
+        });
       },
       () => {
         stopBookmarksPage();
       },
     );
 
-    // Keep the settings seam warm; `refreshBookmarksPage` owns categories.
+    // Keep the settings seam warm; `refreshBookmarksPage` owns the category list.
     void getStore()
       .then((store: Store) => {
         currentSettings = { ...store.settings };

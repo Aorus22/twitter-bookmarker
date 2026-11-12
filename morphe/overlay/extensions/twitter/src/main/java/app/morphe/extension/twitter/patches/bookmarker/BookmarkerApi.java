@@ -56,11 +56,21 @@ public final class BookmarkerApi {
     public static final class Collection {
         public final String slug;
         public final String name;
+        /**
+         * The stored {@code #rrggbb}, or empty for "no colour chosen". The empty
+         * case is a real answer, not a missing one: whoever paints the collection
+         * picks the fallback, so each client shows the same default.
+         */
+        public final String color;
+        /** The backend's position; the list already arrives in this order. */
+        public final int order;
         public final int postCount;
 
-        Collection(String slug, String name, int postCount) {
+        Collection(String slug, String name, String color, int order, int postCount) {
             this.slug = slug;
             this.name = name;
+            this.color = color == null ? "" : color;
+            this.order = order;
             this.postCount = postCount;
         }
 
@@ -68,6 +78,19 @@ public final class BookmarkerApi {
         public String toString() {
             return name + " (" + postCount + ")";
         }
+    }
+
+    /**
+     * The default colour, mirroring the extension's
+     * {@code DEFAULT_CATEGORY_COLOR} and the backend's
+     * {@code model.DefaultCollectionColor} so all three clients agree.
+     */
+    public static final String DEFAULT_COLLECTION_COLOR = "#bf3f2e";
+
+    /** The colour to paint a collection with, applying the shared fallback. */
+    public static String displayColor(Collection collection) {
+        if (collection == null || collection.color.isEmpty()) return DEFAULT_COLLECTION_COLOR;
+        return collection.color;
     }
 
     /** The tweet fields the backend accepts, already extracted from the app. */
@@ -230,6 +253,8 @@ public final class BookmarkerApi {
                 out.add(new Collection(
                         slug,
                         name.isEmpty() ? slug : name,
+                        item.optString("color", ""),
+                        item.optInt("order", i),
                         item.optInt("post_count", 0)));
             }
         } catch (Exception e) {
@@ -238,6 +263,336 @@ public final class BookmarkerApi {
             throw new IOException("could not read the collection list: " + e);
         }
         return out;
+    }
+
+    /**
+     * Creates a collection ({@code POST /v1/collections}).
+     *
+     * <p>The backend derives the slug from the name, which is why nothing here
+     * turns a name into one: doing that on the phone as well would be a second
+     * implementation of the same rule, free to disagree with the server and with
+     * the browser.
+     *
+     * @param color {@code #rrggbb}, or empty to let the clients apply their shared
+     *              default.
+     * @return the created collection, with the slug the backend chose.
+     */
+    public static Collection createCollection(String baseUrl, String token, String name, String color)
+            throws IOException {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) throw new IOException("no backend URL set");
+        if (name == null || name.trim().isEmpty()) throw new IOException("a name is required");
+
+        JSONObject body = new JSONObject();
+        try {
+            body.put("name", name.trim());
+            if (color != null && !color.trim().isEmpty()) body.put("color", color.trim());
+        } catch (Exception e) {
+            throw new IOException("could not build the request: " + e);
+        }
+
+        Response response = request(base, "/v1/collections", token, "POST", body.toString());
+        switch (response.status) {
+            case HttpURLConnection.HTTP_CREATED:
+                break;
+            case HttpURLConnection.HTTP_CONFLICT:
+                throw new IOException("a collection with that name already exists");
+            case HttpURLConnection.HTTP_UNAUTHORIZED:
+                throw new IOException("the backend rejected the token (401)");
+            case HttpURLConnection.HTTP_BAD_REQUEST:
+                throw new IOException("the backend refused the name: " + reasonOf(response.body));
+            default:
+                throw new IOException("the backend returned " + response.status);
+        }
+
+        try {
+            JSONObject created = new JSONObject(response.body).optJSONObject("collection");
+            if (created == null) throw new IOException("the reply carried no collection");
+            String slug = created.optString("slug", "");
+            if (slug.isEmpty()) throw new IOException("the reply carried no slug");
+            String stored = created.optString("name", "");
+            return new Collection(
+                    slug,
+                    stored.isEmpty() ? slug : stored,
+                    created.optString("color", ""),
+                    created.optInt("order", 0),
+                    created.optInt("post_count", 0));
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("could not read the created collection: " + e);
+        }
+    }
+
+    /**
+     * Renames a collection: {@code PUT /v1/collections/{slug}} with a new name.
+     *
+     * <p>The body carries one field, and the endpoint takes three — name, colour and
+     * position — which is why they are all pointers on the backend's side: omitting
+     * one leaves it alone, and this call must not touch a colour the user chose
+     * somewhere else. The slug cannot change: it is what every bookmark row in the
+     * collection stores, so a rename that moved it would have to rewrite them all.
+     */
+    public static Collection renameCollection(String baseUrl, String token, String slug, String name)
+            throws IOException {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) throw new IOException("no backend URL set");
+        if (slug == null || slug.isEmpty()) throw new IOException("no collection to rename");
+        if (name == null || name.trim().isEmpty()) throw new IOException("a name is required");
+
+        JSONObject body = new JSONObject();
+        try {
+            body.put("name", name.trim());
+        } catch (Exception e) {
+            throw new IOException("could not build the request: " + e);
+        }
+
+        Response response = request(base, "/v1/collections/" + encode(slug), token,
+                "PUT", body.toString());
+        switch (response.status) {
+            case HttpURLConnection.HTTP_OK:
+                break;
+            case HttpURLConnection.HTTP_CONFLICT:
+                throw new IOException("a collection with that name already exists");
+            case HttpURLConnection.HTTP_UNAUTHORIZED:
+                throw new IOException("the backend rejected the token (401)");
+            case HttpURLConnection.HTTP_NOT_FOUND:
+                throw new IOException("the backend has no such collection");
+            case HttpURLConnection.HTTP_BAD_REQUEST:
+                throw new IOException("the backend refused the name: " + reasonOf(response.body));
+            default:
+                throw new IOException("the backend returned " + response.status);
+        }
+
+        try {
+            JSONObject updated = new JSONObject(response.body).optJSONObject("collection");
+            if (updated == null) throw new IOException("the reply carried no collection");
+            String stored = updated.optString("name", "");
+            return new Collection(
+                    slug,
+                    stored.isEmpty() ? name.trim() : stored,
+                    updated.optString("color", ""),
+                    updated.optInt("order", 0),
+                    updated.optInt("post_count", 0));
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("could not read the renamed collection: " + e);
+        }
+    }
+
+    /** One bookmark row as {@code /api/gallery/collections/{slug}/posts} reports it. */
+    public static final class Post {
+        public final String tweetId;
+        public final String url;
+        public final String author;
+        public final String username;
+        /** When the tweet was posted, RFC 3339. */
+        public final String tweetDate;
+        /** When this archive saved it, RFC 3339. */
+        public final String savedAt;
+        public final String text;
+        public final List<String> media;
+
+        /**
+         * The post as Twitter describes it today, filled in after the row is drawn.
+         *
+         * <p>The one field here that changes. A saved tweet is a snapshot: the
+         * {@code text} and {@code media} above are what the tweet said when it was
+         * saved, and a row would rather show the live post. The gallery fetches that
+         * lazily for the rows the user actually scrolls to ({@link FxTweet}), so this
+         * starts null and stays null for a post Twitter will not hand back — private,
+         * deleted, or a service that is down. Mutable on purpose: the answer has to
+         * reach the row that asked, without a second table keyed by id.
+         */
+        FxTweet.Row fxRow;
+
+        Post(String tweetId, String url, String author, String username, String tweetDate,
+             String savedAt, String text, List<String> media) {
+            this.tweetId = tweetId;
+            this.url = url;
+            this.author = author;
+            this.username = username;
+            this.tweetDate = tweetDate;
+            this.savedAt = savedAt;
+            this.text = text;
+            this.media = media == null ? Collections.emptyList() : media;
+        }
+
+        /**
+         * Where to open this post: the stored link, or one built from the id.
+         *
+         * <p>One of the two is always there, and a row that cannot be opened is worse
+         * than one whose link was reconstructed.
+         */
+        public String link() {
+            if (url != null && !url.isEmpty()) return url;
+            if (tweetId == null || tweetId.isEmpty()) return "";
+            return "https://x.com/i/status/" + tweetId;
+        }
+    }
+
+    /**
+     * One page of a collection, plus the cursor for the next one.
+     *
+     * <p>{@code nextCursor} is empty when there is none, so the caller only has to
+     * check {@code hasMore} and hand the cursor back unchanged.
+     */
+    public static final class Page {
+        public final List<Post> items;
+        public final String nextCursor;
+        public final boolean hasMore;
+
+        Page(List<Post> items, String nextCursor, boolean hasMore) {
+            this.items = items;
+            this.nextCursor = nextCursor;
+            this.hasMore = hasMore;
+        }
+    }
+
+    /**
+     * The validated {@code sort} values, mirrored from the backend's
+     * {@code gallery.SortMode} (PRD-2 §33). Four strings, and the phone, the
+     * browser and the server have to agree on every one of them.
+     */
+    public static final String SORT_SAVED_DESC = "saved_desc";
+    public static final String SORT_SAVED_ASC = "saved_asc";
+    public static final String SORT_TWEET_DESC = "tweet_desc";
+    public static final String SORT_TWEET_ASC = "tweet_asc";
+
+    /** The largest page the gallery will serve (PRD-2 §34). */
+    public static final int MAX_PAGE_LIMIT = 100;
+
+    /**
+     * One collection's bookmarks, sorted and filtered by the backend.
+     *
+     * <p>All four date fields are the wire's own names rather than a
+     * "basis + range" pair: the sorting and the filtering can legitimately target
+     * different dates, and flattening them here would make one of the two
+     * impossible to express.
+     */
+    public static final class PostQuery {
+        public final String sort;
+        public final String savedFrom;
+        public final String savedTo;
+        public final String tweetFrom;
+        public final String tweetTo;
+        public final String cursor;
+        public final int limit;
+
+        public PostQuery(String sort, String savedFrom, String savedTo, String tweetFrom,
+                         String tweetTo, String cursor, int limit) {
+            this.sort = sort == null || sort.isEmpty() ? SORT_SAVED_DESC : sort;
+            this.savedFrom = savedFrom == null ? "" : savedFrom;
+            this.savedTo = savedTo == null ? "" : savedTo;
+            this.tweetFrom = tweetFrom == null ? "" : tweetFrom;
+            this.tweetTo = tweetTo == null ? "" : tweetTo;
+            this.cursor = cursor == null ? "" : cursor;
+            this.limit = limit <= 0 ? 0 : Math.min(limit, MAX_PAGE_LIMIT);
+        }
+
+        /** The query string this sends, without the leading {@code ?}. */
+        public String toQueryString() {
+            StringBuilder builder = new StringBuilder();
+            append(builder, "sort", sort);
+            append(builder, "saved_from", savedFrom);
+            append(builder, "saved_to", savedTo);
+            append(builder, "tweet_from", tweetFrom);
+            append(builder, "tweet_to", tweetTo);
+            append(builder, "cursor", cursor);
+            if (limit > 0) append(builder, "limit", String.valueOf(limit));
+            return builder.toString();
+        }
+
+        private static void append(StringBuilder builder, String key, String value) {
+            if (value == null || value.isEmpty()) return;
+            if (builder.length() > 0) builder.append('&');
+            builder.append(key).append('=').append(encode(value));
+        }
+    }
+
+    /**
+     * One page of a collection's bookmarks.
+     *
+     * <p>A {@code 400} here means the query was refused — an unparseable date, a
+     * sort the backend does not have, a cursor from a different sort order — so the
+     * reason is passed on verbatim rather than replaced with a generic message.
+     */
+    public static Page posts(String baseUrl, String token, String slug, PostQuery query)
+            throws IOException {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) throw new IOException("no backend URL set");
+        if (slug == null || slug.isEmpty()) throw new IOException("no collection chosen");
+
+        String path = "/api/gallery/collections/" + encode(slug) + "/posts?"
+                + (query == null ? new PostQuery(null, null, null, null, null, null, 0) : query).toQueryString();
+
+        Response response = request(base, path, token, "GET", null);
+        if (response.status == HttpURLConnection.HTTP_NOT_FOUND) {
+            throw new IOException("that collection no longer exists");
+        }
+        if (response.status == HttpURLConnection.HTTP_BAD_REQUEST) {
+            throw new IOException("the backend refused the query: " + reasonOf(response.body));
+        }
+        if (response.status == HttpURLConnection.HTTP_UNAUTHORIZED) {
+            throw new IOException("the backend rejected the token (401)");
+        }
+        if (response.status != HttpURLConnection.HTTP_OK) {
+            throw new IOException("the backend returned " + response.status);
+        }
+
+        List<Post> items = new ArrayList<>();
+        String nextCursor = "";
+        boolean hasMore = false;
+        try {
+            JSONObject json = new JSONObject(response.body);
+            JSONArray array = json.optJSONArray("items");
+            if (array != null) {
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.optJSONObject(i);
+                    if (item == null) continue;
+                    String tweetId = item.optString("tweet_id", "");
+                    if (tweetId.isEmpty()) continue;
+
+                    List<String> media = new ArrayList<>();
+                    JSONArray mediaArray = item.optJSONArray("media");
+                    if (mediaArray != null) {
+                        for (int m = 0; m < mediaArray.length(); m++) {
+                            String url = mediaArray.optString(m, "");
+                            if (!url.isEmpty()) media.add(url);
+                        }
+                    }
+
+                    items.add(new Post(
+                            tweetId,
+                            item.optString("url", ""),
+                            item.optString("author", ""),
+                            item.optString("username", ""),
+                            item.optString("tweet_date", ""),
+                            item.optString("saved_at", ""),
+                            item.optString("text", ""),
+                            media));
+                }
+            }
+            nextCursor = json.optString("next_cursor", "");
+            hasMore = json.optBoolean("has_more", false);
+        } catch (Exception e) {
+            // A body that is not the JSON we expect is a failed page, not an empty
+            // collection: reporting "no bookmarks" would be a lie about the archive.
+            throw new IOException("could not read the collection: " + e);
+        }
+        return new Page(items, nextCursor, hasMore);
+    }
+
+    /** Percent-encode one query value; the slug is already restricted to a slug. */
+    private static String encode(String value) {
+        try {
+            return java.net.URLEncoder.encode(value, "UTF-8");
+        } catch (Exception e) {
+            // UTF-8 is always available, so this cannot happen; returning the raw
+            // value keeps the request going rather than failing on a formality.
+            return value;
+        }
     }
 
     /**
@@ -285,6 +640,86 @@ public final class BookmarkerApi {
             // a failed request never leaves a half-saved row behind. A malformed
             // response lands here too rather than escaping into the thread that
             // called us, where it would take the app down.
+            return new Result(false, false, null, "cannot reach the backend: " + shortReason(e));
+        }
+    }
+
+    /**
+     * Moves a bookmark into another collection:
+     * {@code PUT /v1/bookmarks/{tweet_id}/collection}.
+     *
+     * <p>The body names the collection and nothing else, because that path sets
+     * exactly one thing. The backend owns whether the slug exists, so a 404 is
+     * reported in its own words rather than pre-checked against the cached list of
+     * collections — which can be minutes old.
+     */
+    public static Result move(String baseUrl, String token, String tweetId, String slug) {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) return new Result(false, false, null, "no backend URL set");
+        if (tweetId == null || tweetId.isEmpty()) {
+            return new Result(false, false, null, "could not work out which tweet this is");
+        }
+
+        try {
+            JSONObject body = new JSONObject();
+            body.put("slug", slug == null ? "" : slug);
+            Response response = request(base,
+                    "/v1/bookmarks/" + encode(tweetId) + "/collection",
+                    token, "PUT", body.toString());
+
+            switch (response.status) {
+                case HttpURLConnection.HTTP_OK:
+                    return new Result(true, false, slug, "moved to " + slug);
+                case HttpURLConnection.HTTP_UNAUTHORIZED:
+                    return new Result(false, false, null, "the backend rejected the token (401)");
+                case HttpURLConnection.HTTP_NOT_FOUND:
+                    return new Result(false, false, null,
+                            "the backend has no such bookmark or collection");
+                case HttpURLConnection.HTTP_BAD_REQUEST:
+                    return new Result(false, false, null,
+                            "the backend refused the move: " + reasonOf(response.body));
+                default:
+                    return new Result(false, false, null,
+                            "the backend returned " + response.status + ": " + reasonOf(response.body));
+            }
+        } catch (Exception e) {
+            return new Result(false, false, null, "cannot reach the backend: " + shortReason(e));
+        }
+    }
+
+    /**
+     * Takes a bookmark out of the archive: {@code DELETE /v1/bookmarks/{tweet_id}}.
+     *
+     * <p>Named {@code remove} rather than {@code delete} for the reason the backend
+     * spells out in its own answer: the row moves to the trash and is still
+     * recoverable, so nothing the user saved is actually gone. The phone has no
+     * restore flow yet, which is why the caller asks before calling this at all.
+     */
+    public static Result remove(String baseUrl, String token, String tweetId) {
+        String base = normalizeBaseUrl(baseUrl);
+        if (base.isEmpty()) return new Result(false, false, null, "no backend URL set");
+        if (tweetId == null || tweetId.isEmpty()) {
+            return new Result(false, false, null, "could not work out which tweet this is");
+        }
+
+        try {
+            Response response = request(base, "/v1/bookmarks/" + encode(tweetId), token,
+                    "DELETE", null);
+
+            switch (response.status) {
+                case HttpURLConnection.HTTP_OK:
+                    // The backend answers with {"status":"deleted","recoverable":true},
+                    // so the wording here can promise what it promises.
+                    return new Result(true, false, null, "removed; still in the trash");
+                case HttpURLConnection.HTTP_UNAUTHORIZED:
+                    return new Result(false, false, null, "the backend rejected the token (401)");
+                case HttpURLConnection.HTTP_NOT_FOUND:
+                    return new Result(false, false, null, "that bookmark is not in the archive");
+                default:
+                    return new Result(false, false, null,
+                            "the backend returned " + response.status + ": " + reasonOf(response.body));
+            }
+        } catch (Exception e) {
             return new Result(false, false, null, "cannot reach the backend: " + shortReason(e));
         }
     }

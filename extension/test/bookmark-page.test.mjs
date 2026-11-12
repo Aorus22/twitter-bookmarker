@@ -10,18 +10,28 @@ import {
   getSavedTweetIds,
   isTweetSaved,
   loadSavedIndexFromServiceWorker,
+  markTweetMoved,
   markTweetSaved,
+  markTweetUnsaved,
   refreshBookmarksPage,
+  savedSlugFor,
   startBookmarksPage,
   stopBookmarksPage,
 } from "../src/content/bookmark-page.ts";
 import { INJECTED_ATTRIBUTE } from "../src/content/selectors.ts";
 import { isPopoverOpen } from "../src/content/organizer.ts";
+import { injectOrganizer, rerenderAll } from "../src/content/ui-injector.ts";
 import { extractTweet } from "../src/content/tweet-extractor.ts";
 import { appendTweet, createTweetDocument, makeStore, sampleCategories } from "./helpers/tweet-fixtures.mjs";
 
 afterEach(() => {
   stopBookmarksPage();
+});
+
+/** What a `loadSavedIndex` dep returns: the ids plus where each tweet lives. */
+const savedLookup = (ids, slugs = {}) => ({
+  ids: new Set(ids),
+  slugsByTweetId: new Map(Object.entries(slugs)),
 });
 
 function createObserverHarness() {
@@ -78,7 +88,7 @@ function baseDeps(doc, observers, timers, overrides = {}) {
     setTimeout: timers.setTimeout,
     clearTimeout: timers.clearTimeout,
     loadStore: async () => makeStore(sampleCategories()),
-    loadSavedIndex: async () => new Set(),
+    loadSavedIndex: async () => savedLookup([]),
     ...overrides,
   };
 }
@@ -95,7 +105,7 @@ test("start fetches the index once, injects, and marks saved tweets (XI-03, XI-0
     baseDeps(doc, observers, timers, {
       loadSavedIndex: async () => {
         indexCalls += 1;
-        return new Set(["1234567890"]);
+        return savedLookup(["1234567890"], { 1234567890: "linux" });
       },
     }),
   );
@@ -108,6 +118,7 @@ test("start fetches the index once, injects, and marks saved tweets (XI-03, XI-0
   assert.ok(root.querySelector("[data-twitter-bookmarker-saved]"));
   assert.equal(isTweetSaved("1234567890"), true);
   assert.deepEqual([...getSavedTweetIds()], ["1234567890"]);
+  assert.equal(savedSlugFor("1234567890"), "linux", "the slug travels with the saved mark");
 
   assert.equal(observers.observers.length, 1, "exactly one MutationObserver");
   assert.equal(observers.observers[0].targets[0].target, doc.body);
@@ -147,17 +158,20 @@ test("loadSavedIndexFromServiceWorker tolerates ok:false and thrown messages", a
   globalThis.chrome = {
     runtime: { sendMessage: async () => ({ ok: false, index: null, error: "not_implemented" }) },
   };
-  assert.equal((await loadSavedIndexFromServiceWorker()).size, 0);
+  assert.equal((await loadSavedIndexFromServiceWorker()).ids.size, 0);
 
   globalThis.chrome = {
     runtime: {
       sendMessage: async () => ({
         ok: true,
-        index: { items: { 111: { url: "u", slug: "f", saved_at: "t" }, 222: { url: "u", slug: "f", saved_at: "t" } } },
+        index: { items: { 111: { url: "u", slug: "f", saved_at: "t" }, 222: { url: "u", slug: "g", saved_at: "t" } } },
       }),
     },
   };
-  assert.deepEqual([...(await loadSavedIndexFromServiceWorker())].sort(), ["111", "222"]);
+  const lookup = await loadSavedIndexFromServiceWorker();
+  assert.deepEqual([...lookup.ids].sort(), ["111", "222"]);
+  assert.equal(lookup.slugsByTweetId.get("111"), "f");
+  assert.equal(lookup.slugsByTweetId.get("222"), "g");
 
   globalThis.chrome = {
     runtime: {
@@ -166,7 +180,7 @@ test("loadSavedIndexFromServiceWorker tolerates ok:false and thrown messages", a
       },
     },
   };
-  assert.equal((await loadSavedIndexFromServiceWorker()).size, 0);
+  assert.equal((await loadSavedIndexFromServiceWorker()).ids.size, 0);
 });
 
 test("addedNodes discovery injects immediately and is idempotent; own-root mutations are ignored", async () => {
@@ -231,7 +245,7 @@ test("stop disconnects, clears timers, and removes roots, markers, and the saved
   const observers = createObserverHarness();
   const timers = createTimerHarness();
   await startBookmarksPage(
-    baseDeps(doc, observers, timers, { loadSavedIndex: async () => new Set(["1234567890"]) }),
+    baseDeps(doc, observers, timers, { loadSavedIndex: async () => savedLookup(["1234567890"]) }),
   );
   const observer = observers.observers[0];
 
@@ -271,12 +285,12 @@ test("refresh rerenders order and display mode on existing controls (PRD §51)",
   const root = rootsIn(article)[0];
   assert.deepEqual(
     root.querySelectorAll("[data-category-id]").map((button) => button.getAttribute("data-category-id")),
-    ["cat-ai", "cat-linux"],
+    ["ai", "linux"],
   );
 
   const reordered = [
-    { id: "cat-linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 },
-    { id: "cat-ai", name: "AI", slug: "ai", color: "#4f46e5", order: 1 },
+    { id: "linux", name: "Linux", slug: "linux", color: "#10b981", order: 0 },
+    { id: "ai", name: "AI", slug: "ai", color: "#4f46e5", order: 1 },
   ];
   refreshBookmarksPage(makeStore(reordered, "popover"));
 
@@ -286,7 +300,7 @@ test("refresh rerenders order and display mode on existing controls (PRD §51)",
     .querySelector("[data-twitter-bookmarker-panel]")
     .querySelectorAll("[data-category-id]")
     .map((button) => button.getAttribute("data-category-id"));
-  assert.deepEqual(panelButtons, ["cat-linux", "cat-ai"], "reorder is reflected live");
+  assert.deepEqual(panelButtons, ["linux", "ai"], "reorder is reflected live");
 });
 
 test("extraction failure surfaces once, injects nothing, and never sends a partial record (XI-12)", async () => {
@@ -361,4 +375,183 @@ test("markTweetSaved updates the cache and renders ✓ Saved (Phase 4 seam)", as
   markTweetSaved("1234567890");
   assert.equal(isTweetSaved("1234567890"), true);
   assert.ok(article.querySelector("[data-twitter-bookmarker-saved]"));
+});
+
+test("the saved slug follows the tweet: saved, moved, then unsaved", async () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const observers = createObserverHarness();
+  const timers = createTimerHarness();
+  await startBookmarksPage(baseDeps(doc, observers, timers));
+
+  assert.equal(savedSlugFor("1234567890"), null);
+  markTweetSaved("1234567890", "ai");
+  assert.equal(savedSlugFor("1234567890"), "ai");
+
+  markTweetMoved("1234567890", "linux");
+  assert.equal(savedSlugFor("1234567890"), "linux", "a confirmed move rewrites the slug in place");
+  assert.equal(isTweetSaved("1234567890"), true, "a move never drops the saved mark");
+
+  markTweetUnsaved("1234567890");
+  assert.equal(savedSlugFor("1234567890"), null);
+  assert.equal(isTweetSaved("1234567890"), false);
+});
+
+test("the variant reaches the injector and every live rerender (general pages)", async () => {
+  // The lifecycle is shared between the bookmarks timeline and every other page;
+  // the variant is the only difference, so it has to travel with the options into
+  // the injector and into each stored re-render.
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const observers = createObserverHarness();
+  const timers = createTimerHarness();
+  const injected = [];
+  const rerendered = [];
+
+  await startBookmarksPage(
+    baseDeps(doc, observers, timers, {
+      // Popover, so the trigger is the thing under test: in inline mode the
+      // categories are the buttons and there is no trigger to label.
+      loadStore: async () => makeStore(sampleCategories(), "popover"),
+      variant: "bookmark",
+      inject: (options) => {
+        injected.push(options.variant);
+        return injectOrganizer(options);
+      },
+      rerenderAll: (targetDoc, input) => {
+        rerendered.push(input.variant);
+        rerenderAll(targetDoc, input);
+      },
+    }),
+  );
+
+  assert.deepEqual(injected, ["bookmark"]);
+  const root = rootsIn(article)[0];
+  // The bookmark surface is the icon-only trigger; its identity is the
+  // aria-label, and the modal (not a popover panel) is what the tap opens.
+  const trigger = () => root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger().querySelector(".twb-trigger-label"), null, "icon-only: no text label");
+  assert.equal(trigger().getAttribute("aria-label"), "Save to Twitter Bookmarker");
+  assert.ok(trigger().querySelector("svg"), "the icon is inline SVG");
+
+  refreshBookmarksPage(makeStore(sampleCategories(), "popover"));
+  assert.ok(rerendered.length > 0, "the live re-render went through the injected seam");
+  assert.deepEqual([...new Set(rerendered)], ["bookmark"], "the variant survives a live re-render");
+  assert.equal(trigger().getAttribute("aria-label"), "Save to Twitter Bookmarker");
+
+  // The default is the organizer, so a caller that does not care keeps the
+  // bookmarks-timeline behaviour it always had.
+  stopBookmarksPage();
+  const second = createTweetDocument({ text: "hi" });
+  await startBookmarksPage(
+    baseDeps(second.doc, createObserverHarness(), createTimerHarness(), {
+      loadStore: async () => makeStore(sampleCategories(), "popover"),
+    }),
+  );
+  assert.equal(
+    rootsIn(second.article)[0].querySelector("[data-twitter-bookmarker-trigger]").textContent,
+    "Organize",
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* History watcher wiring                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** Records everything the lifecycle does to its watcher. */
+function createWatcherHarness() {
+  const instances = [];
+  const factory = (deps) => {
+    const instance = {
+      deps,
+      tracked: [],
+      enabled: null,
+      modes: [],
+      stopped: false,
+      track(article, tweetId) {
+        this.tracked.push([article, tweetId]);
+      },
+      setEnabled(on) {
+        this.enabled = on;
+      },
+      setMode(mode) {
+        this.modes.push(mode);
+      },
+      stop() {
+        this.stopped = true;
+      },
+    };
+    instances.push(instance);
+    return instance;
+  };
+  return { factory, instances };
+}
+
+test("the watcher follows the settings on the bookmarks timeline, live and on teardown", async () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const observers = createObserverHarness();
+  const timers = createTimerHarness();
+  const watchers = createWatcherHarness();
+
+  await startBookmarksPage(
+    baseDeps(doc, observers, timers, {
+      loadSavedIndex: async () => savedLookup(["1234567890"]),
+      loadStore: async () =>
+        makeStore(sampleCategories(), "inline", { autoUnbookmarkSaved: true, autoUnbookmarkSavedMode: "visible" }),
+      createWatcher: watchers.factory,
+    }),
+  );
+
+  assert.equal(watchers.instances.length, 1);
+  assert.equal(watchers.instances[0].enabled, true, "the setting turns the watcher on at entry");
+  assert.deepEqual(watchers.instances[0].modes, ["visible"], "the mode travels with the settings");
+  assert.deepEqual(
+    watchers.instances[0].tracked,
+    [[article, "1234567890"]],
+    "injected tweets are offered to the watcher",
+  );
+
+  refreshBookmarksPage(
+    makeStore(sampleCategories(), "inline", { autoUnbookmarkSaved: false, autoUnbookmarkSavedMode: "aggressive" }),
+  );
+  assert.equal(watchers.instances[0].enabled, false, "a flipped toggle reaches the open page");
+  assert.deepEqual(watchers.instances[0].modes, ["visible", "aggressive"], "a flipped mode reaches it too");
+
+  stopBookmarksPage();
+  assert.equal(watchers.instances[0].stopped, true, "route leave stops the watcher");
+});
+
+test("the watcher stays off the general tweet surface, even with the setting on", async () => {
+  const { doc } = createTweetDocument({ text: "hi" });
+  const observers = createObserverHarness();
+  const timers = createTimerHarness();
+  const watchers = createWatcherHarness();
+
+  await startBookmarksPage(
+    baseDeps(doc, observers, timers, {
+      variant: "bookmark",
+      loadStore: async () =>
+        makeStore(sampleCategories(), "inline", { autoUnbookmarkSaved: true, autoUnbookmarkSavedMode: "aggressive" }),
+      createWatcher: watchers.factory,
+    }),
+  );
+
+  assert.equal(watchers.instances.length, 0, "no watcher is created off /history");
+});
+
+test("the watcher exists but stays disabled when the setting is off", async () => {
+  const { doc } = createTweetDocument({ text: "hi" });
+  const observers = createObserverHarness();
+  const timers = createTimerHarness();
+  const watchers = createWatcherHarness();
+
+  await startBookmarksPage(
+    baseDeps(doc, observers, timers, {
+      createWatcher: watchers.factory,
+      loadStore: async () =>
+        makeStore(sampleCategories(), "inline", { autoUnbookmarkSaved: false, autoUnbookmarkSavedMode: "visible" }),
+    }),
+  );
+
+  assert.equal(watchers.instances.length, 1);
+  assert.equal(watchers.instances[0].enabled, false, "off is the default");
+  assert.ok(watchers.instances[0].tracked.length > 0, "tracking is free without the setting");
 });

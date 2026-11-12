@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it } from "vitest"
 
@@ -107,5 +108,56 @@ describe("CollectionCard", () => {
 
     expect(screen.queryByText("•••")).not.toBeInTheDocument()
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+})
+
+describe("CollectionCard — NSFW guard", () => {
+  const NSFW = { ...LINUX, slug: "nsfw-art", name: "NSFW Art" }
+
+  it("blurs the cover of a collection whose title carries NSFW", () => {
+    renderCard(NSFW)
+
+    const card = screen.getByTestId("collection-card")
+    expect(card).toHaveAttribute("data-nsfw", "true")
+    expect(screen.getByTestId("collection-cover").className).toContain(
+      "blur-xl"
+    )
+    expect(
+      screen.getByRole("button", { name: "Show preview: NSFW Art" })
+    ).toBeInTheDocument()
+  })
+
+  it("lifts the blur for this card when the preview is revealed", async () => {
+    const user = userEvent.setup()
+    renderCard(NSFW)
+
+    await user.click(
+      screen.getByRole("button", { name: "Show preview: NSFW Art" })
+    )
+
+    expect(screen.getByTestId("collection-cover").className).not.toContain(
+      "blur-xl"
+    )
+    expect(
+      screen.queryByTestId("collection-nsfw-reveal")
+    ).not.toBeInTheDocument()
+    // The rest of the card still navigates to the collection.
+    expect(
+      screen.getByRole("link", { name: /NSFW Art, 83 posts/ })
+    ).toHaveAttribute("href", "/collections/nsfw-art")
+  })
+
+  it("leaves an ordinary collection unblurred", () => {
+    renderCard()
+
+    expect(screen.getByTestId("collection-card")).not.toHaveAttribute(
+      "data-nsfw"
+    )
+    expect(screen.getByTestId("collection-cover").className).not.toContain(
+      "blur-xl"
+    )
+    expect(
+      screen.queryByTestId("collection-nsfw-reveal")
+    ).not.toBeInTheDocument()
   })
 })

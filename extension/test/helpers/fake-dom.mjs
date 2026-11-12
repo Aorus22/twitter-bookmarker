@@ -486,6 +486,19 @@ export class FakeDocument extends FakeElement {
     return new FakeElement(tagName, this);
   }
 
+  /**
+   * Namespaced elements (the inline SVG bookmark glyph).
+   *
+   * A real DOM needs the namespace for `createElementNS` to produce an element that
+   * renders; the fake only has to be shaped like one, so the element carries the
+   * tag and namespace and everything else is the same FakeElement.
+   */
+  createElementNS(namespace, tagName) {
+    const element = new FakeElement(tagName, this);
+    element.namespaceURI = namespace;
+    return element;
+  }
+
   createTextNode(text) {
     return new FakeTextNode(text);
   }

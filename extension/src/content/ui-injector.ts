@@ -1,9 +1,11 @@
 /**
- * Placement and lifecycle of the per-tweet organizer root (PRD §31, §51).
+ * Placement and lifecycle of the per-tweet controls (PRD §31, §51).
  *
  * Responsibilities:
- *  - find the tweet's action area and insert exactly one root on its own row
- *    directly above it (never the page header — XI-08);
+ *  - find the tweet's action area and place exactly one root there: the
+ *    bookmarks-timeline organizer occupies its own row directly above the bar
+ *    (never the page header — XI-08), and the bookmark icon sits inside the bar
+ *    as a sibling of X's native actions;
  *  - keep injection idempotent: an article that already owns a root is updated
  *    in place, never duplicated (XI-04);
  *  - re-render every visible root when categories/settings/the saved set change
@@ -21,6 +23,7 @@ import {
   queryAll,
   queryFirst,
 } from "./selectors.ts";
+import { closeSaveModalFor } from "./save-modal.ts";
 import {
   closeOpenPopover,
   isPopoverOpen,
@@ -29,7 +32,7 @@ import {
   updateOrganizerSaved,
   updateOrganizerSaving,
 } from "./organizer.ts";
-import type { OrganizerCallbacks } from "./organizer.ts";
+import type { OrganizerCallbacks, OrganizerVariant } from "./organizer.ts";
 
 /** Input for {@link injectOrganizer}. */
 export interface InjectOrganizerOptions {
@@ -45,11 +48,16 @@ export interface InjectOrganizerOptions {
   saved: boolean;
   /** Phase-4 callback seam. */
   callbacks: OrganizerCallbacks;
+  /**
+   * Trigger style: the bookmarks-timeline organizer, or our own bookmark button on
+   * any other X page. Defaults to `"organize"`.
+   */
+  variant?: OrganizerVariant | undefined;
 }
 
 /** Input for {@link rerenderAll}. */
 export interface RerenderAllInput {
-  /** All categories, in storage order. */
+  /** All categories, in the backend's order. */
   categories: readonly Category[];
   /** Current settings (drives the display mode). */
   settings: Settings;
@@ -57,6 +65,8 @@ export interface RerenderAllInput {
   savedIds: ReadonlySet<string>;
   /** Phase-4 callback seam. */
   callbacks: OrganizerCallbacks;
+  /** Trigger style; see {@link InjectOrganizerOptions.variant}. */
+  variant?: OrganizerVariant | undefined;
 }
 
 function defaultDocument(): Document {
@@ -68,6 +78,9 @@ function defaultDocument(): Document {
  * also contains X's native bookmark control, falling back to the last such
  * element in the article. Returns `null` when there is no action area, so
  * nothing is ever placed in the header.
+ *
+ * Both placements anchor here: the organizer row is inserted *above* it, and
+ * the bookmark icon is appended *inside* it.
  */
 function findActionBar(article: Element): Element | null {
   const groups = queryAll(article, "actionBar");
@@ -121,11 +134,17 @@ function renderOptionsFor(
     displayMode: options.displayMode,
     saved: options.saved,
     callbacks: options.callbacks,
+    variant: options.variant,
   };
 }
 
 /**
  * Inject (or update) the single organizer root for `article`.
+ *
+ * Placement follows the variant: the bookmarks-timeline organizer gets its own
+ * full-width row directly above the action bar (never the page header — XI-08),
+ * while the bookmark icon becomes the last child *of* the action bar, a sibling
+ * of X's native actions — the web twin of the phone's action-bar button.
  *
  * Returns the root, or `null` when there is nothing to render (no categories and
  * not saved) or no action area exists.
@@ -153,6 +172,23 @@ export function injectOrganizer(options: InjectOrganizerOptions): HTMLElement | 
   root.setAttribute(ROOT_ATTRIBUTE, INJECTED_VALUE);
   root.setAttribute(ROOT_TWEET_ID_ATTRIBUTE, options.tweetId);
   root.className = "twb-root";
+
+  renderOrganizer(root, renderOptionsFor(options));
+
+  if (options.variant === "bookmark") {
+    // An inline action item inside X's own bar: no row, no margins, and no
+    // positioning safety needed — the modal lives in `document.body`.
+    root.style.display = "inline-flex";
+    root.style.alignItems = "center";
+    root.style.flex = "0 0 auto";
+    root.style.gap = "0";
+    root.style.width = "auto";
+    root.style.boxSizing = "border-box";
+    root.style.margin = "0";
+    actionBar.appendChild(root);
+    return root;
+  }
+
   // Its own full-width row above the native action bar.
   root.style.display = "flex";
   root.style.flexWrap = "wrap";
@@ -162,8 +198,6 @@ export function injectOrganizer(options: InjectOrganizerOptions): HTMLElement | 
   root.style.boxSizing = "border-box";
   root.style.margin = "4px 0 2px";
   root.style.position = "relative";
-
-  renderOrganizer(root, renderOptionsFor(options));
   makePositioningSafe(article);
 
   const anchor = findRowAnchor(article, actionBar);
@@ -173,11 +207,13 @@ export function injectOrganizer(options: InjectOrganizerOptions): HTMLElement | 
   return root;
 }
 
-/** Remove the organizer root (and any open popover) from one article. */
+/** Remove the organizer root (and any open popover or modal) from one article. */
 export function removeOrganizer(article: HTMLElement): void {
   const root = queryFirst<HTMLElement>(article, "organizerRoot");
   if (!root) return;
   if (isPopoverOpen(root)) closeOpenPopover();
+  const tweetId = root.getAttribute(ROOT_TWEET_ID_ATTRIBUTE);
+  if (tweetId) closeSaveModalFor(tweetId);
   root.remove();
 }
 
@@ -203,6 +239,7 @@ export function rerenderAll(doc: Document, input: RerenderAllInput): void {
     const article = closestArticle(root);
     if (!article) {
       if (isPopoverOpen(root)) closeOpenPopover();
+      if (tweetId) closeSaveModalFor(tweetId);
       root.remove();
       continue;
     }
@@ -210,6 +247,7 @@ export function rerenderAll(doc: Document, input: RerenderAllInput): void {
     const saved = input.savedIds.has(tweetId) || input.callbacks.isSaved(tweetId);
     if (!saved && input.categories.length === 0) {
       if (isPopoverOpen(root)) closeOpenPopover();
+      if (tweetId) closeSaveModalFor(tweetId);
       root.remove();
       article.removeAttribute(INJECTED_ATTRIBUTE);
       continue;
@@ -221,6 +259,7 @@ export function rerenderAll(doc: Document, input: RerenderAllInput): void {
       displayMode: input.settings.displayMode,
       saved,
       callbacks: input.callbacks,
+      variant: input.variant,
     });
   }
 }

@@ -208,9 +208,21 @@ func writeMethodNotAllowed(w http.ResponseWriter) {
 // `POST /health` and `GET /v1/bookmarks` at 405 while unknown /api/* paths fall
 // through to the JSON 404 (PROD-02, PROD-04).
 func methodGate(allowed string, h http.HandlerFunc) http.HandlerFunc {
+	return methodGateAll([]string{allowed}, h)
+}
+
+// methodGateAll is methodGate for a path that legitimately answers more than one
+// method, like /v1/collections (GET to list, POST to create).
+//
+// Two registrations of the same pattern would panic: ServeMux records patterns,
+// not pattern+method pairs, and the catch-all already forces these routes to be
+// registered without a method. The Allow header names every method, so a client
+// still learns what the resource supports from the 405.
+func methodGateAll(allowed []string, h http.HandlerFunc) http.HandlerFunc {
+	allow := strings.Join(withGetHead(allowed), ", ")
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != allowed && !(allowed == http.MethodGet && r.Method == http.MethodHead) {
-			w.Header().Set("Allow", allowHeader(allowed))
+		if !methodAllowed(allowed, r.Method) {
+			w.Header().Set("Allow", allow)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -218,10 +230,33 @@ func methodGate(allowed string, h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// methodAllowed reports whether method is one of allowed, with the ServeMux's own
+// rule that a GET route also answers HEAD.
+func methodAllowed(allowed []string, method string) bool {
+	for _, candidate := range allowed {
+		if method == candidate {
+			return true
+		}
+		if candidate == http.MethodGet && method == http.MethodHead {
+			return true
+		}
+	}
+	return false
+}
+
+// withGetHead expands GET to "GET, HEAD" so the Allow header matches the mux.
+func withGetHead(allowed []string) []string {
+	out := make([]string, 0, len(allowed)+1)
+	for _, method := range allowed {
+		out = append(out, method)
+		if method == http.MethodGet {
+			out = append(out, http.MethodHead)
+		}
+	}
+	return out
+}
+
 // allowHeader mirrors the Go ServeMux: a GET route also answers HEAD.
 func allowHeader(allowed string) string {
-	if allowed == http.MethodGet {
-		return "GET, HEAD"
-	}
-	return allowed
+	return strings.Join(withGetHead([]string{allowed}), ", ")
 }

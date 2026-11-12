@@ -33,11 +33,13 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 
 ```text
 ┌────────────────────────── Chrome ──────────────────────────┐
-│  Content script (x.com/i/history)                        │
-│    route watcher → single MutationObserver → organizer UI  │
+│  Content script (every x.com page)                         │
+│    route watcher → single MutationObserver → organizer UI   │
+│    (the bookmarks timeline organizes; other pages get our   │
+│     own Save button)                                        │
 │    save controller ──message──▶ MV3 service worker ──HTTP──┼──▶ 127.0.0.1:43121
-│  Popup: categories, colors, order, settings                 │      (Go server)
-│  chrome.storage.local = categories + settings (only)        │         │
+│  Popup: categories, colours, order, settings                │      (Go server)
+│  chrome.storage.local = settings + a cache of the list      │         │
 └─────────────────────────────────────────────────────────────┘         │
                                                                         ▼
                                           <storage dir>/tw-bookmarker.db
@@ -46,8 +48,13 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 
 - The backend binds **loopback only** (`127.0.0.1:43121`) by default. It can be
   moved onto the LAN for a phone client, and a non-loopback bind then requires a
-  bearer token — see [Where the server listens](#where-the-server-listens). It
-  never stores categories or settings — those live in `chrome.storage.local`.
+  bearer token — see [Where the server listens](#where-the-server-listens).
+- **Collections are the backend's resource**: name, colour and order live in the
+  database and are read and written over `/v1/collections`. The extension keeps a
+  cached copy in `chrome.storage.local` so the timeline can render without waiting
+  for a request; the cache is written only by the service worker. The phone reads
+  the same list rather than keeping one of its own. Nothing deletes a collection —
+  see [Collections](#collections).
 - The content script never calls the backend directly; every HTTP request goes
   through the service worker (PRD §53).
 - One `MutationObserver` per page entry, one index fetch per page entry, O(1)
@@ -56,10 +63,13 @@ See `.planning/PROJECT.md` for the full out-of-scope list.
 The phone is a second client of the same API rather than a second backend: X has
 no hook for this, so the app is patched with Morphe, and the patch adds a save
 button beside the native bookmark action. It sends the same payload the extension
-does, which is why nothing in `backend/` changed for it. The button is a 48 dp
-target with a gap so it is not hit by accident, and a tweet that is already in a
+does, and it creates a collection through the same `POST /v1/collections` the web
+popup uses rather than deriving a slug of its own. The button is a 48 dp target
+with a gap so it is not hit by accident, and a tweet that is already in a
 collection is marked — see [Already saved](morphe/README.md#already-saved) for how
-that mark is kept fresh. Sources, build and the device runbook live in
+that mark is kept fresh. A second phone screen shows the archive itself: folders,
+then one folder's bookmarks as cards, sortable and filterable by either date —
+see [The gallery screen](morphe/README.md#the-gallery-screen). Sources, build and the device runbook live in
 [morphe/](morphe/README.md), and the LAN bind it needs is
 [Where the server listens](#where-the-server-listens).
 
@@ -357,14 +367,19 @@ record. Both live in Cloudflare, not here.
 2. Enable **Developer mode**
 3. Click **Load unpacked** → select `extension/dist/`
 
-### 4. Create categories
+### 4. Create collections
 
-Open the extension popup and add e.g. `AI`, `Linux`, `Design`. Pick colours,
-drag to reorder, and choose **Popover** or **Inline**. Under **Backend URL**, keep
-**Localhost** for the default `http://127.0.0.1:43121`, or pick **Custom** and enter
-another base URL plus, if that backend asks for one, its **Token** — both are saved
-by the same **Save** button. Everything is saved to `chrome.storage.local`
-immediately and propagates to open X tabs without a reload.
+Open the extension popup and add e.g. `AI`, `Linux`, `Design`. Pick colours, use
+the ↑/↓ buttons or drag a row to order them, and choose **Popover** or **Inline**.
+The list is the **backend's**: every add, rename, recolour and reorder is a
+`/v1/collections` request made by the service worker, and the popup re-renders
+from the answer. That is what makes a collection created here appear on the phone
+in the same colour and the same position. There is no delete — see
+[Collections](#collections). Under **Backend
+URL**, keep **Localhost** for the default `http://127.0.0.1:43121`, or pick
+**Custom** and enter another base URL plus, if that backend asks for one, its
+**Token** — both are saved by the same **Save** button. Settings are saved to
+`chrome.storage.local` immediately and propagate to open X tabs without a reload.
 
 ### 5. Use it
 
@@ -375,6 +390,15 @@ immediately and propagates to open X tabs without a reload.
    (PRD §31, XI-08).
 3. Click **Linux** on a tweet → success toast `Saved to Linux`, controls become
    `✓ Saved`
+
+**On any other X page** the same controls appear in the action bar as our own
+**`Save to…`** button (a bookmark glyph, not X's bookmark action). Tapping it
+opens the same collection picker and saves the tweet; tapping X's own bookmark
+button still does exactly what X always did. The bookmarks timeline keeps the
+organizer instead, because a tweet there is already in the account's bookmarks and
+the only decision left is which collection it belongs in. A short list of
+tweet-free screens (`/settings`, `/messages`, `/compose`, the login flow) is
+skipped entirely.
 4. Inspect the result:
 
 ```bash
@@ -393,7 +417,7 @@ One SQLite database per storage directory:
 <storage dir>/tw-bookmarker.db      (config.DBName)
 ```
 
-Schema version `2` in `PRAGMA user_version`. `journal_mode=DELETE` (deliberately
+Schema version `3` in `PRAGMA user_version`. `journal_mode=DELETE` (deliberately
 **not** WAL, so the directory holds one complete, git-safe file at every quiescent
 moment), `synchronous=FULL`, `foreign_keys=ON` and `busy_timeout=5000`, all
 applied through the DSN so they hold on every pooled connection. A database the
@@ -406,8 +430,14 @@ CREATE TABLE collections (
   id         INTEGER PRIMARY KEY,
   slug       TEXT NOT NULL UNIQUE,   -- public key: ^[a-z0-9][a-z0-9-]*$
   name       TEXT NOT NULL,          -- display name the user typed
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  color      TEXT NOT NULL DEFAULT '',   -- '#rrggbb', or '' for "not chosen"
+  sort_order INTEGER NOT NULL DEFAULT 0  -- the position the user put it in
 );
+
+-- Added in schema version 3; a collection with no colour is not an error, and
+-- the order is a dense 0..n-1 sequence the server maintains.
+CREATE INDEX collections_by_order ON collections(sort_order, slug);
 
 CREATE TABLE bookmarks (
   tweet_id      TEXT PRIMARY KEY,    -- Tweet Status ID, globally unique
@@ -482,6 +512,16 @@ sqlite3 -header -column ~/.twitter-bookmarker/tw-bookmarker.db \
 `GET /v1/index` is built from these same live tables in Go — a `JOIN`, not a JSON
 file — so it can never disagree with what the gallery serves.
 
+**Colour and order.** `color` is `#rrggbb` or the empty string, and empty means
+"not chosen" rather than "broken": the API stores what the user picked and each
+client falls back to the same default red (`#bf3f2e`) when it paints. `sort_order`
+is the position the user dragged the collection into, and it is a dense `0..n-1`
+sequence the server renumbers on every reorder — no client is trusted to compute
+it, and every client renders the list in the order the server returns. The
+version-3 upgrade backfills that sequence to reproduce the order the previous
+version derived from `last_saved_at`, so an existing install does not reorder
+itself the first time it is opened.
+
 > The `sqlite3` CLI defaults `PRAGMA foreign_keys` to **off**. That is fine for
 > reads; before any manual `DELETE` from `collections`, run
 > `PRAGMA foreign_keys=ON` in the same session (or pass
@@ -490,7 +530,9 @@ file — so it can never disagree with what the gallery serves.
 ### Soft delete: `deleted_bookmarks`
 
 Version 1 → 2 adds exactly one table and one index; the `collections` and
-`bookmarks` DDL above is **unchanged**.
+`bookmarks` DDL above is **unchanged**. Version 2 → 3 adds the two `collections`
+columns and their index, backfilling the order in Go so the upgrade is additive:
+no row is rewritten except to fill the new columns.
 
 `DELETE /v1/bookmarks/{tweet_id}` does not destroy the row, and it does not flag
 it in place with a `deleted_at` column on `bookmarks`. It **moves the row** into
@@ -514,13 +556,15 @@ Two choices in that DDL are deliberate:
   the same tweet twice must record two events rather than overwrite the first, so
   the trash is a log, not a claim on the Status ID.
 
-**Upgrading is automatic.** Starting the server against a version-1 directory
-upgrades it in place on startup: one transaction that creates the table and its
-index and stamps `user_version = 2`, rewriting no row. The upgrade is narrow on
-purpose: it runs only for a version-1 file that really holds the version-1 table
-set. A database whose shape does not match its stamp is refused rather than
-guessed at — a version-1 file with unexpected tables is not upgraded, and a file
-that claims version 2 while missing one of the tables fails to open.
+**Upgrading is automatic.** Starting the server against an older directory upgrades
+it in place on startup: version 1 creates the table and its index and stamps
+`user_version = 2`; version 2 adds the two `collections` columns, fills in the
+order and stamps `user_version = 3`. Each step runs in one transaction and touches
+only what it has to. The upgrades are narrow on purpose: they run only for a file
+that really holds the older table set. A database whose shape does not match its
+stamp is refused rather than guessed at — a version-1 file with unexpected tables
+is not upgraded, and a file that claims version 3 while missing one of the new
+columns fails to open.
 
 Restoring a row is a manual SQL step; the recipe is in
 [Restoring a deleted bookmark](#restoring-a-deleted-bookmark-manual).
@@ -562,6 +606,55 @@ popup's **Custom** panel therefore has a **Token** field: paste the backend's
 `TWITTER_BOOKMARKER_TOKEN` there and every request from the worker and the popup
 carries `Authorization: Bearer …`. Leave it empty (the default) for a loopback
 server, which is never challenged; it is ignored in **Localhost** mode.
+
+### Collections
+
+`GET|POST /v1/collections`, `PUT /v1/collections/{slug}`, `PUT /v1/collections/order`.
+
+The collection list is a resource, not a side effect of saving. All four routes are
+under `/v1/` and none of them is a gallery route, so
+[the gallery's read-only guarantee](#the-gallery-api-is-read-only) is untouched.
+
+```http
+GET /v1/collections
+200 OK
+{"collections":[{"slug":"linux","name":"Linux","color":"#bf3f2e","order":0,
+                 "post_count":12,"media_count":4,
+                 "last_saved_at":"2026-09-27T01:15:32Z","cover_media":["https://pbs.twimg.com/…"]}]}
+
+POST /v1/collections          {"name":"Read Later","color":"#0ea5e9"}
+201 Created                   {"status":"created","collection":{…}}
+
+PUT /v1/collections/linux     {"name":"Linux & BSD"}   (or {"color":"#10b981"}, or both)
+200 OK                        {"status":"updated","collection":{"slug":"linux-bsd",…}}
+
+PUT /v1/collections/order     {"slugs":["design","linux","read-later"]}
+200 OK                        {"status":"ordered","collections":[…renumbered…]}
+```
+
+The three things worth knowing:
+
+- **The server derives the slug** from the name (`storage.Slugify`, the same rule
+  the extension used to carry a copy of). A rename therefore *can change the key*,
+  which is why `PUT /v1/collections/{slug}` answers with the collection it now
+  holds rather than an empty 200, and why every client re-reads the list instead of
+  patching its own copy.
+- **`color` may be empty.** An empty string is a real value — "the user has not
+  chosen one" — and is not an error. Clients fall back to `#bf3f2e`, the same
+  default in the Go model, the extension and the phone.
+- **`order` is computed, never trusted.** `PUT /v1/collections/order` takes every
+  slug the caller knows, in the order it just drew, and renumbers the whole table
+  to a dense `0..n-1`; a new collection is appended at `max+1`. A partial list is
+  rejected, because two clients interleaving partial orders is how a list ends up
+  with duplicate positions.
+
+Failures are `400` (blank name, unusable colour, unknown slug in the order list),
+`404` (no such collection), `409` (`{"reason":"collection already exists"}` — a
+rename or a create that collides on the slug) and `500`.
+
+**There is no delete.** A collection holds bookmarks, and deleting one would have to
+answer what happens to them; the resource is easier to explain without a second
+destructive verb. An empty collection can simply be ignored, and a rename reuses it.
 
 ### `GET /health`
 
@@ -629,7 +722,23 @@ entries for that prefix, and any other method is answered with `405` and an
 ```text
 GET /api/gallery/collections
 GET /api/gallery/collections/{slug}/posts
+                              ?sort=saved_desc|saved_asc|tweet_desc|tweet_asc
+                              &saved_from=&saved_to=&tweet_from=&tweet_to=
+                              &cursor=&limit=
 ```
+
+Two clients read these two routes: the web gallery, and the phone screen
+(`morphe/README.md#the-gallery-screen`), which is why the collection summary
+carries `color` and `order` and the post page carries `next_cursor` / `has_more`
+rather than a page offset. The phone sorts and filters through the same four
+`sort` values and the same inclusive date bounds, so neither client has to
+implement ordering of its own.
+
+What the phone does with a row is its own business: it takes the tweet id from this
+answer and draws the live post from Twitter itself
+(`morphe/README.md#where-a-rows-content-comes-from`), so the archive's stored
+`text`, `media` and `author` are the fallback and the web gallery stays the only
+client that renders them as the truth.
 
 `scripts/check-gallery-acceptance.sh` re-asserts the guarantee *after* curation
 has run — `POST`, `PUT` and `DELETE` against a gallery path all answer `405`, and
@@ -658,6 +767,14 @@ of turning it into a list of exceptions.
 > say **collection**. They are the same thing, and `slug` is the key either way:
 > a "move to folder" is `PUT …/collection` with `{"slug":"…"}`. Expect both words
 > in the same conversation.
+
+Both routes have three callers now, and none of them is the gallery API: the web
+app's curation menu, the extension's popup, and — since the phone's saved-tweet
+sheet gained a **Change collection…** row and a **Remove from Bookmarker** row —
+the Morphe patch. That is the point of putting them here rather than under
+`/api/gallery/`: the phone moves a bookmark by writing one column and takes one out
+by asking for the soft delete, so neither client needs the archive's read-only
+guarantee to be relaxed for it.
 
 ### `DELETE /v1/bookmarks/{tweet_id}`
 

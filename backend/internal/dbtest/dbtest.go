@@ -93,13 +93,20 @@ func Insert(t *testing.T, conn *sql.DB, collectionID int64, row Row) string {
 
 // Collection inserts a collection and returns its id. An empty name falls back
 // to the slug, which is what the schema requires (name is NOT NULL).
+//
+// The position is max+1, exactly like the Store's own insert, so a fixture in
+// insertion order is a fixture in display order. Seeding with the column default
+// (0 for every row) would leave the order to the tie-break and make a test that
+// reads "the collections come back in this order" depend on the slug alphabet
+// instead of on the positions it meant to set.
 func Collection(t *testing.T, conn *sql.DB, slug, name string) int64 {
 	t.Helper()
 	if name == "" {
 		name = slug
 	}
 	result, err := conn.Exec(
-		`INSERT INTO collections(slug, name, created_at) VALUES(?, ?, ?)`,
+		`INSERT INTO collections(slug, name, created_at, sort_order)
+		 VALUES(?, ?, ?, (SELECT coalesce(max(sort_order), -1) + 1 FROM collections))`,
 		slug, name, Stamp(0),
 	)
 	if err != nil {

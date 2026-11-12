@@ -15,27 +15,19 @@ package gallery
 import (
 	"errors"
 	"time"
+
+	"twitter-bookmarker/internal/model"
 )
 
-// Collection is the summary of one collection. It maps to a homepage card
-// (PRD-2 §74).
-type Collection struct {
-	// Slug is the collection's public key: what the extension sends with a save
-	// and what the gallery URL carries. It is not a filename.
-	Slug string `json:"slug"`
-	// Name is the display name the extension supplied, falling back to a name
-	// derived from the slug for a collection that was never saved to by a
-	// version of the extension that sends one.
-	Name       string `json:"name"`
-	PostCount  int    `json:"post_count"`
-	MediaCount int    `json:"media_count"`
-	// LastSavedAt is the maximum saved_at in the collection as UTC RFC3339, or
-	// nil when it has no valid rows. JSON is null in that case.
-	LastSavedAt *string `json:"last_saved_at"`
-	// CoverMedia holds up to four media URLs taken from the newest-by-saved_at
-	// rows, newest first. It is never nil, so it always encodes as [].
-	CoverMedia []string `json:"cover_media"`
-}
+// Collection is the summary of one collection: the catalog fields the backend
+// stores (slug, name, colour, order) plus the ones derived from its bookmarks
+// (counts, the newest saved_at, the cover). It maps to a homepage card.
+//
+// It is an alias for model.Collection rather than a second struct with the same
+// JSON tags, because the two are the same wire object: /v1/collections and
+// /api/gallery/collections answer with it, and a client should not have to
+// reconcile two shapes that look the same and drift apart.
+type Collection = model.Collection
 
 // Post is one bookmark row, ready to render as a gallery card (PRD-2 §75).
 type Post struct {

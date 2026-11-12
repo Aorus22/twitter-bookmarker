@@ -13,7 +13,7 @@ import {
   MASONRY_COLUMN_GAP,
   MASONRY_ROW_GAP,
   distributeMasonryKeys,
-  masonryContainerWidth,
+  masonryMaxWidth,
 } from "@/lib/masonry"
 import { cn } from "@/lib/utils"
 
@@ -206,7 +206,10 @@ export function GalleryMasonry({
         data-columns={count}
         style={{
           columnGap: `${MASONRY_COLUMN_GAP}px`,
-          maxWidth: `${masonryContainerWidth(count)}px`,
+          maxWidth:
+            masonryMaxWidth(count) === undefined
+              ? undefined
+              : `${masonryMaxWidth(count)}px`,
         }}
         className={cn("flex w-full items-start", className)}
       >

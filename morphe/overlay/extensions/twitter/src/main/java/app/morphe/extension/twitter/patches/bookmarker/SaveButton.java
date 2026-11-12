@@ -242,7 +242,11 @@ public class SaveButton {
         String savedSlug = BookmarkerCache.savedSlug(tweetId);
         if (savedSlug != null) {
             Logger.printInfo(() -> "twb: tapped an already saved tweet (" + savedSlug + ")");
-            BookmarkerSheets.showSavedInfo(context, BookmarkerCache.nameFor(savedSlug), savedSlug);
+            // The tweet id comes along: the sheet's move and remove rows write to the
+            // backend, and the button is already marked, so this is the only place
+            // that knows which tweet the sheet is about.
+            BookmarkerSheets.showSavedInfo(
+                    context, tweetId, BookmarkerCache.nameFor(savedSlug), savedSlug);
             return;
         }
 

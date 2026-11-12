@@ -2,7 +2,7 @@
  * Popup entry point.
  *
  * Wires the four popup sections together on load:
- *   - categories (CRUD / colour / drag order),
+ *   - categories (list / add / rename / colour / order, all backend calls),
  *   - settings (auto-unbookmark, Popover/Inline),
  *   - backend target (Localhost / Custom URL),
  *   - backend status (`GET /health`).
@@ -11,8 +11,13 @@
  * storage-backed sections, so the popup can never show stale state. The health
  * probe runs whenever the *resolved* backend address changes, so a custom URL
  * takes effect the moment it is saved.
+ *
+ * The category list is rendered from the cache first, then refreshed if it is
+ * stale; the refresh reaches this popup as a storage change, which is the same path
+ * a change made from another window takes.
  */
 
+import { refreshCollectionsIfStale } from "../shared/collections-sync.ts";
 import { resolveBackendBaseUrl } from "../shared/backend-url.ts";
 import { resolveBackendToken } from "../shared/backend-token.ts";
 import { getStore, onStoreChanged } from "../shared/storage.ts";
@@ -64,6 +69,10 @@ function bootstrap(): void {
     void getStore()
       .then(render)
       .catch(reportBootError);
+
+    // The list renders from the cache above; this only fills the gap when the cache
+    // is empty or old, and it never blocks the first paint.
+    void refreshCollectionsIfStale().catch(reportBootError);
   } catch (error) {
     reportBootError(error);
   }

@@ -1,6 +1,7 @@
 import { CollectionCover } from "@/components/gallery/collection-cover"
 import { formatCount, sumCounts } from "@/lib/collection-meta"
 import { sliceCoverMedia } from "@/lib/cover"
+import { isNsfwCollection } from "@/lib/nsfw"
 import { cn } from "@/lib/utils"
 import type { GalleryCollection } from "@/types"
 
@@ -54,8 +55,14 @@ export interface GalleryHeroProps {
 }
 
 export function GalleryHero({ collections }: GalleryHeroProps) {
+  // An NSFW collection's covers are blurred on its own card, so its media must
+  // not reappear unblurred in the hero collage. Excluded here rather than
+  // filtered per tile: the hero is one composition, and a half-blurred mosaic
+  // would read as a rendering fault.
   const media = sliceCoverMedia(
-    collections.flatMap((collection) => collection.cover_media)
+    collections
+      .filter((collection) => !isNsfwCollection(collection))
+      .flatMap((collection) => collection.cover_media)
   )
   const mediaTotal = sumCounts(collections, (c) => c.media_count)
   // The archive-wide bookmark (post) total. The per-collection rows each carry

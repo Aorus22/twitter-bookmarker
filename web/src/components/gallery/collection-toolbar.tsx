@@ -1,6 +1,7 @@
 import { ChevronDownIcon, ListFilter } from "lucide-react"
 import type { ReactNode } from "react"
 
+import { ViewModeToggle } from "@/components/gallery/view-mode-toggle"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +15,7 @@ import {
   FILTER_LABEL,
   SORT_LABEL,
 } from "@/lib/messages"
+import { DEFAULT_VIEW_MODE, type GalleryViewMode } from "@/lib/view-mode"
 import { cn } from "@/lib/utils"
 import type { GallerySort } from "@/types"
 
@@ -75,6 +77,13 @@ export interface CollectionToolbarProps {
   /** Current sort mode. */
   sort: GallerySort
   onSortChange: (value: GallerySort) => void
+  /**
+   * Current layout (owner request, Nov 2026). The switcher only renders when
+   * `onViewModeChange` is supplied, so a toolbar rendered without a page to own
+   * the choice shows no dead controls.
+   */
+  viewMode?: GalleryViewMode
+  onViewModeChange?: (mode: GalleryViewMode) => void
   className?: string
 }
 
@@ -86,6 +95,8 @@ export function CollectionToolbar({
   filterControl,
   sort,
   onSortChange,
+  viewMode = DEFAULT_VIEW_MODE,
+  onViewModeChange,
   className,
 }: CollectionToolbarProps) {
   return (
@@ -165,6 +176,14 @@ export function CollectionToolbar({
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {onViewModeChange === undefined ? null : (
+        <ViewModeToggle
+          value={viewMode}
+          onChange={onViewModeChange}
+          className="sm:ml-auto"
+        />
+      )}
     </div>
   )
 }

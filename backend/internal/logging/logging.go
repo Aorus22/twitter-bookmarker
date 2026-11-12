@@ -107,6 +107,24 @@ func (lg *Logger) Duplicate(tweetID string) {
 	lg.Slog().Info("duplicate bookmark rejected", "tweet_id", tweetID)
 }
 
+// CollectionCreated reports a new category. Slugs are identifiers, never user
+// text, so only the key is logged.
+func (lg *Logger) CollectionCreated(slug string) {
+	lg.Slog().Info("collection created", "slug", slug)
+}
+
+// CollectionUpdated reports a rename, a colour change or a move. A rename logs
+// both keys so a URL that stopped resolving can be traced to the change.
+func (lg *Logger) CollectionUpdated(slug, current string) {
+	lg.Slog().Info("collection updated", "slug", slug, "current_slug", current)
+}
+
+// CollectionsReordered reports that the display order changed, with how many
+// collections the request named.
+func (lg *Logger) CollectionsReordered(named int) {
+	lg.Slog().Info("collections reordered", "named", named)
+}
+
 // InvalidRequest reports a payload/validation failure.
 func (lg *Logger) InvalidRequest(reason string) {
 	lg.Slog().Warn("invalid request", "reason", reason)

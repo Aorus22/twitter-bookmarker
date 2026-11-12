@@ -6,10 +6,13 @@ an observable expected result, and what to inspect on disk.
 
 > This file is the manual half of Phase 6. The automated half is
 > `go test ./... -race` (backend, PRD §65 items 1–20), `npm test`
-> (extension, 158 tests) and, for the gallery, `cd web && pnpm test`
+> (extension, 207 tests) and, for the gallery, `cd web && pnpm test`
 > (46 files / 496 tests) plus the two acceptance scripts described in §4.
 > The curation feature has its own scenario, §5 *G1*. Anything automated
-> there is **not** repeated here.
+> there is **not** repeated here. The collections API and the two injected
+> surfaces are covered by `extension/test/collections.test.mjs`,
+> `extension/test/route.test.mjs` and `backend/internal/api/collections_test.go`,
+> so this file only carries what a machine cannot see.
 >
 > A literal `~/.twitter-bookmarker/...` below is the **default** storage path. If
 > you started the backend with `TWITTER_BOOKMARKER_DIR`, substitute that
@@ -51,10 +54,21 @@ cd extension && npm run build
 3. Click **Load unpacked** and select `extension/dist/`
 4. Pin the extension so the popup is one click away
 
-### Create the categories used below
+### Create the collections used below
 
-Open the popup and add, in order: **AI**, **Linux**, **Design**.
-Set display mode to **Popover** first; switch to **Inline** only for scenario B9.
+The popup's list is the backend's, so this step writes rows to the database through
+`POST /v1/collections`. Open the popup and add, in order: **AI**, **Linux**,
+**Design** — then give **Linux** the green swatch and drag it to the top. Set
+display mode to **Popover** first; switch to **Inline** only for scenario B9.
+
+Confirm the four writes landed before testing anything else:
+
+```bash
+curl -s http://127.0.0.1:43121/v1/collections | python3 -m json.tool
+# expect: design/linux/ai in a deliberate order, with Linux's #10b981, and
+#         no `sort_order` in the JSON — the field the API exposes is `order`
+sqlite3 -header -column "$DB" 'SELECT slug, color, sort_order FROM collections ORDER BY sort_order;'
+```
 
 ### Disk locations and inspection commands
 
@@ -66,7 +80,8 @@ Everything below uses `<storage>`: `$TWITTER_BOOKMARKER_DIR` when that is set,
 |---|---|
 | Storage dir | `ls -la "$STORAGE"` |
 | Database | `$STORAGE/tw-bookmarker.db` |
-| Schema version | `sqlite3 "$DB" 'PRAGMA user_version;'` |
+| Schema version | `sqlite3 "$DB" 'PRAGMA user_version;'` (3 for a current database) |
+| Collections in the backend's order | `sqlite3 -header -column "$DB" 'SELECT sort_order, slug, color FROM collections ORDER BY sort_order;'` |
 | Collections + post counts | `sqlite3 -header -column "$DB" "SELECT c.slug, c.name, count(b.tweet_id) AS posts FROM collections c LEFT JOIN bookmarks b ON b.collection_id = c.id GROUP BY c.id ORDER BY c.slug;"` |
 | One collection's newest rows | `sqlite3 -header -column "$DB" "SELECT b.tweet_id, b.author, b.saved_at, b.text FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux' ORDER BY b.saved_at DESC LIMIT 5;"` |
 | Health | `curl -s http://127.0.0.1:43121/health` |
@@ -112,8 +127,8 @@ export DB="$STORAGE/tw-bookmarker.db"
 | A3 | Backend offline | Browser |
 | A4 | Auto-unbookmark enabled | Browser |
 | A5 | Auto-unbookmark fails | Browser |
-| B1 | Rename category | Browser (popup) |
-| B2 | Delete category | Browser (popup) |
+| B1 | Rename a collection | Browser (popup) + backend |
+| B2 | A collection cannot be deleted | Browser (popup) + backend |
 | B3 | Browser reload shows `✓ Saved` | Browser |
 | B4 | Backend restart (no derived index) | Backend + browser |
 | B5 | Stray CSV/index sidecars ignored | Backend + browser |
@@ -122,6 +137,8 @@ export DB="$STORAGE/tw-bookmarker.db"
 | B8 | Double-click category → one request | Browser + backend log |
 | B9 | Inline category display | Browser |
 | B10 | Custom backend URL | Browser (popup) + backend |
+| B11 | Colour and order are the backend's | Browser (popup) + backend |
+| B12 | Save button outside the bookmarks timeline | Browser |
 | C1 | Multiline tweet | Browser |
 | C2 | Emoji author | Browser |
 | C3 | Quoted tweet (parent text only) | Browser |
@@ -263,61 +280,123 @@ sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.c
 
 ---
 
-### B1 — Rename category  ·  PRD §68 *Rename category*
+### B1 — Rename a collection  ·  PRD §68 *Rename category*
 
 **Steps**
 1. Save one tweet to **Linux** so the `linux` collection exists.
-2. In the popup, rename **Linux** → **Linux Stuff** and confirm.
-3. Save a different tweet to the renamed category.
+2. In the popup, click the pencil on **Linux**, type **Linux Stuff**, press Enter.
+3. Watch the network: one `PUT /v1/collections/linux`, then one
+   `GET /v1/collections` (the worker re-reads the list it just changed).
 
 **Expected**
-- The old `linux` collection and its rows are untouched; new saves use the new
-  slug `linux-stuff`.
-- No toast error; the popup shows the new name and the new slug.
+- The popup shows **Linux Stuff** and the slug line reads `→ linux-stuff`.
+- No error text appears: a rename that changes the slug is a success, not a
+  conflict.
+- A second rename to the same name leaves one row: the update is in place.
 
 **Inspect on disk**
 ```bash
 sqlite3 -header -column "$DB" "SELECT id, slug, name FROM collections ORDER BY slug;"
-sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux';"
 sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug = 'linux-stuff';"
 ```
-- `linux` still has exactly its original row.
-- `linux-stuff` is a **new** collection row with the new bookmark. Renaming
-  changes the slug (which is derived from the name), so it never rewrites the old
-  bookmark rows.
-- `/v1/index` maps each tweet id to the slug used at save time.
+- One row, `linux-stuff`: the rename **updated** the collection rather than
+  creating a second one, so the `id` is unchanged and every bookmark filed under
+  it followed the rename.
+- The old slug `linux` matches nothing, and `/v1/index` now reports
+  `linux-stuff` for that tweet — the index is a join, not a stored slug.
+- Renaming onto a name another collection already has answers `409`; the popup
+  shows "A collection with that name already exists" and the list is unchanged.
 
 ---
 
-### B2 — Delete category  ·  PRD §68 *Delete category*
+### B2 — A collection cannot be deleted  ·  PRD §68 *Delete category*
+
+The product has no delete: a collection holds bookmarks, and removing one would
+have to answer where they go. This scenario proves the absence is real, not just
+hidden from the popup.
 
 **Steps**
-1. With the `linux` collection populated, delete the **Linux Stuff** category in
-   the popup.
-2. Confirm the native dialog: `Delete category "Linux Stuff"? Existing CSV data
-   will not be deleted.`
-3. Save a different tweet to another category (e.g. **AI**).
+1. Open the popup with at least two collections.
+2. Look for any delete control: there is none — the row has rename, colour, ↑/↓
+   and a drag handle.
+3. Try the API by hand, with the collection populated:
+   `curl -i -X DELETE http://127.0.0.1:43121/v1/collections/linux`
+4. Reload the popup and re-check the list.
 
 **Expected**
-- The category disappears from the popup.
-- No backend request is made for the delete (no server log line).
-- The database is untouched; `/v1/index` entries for deleted categories are
-  untouched.
+- Step 3 answers `405` with `Allow: PUT` (the path exists for a rename, and a
+  delete is not one of its methods). Nothing is removed.
+- The popup's list is unchanged after a reload.
+- `extension/scripts/verify-dist.mjs` fails the build if a delete string or the
+  `.category-delete` hook comes back, so this cannot regress silently.
 
 **Inspect on disk**
 ```bash
-sqlite3 -header -column "$DB" "SELECT slug, name FROM collections ORDER BY slug;"
-sqlite3 "$DB" "SELECT count(*) FROM bookmarks b JOIN collections c ON c.id = b.collection_id WHERE c.slug IN ('linux','linux-stuff');"
+sqlite3 -header -column "$DB" 'SELECT slug, name, color, sort_order FROM collections ORDER BY sort_order;'
+curl -s http://127.0.0.1:43121/v1/collections | python3 -m json.tool
 ```
-- The `linux` / `linux-stuff` collections and their bookmark rows are still
-  there — deleting a category only edits `chrome.storage.local`.
-- Previously saved tweets still show `✓ Saved` on reload (edge case §64
-  *"tweet saved in category that no longer exists"*).
+- Both lists agree, row for row, including the colours and the positions.
 
-> The popup's confirm text still says "Existing CSV data will not be deleted."
-> That string lives in `extension/src/popup/category-manager.ts` and was not part
-> of the storage migration; quote it as-is when matching the dialog, and read it
-> as "existing bookmark data".
+---
+
+### B11 — Colour and order are the backend's
+
+**Steps**
+1. In the popup, give **Linux** the green swatch and move it to the top with ↑.
+2. Read the list back over HTTP; read it again from the database.
+3. Open the phone's gallery screen (see `morphe/README.md#the-gallery-screen`).
+4. Clear the colour. The popup's swatch is a colour input and cannot express
+   "none", so do it over HTTP — this is also what the phone's **New collection…**
+   leaves behind, since a name is the only thing it sends:
+   `curl -s -X PUT http://127.0.0.1:43121/v1/collections/linux -H 'Content-Type: application/json' -d '{"color":""}'`
+5. Reload the popup and pull the phone screen's folder list again.
+
+**Expected**
+- `PUT /v1/collections/linux` carries `{"color":"#10b981"}`, and
+  `PUT /v1/collections/order` carries **every** slug, not just the moved one.
+- HTTP, the database and the phone agree on the order, and the phone shows the
+  same green bar for Linux.
+- After step 4 the database holds `''` — **not** `#bf3f2e`, because "no colour
+  chosen" and "chose the default" are different answers — while the popup's
+  swatch and the phone's bar both paint the shared default red. A colour the
+  server cannot parse (`#12345`, `red`) is the `400`.
+
+**Inspect on disk**
+```bash
+sqlite3 -header -column "$DB" 'SELECT sort_order, slug, color FROM collections ORDER BY sort_order;'
+sqlite3 "$DB" "SELECT count(*) FROM collections WHERE color = '' OR color GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]';"
+```
+- `sort_order` is a dense `0..n-1` with no gaps and no duplicates.
+
+---
+
+### B12 — Save button outside the bookmarks timeline
+
+**Steps**
+1. Open `https://x.com/home` and find the action bar of any tweet.
+2. Look for our button: a bookmark glyph with the label **Save to…**.
+3. Click it, pick a collection, confirm the toast.
+4. Open `https://x.com/settings` and a Direct Message thread
+   (`https://x.com/messages`), then scroll.
+5. Navigate with X's own UI from `/home` to `/i/history` and back, without a
+   reload.
+
+**Expected**
+- `/home` gets our button; X's own bookmark action is untouched beside it.
+- `/i/history` gets the **organizer** (`[Organize]` / inline chips) and **not**
+  our bookmark button — one surface at a time.
+- `/settings` and `/messages` get nothing at all: a route change there tears the
+  previous surface down without starting another.
+- Navigating between two ordinary pages (profile → tweet) does **not** tear the
+  controls down and does not re-inject them.
+- On a tweet that is already in the archive, the label reads `✓ Saved` and a tap
+  explains where it lives, on both surfaces.
+
+**Inspect**
+- The service worker's log: one `GET /v1/index` per page *entry*, not per
+  navigation between two ordinary pages.
+- `chrome://extensions` → the extension's console: no errors after the route
+  changes.
 
 ---
 
@@ -812,7 +891,7 @@ substitute `"$FIXTURE/tw-bookmarker.db"` and `<tweet_id>` (the id in the card's
 | G1.14 | Open a post in the media lightbox and use the kebab in its info panel (left of the `×`) | The menu, and then the confirmation, mount **inside** the lightbox, so `Tab` stays trapped in the dialog. Confirming closes the lightbox as well (its position is derived from the loaded posts) and the post is in the trash |
 | G1.15 | With a keyboard only: `Tab` to a card's kebab, `Enter`, `Delete bookmark`, then confirm | When the card is removed focus lands on the collection heading, not `<body>`, so the next `Tab` continues where the user was instead of restarting at the top of the page. Check `document.activeElement` in the console |
 | G1.16 | Restore the deleted bookmark with the documented recipe (command block E) | The before/after counts show the row is live again, and the trash row is **deliberately kept** so a restore stays auditable |
-| G1.17 | Check the schema (command block F) | `PRAGMA user_version;` is `2` and all three tables exist. Pointing the new backend at a version-1 directory upgrades it **in place on start** — it adds `deleted_bookmarks` and its index and stamps version 2, rewriting no row |
+| G1.17 | Check the schema (command block F) | `PRAGMA user_version;` is `3` and all three tables exist. Pointing the backend at a version-1 directory upgrades it **in place on start** — it adds `deleted_bookmarks` and its index, then the two `collections` columns, stamping 2 and then 3, and rewriting no row beyond filling the new columns in |
 
 **Command block A — Cancel / Escape changed nothing (G1.6)**
 ```bash
@@ -876,25 +955,243 @@ sqlite3 "$DB" "SELECT count(*) FROM deleted_bookmarks WHERE id = <the trash row'
 
 **Command block F — schema version and tables (G1.17)**
 ```bash
-sqlite3 "$DB" 'PRAGMA user_version;'    # -> 2
+sqlite3 "$DB" 'PRAGMA user_version;'    # -> 3
 sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;"
 # -> bookmarks, collections, deleted_bookmarks
+sqlite3 -header -column "$DB" 'SELECT sort_order, slug, color FROM collections ORDER BY sort_order;'
 ```
 - Version 2 added exactly one table plus one index
-  (`deleted_bookmarks_by_tweet`); the `collections` and `bookmarks` DDL is
-  unchanged from version 1.
-- To watch the upgrade: point the server at a version-1 storage directory (or
-  restore one from `backup/`), start it, and re-run the two commands above —
-  `user_version` is `2` and the row counts in `collections` / `bookmarks` are
-  unchanged. A file whose version is neither 1 nor 2 is refused rather than
+  (`deleted_bookmarks_by_tweet`); version 3 added `collections.color` and
+  `collections.sort_order` plus `collections_by_order`, and backfilled the order
+  to reproduce the previous `last_saved_at` arrangement.
+- To watch the upgrade: point the server at a version-1 or version-2 storage
+  directory (or restore one from `backup/`), start it, and re-run the commands
+  above — `user_version` is `3`, the row counts in `collections` / `bookmarks`
+  are unchanged, and the collections come out in the order the old build showed
+  them in. A file whose version is neither 1, 2 nor 3 is refused rather than
   migrated.
 
 ---
 
-## 6. Sign-off
+## 6. The phone (Morphe patch)
+
+The phone is a second client of the same API, so everything above still holds for
+it; these two scenarios cover what only a device can show. Build and install per
+[`morphe/README.md`](../morphe/README.md#installing-on-the-phone), then:
+
+### H1 — Save, and create a collection, from the phone
+
+**Steps**
+1. Open a tweet and tap our button beside the native bookmark action. With no
+   backend configured, the settings dialog opens instead: fill in the LAN address
+   and token, tap **Test**, then **Save**.
+2. Tap the button again and choose **New collection…**; type a name with a space
+   and a capital (`Read Later`) and confirm.
+3. Check the database and the browser.
+4. Save a second tweet into that collection, then close and reopen the app.
+
+**Expected**
+- One `POST /v1/collections` with the raw name, then one `POST /v1/bookmarks`
+  with the slug the **backend** derived (`read-later`) — the phone never invents
+  a slug of its own.
+- `/v1/collections` and `chrome.storage.local` (via the popup) both show
+  `read-later`; the popup can rename it and the phone sees the new name after its
+  cache TTL.
+- A tweet already in the archive is marked (filled bookmark), and tapping it names
+  the collection rather than posting a second save.
+
+**Inspect on disk**
+```bash
+sqlite3 -header -column "$DB" 'SELECT sort_order, slug, name, color FROM collections ORDER BY sort_order;'
+sqlite3 -header -column "$DB" "SELECT b.tweet_id, c.slug FROM bookmarks b JOIN collections c ON c.id = b.collection_id ORDER BY b.saved_at DESC LIMIT 3;"
+```
+- The phone-created collection sits **last** (its `sort_order` is `max+1`) and
+  carries `color = ''` until a colour is chosen anywhere.
+
+---
+
+### H2 — The gallery screen
+
+**Steps**
+1. Long-press our button → **Open bookmarker gallery**. (The same row is in the
+   collection picker, and there is one in the saved-notice sheet.)
+2. Note the folder list: does it match the popup's order and colours? Is there an
+   X title bar above our own header?
+3. Open a collection with at least 40 bookmarks. Scroll to the bottom.
+4. Tap the **filter** button in the header, then **Posted date**, then
+   **Oldest first**, then the **Date range** row and pick both dates, then
+   **Clear the date range**. Reopen the sheet after each tap: is the tick on the
+   option that is now in force?
+5. While a page is loading, tap another sort immediately.
+6. Tap a row.
+7. Watch the rows fill in: the avatar appears, and for a post saved without media
+   the text and the media come from Twitter rather than from the archive.
+8. Scroll to a post you know is **deleted** on X, and to one from a **private**
+   account (or turn the phone's network off and scroll a fresh collection).
+9. Open a collection containing a post with **four photos**, one with a **video**,
+   one that **quotes** another post, and one with a **poll**.
+10. Watch the first frame of a fresh collection, before any request can have
+    answered: is every row's avatar a grey circle of the full 40 dp, and every media
+    cell a grey box, with the text starting at the same x on every row?
+11. Compare the strip under a post that has counts with X's own: replies, reposts,
+    likes and views, glyph and figure, spread across the width.
+12. Tap the "Twitter is not answering" line itself while it is showing (step 8's
+    offline case is the reliable way to get it there). Then, from the **folder list**
+    (the overflow is only there), open the three dots: is **Rename a collection…**
+    absent while every folder has posts, and present — listing only the empty ones —
+    after creating a new collection? Is the **filter** button gone from this screen,
+    and the **overflow** gone once a collection is open?
+
+**Expected**
+- The folder order is the backend's, and each row's bar is that collection's
+  colour (the shared default red when the colour is empty).
+- Paging appends smoothly, with the "Load more" footer only while a next page
+  exists; the list never shows two pages twice.
+- The sort the user picked last wins: a page that arrives after the change is
+  dropped rather than appended (the list does not jump back).
+- The header is the app's, not ours: a **back arrow** (not a chip) on the left, the
+  title, and **one** action on the right — the **overflow** on the folder list, the
+  **filter** inside a collection. Both are drawn glyphs, not words, and there is no
+  **Refresh** anywhere. The filter button is accent-coloured exactly while a filter
+  or a non-default sort is in force, and muted otherwise.
+- The filters live in the bottom sheet the filter button opens — not in a row of
+  capsules under the header — and every option is present there: both date bases,
+  both directions, and the date range with its pickers.
+- Every row shows four icons under the post (**reply, repost, heart, chart**), drawn
+  by the overlay, whether or not the live post arrived — and the numbers only appear
+  when it did. The filter button's sliders are the same kind of drawn glyph.
+- A row whose live post has not arrived shows **grey skeleton bars** — one where the
+  name goes, two where the text goes — and never the archive's saved name, handle,
+  date or text. Nothing in the row changes height when the answer lands, and no row
+  ever shows our stored copy of the tweet.
+- Rows ahead of the scroll are already loaded: scroll a collection slowly and the next
+  screenful should arrive with its pictures and numbers in place rather than filling
+  in behind the scroll. The next page is fetched eight rows before the end of the
+  current one.
+- Profile pictures are **circles**, including the ones that load late, and handles
+  read as `@name` with one `@` — the stored value sometimes carries its own.
+- No **Loading…** text ever appears above the list: the folders and the rows simply
+  appear. Nothing above the list changes height while the user is looking at it, so
+  a finger already moving towards a folder lands on the folder it aimed at.
+- The status bar and the navigation bar are the screen's own colour (black in
+  **Lights out**, white in light mode) with icons that are readable on it — not the
+  app's blue.
+- A picked day bounds the range inclusively at both ends, in the **phone's**
+  timezone, against whichever date basis is selected.
+- Tapping a row opens the post **in X**, on the tweet screen with its replies.
+  Opening in a browser is a failure, not the expected fallback: the row tries the
+  known names for X's link interpreter, then asks the app which of its own
+  activities claims the link, and only then gives up on the app. `adb logcat | grep
+  "twb:"` says which class it used — `opened a post with
+  com.twitter.deeplink.implementation.UrlInterpreterActivity` is the pass, and
+  `nothing in the app resolved …` is the failure.
+- Rows carry Twitter's own content: an avatar, the name and handle, a relative age
+  (`5m`, `3h`, `12 Mar`), the text, and the four counts as an action strip. A
+  verified account shows a badge only if this X build has a drawable named
+  `ic_vector_verified` — the header is correct either way.
+- The layout does not move while images arrive: a row with no avatar URL *or* an
+  avatar still downloading shows the same grey circle in the same 40 dp column, so
+  the text never starts at the screen edge, and a media cell that has not decoded
+  yet is a grey box rather than a black hole of the reserved height. Nothing about a
+  row changes size between its first frame and its last.
+- The strip under the post is four equal columns of glyph-plus-figure, and a figure
+  is omitted when it is zero and when Twitter has not answered — the glyphs are
+  never mixed, so it is either four icons or four bare numbers, never a heart among
+  numbers. (X's drawable names are not a contract: if none of the four resolve, the
+  numbers are the strip.)
+- With **no route to Twitter at all**, after roughly three rows the screen says
+  `Twitter is not answering, so these rows are the copies saved in the archive.` and
+  stops requesting — the line is a deliberate state, not an error, and **tapping the
+  line** clears it and tries again.
+- Images and live posts load in parallel rather than in a queue: the avatars and
+  media of the visible rows arrive while later rows are still being asked about.
+- A post with four photos renders as a 2×2 grid, one with three as two and then a
+  full-width cell, one video as a poster frame with `Video · 0:25` under it, and
+  more than four as the first four plus `+N more`.
+- A quoted post renders as an outlined block with its author and text; a poll
+  renders as `label — 42%` rows. Nothing in a row is a button: the whole row is one
+  tap target.
+- A deleted post reads `This post is no longer on X, so this is the copy saved in
+  the archive.`, a private one says the same about privacy, and with no network at
+  all the rows still show the archive's copy with no message.
+- The sort and the filters are unaffected by rows filling in: a late answer changes
+  what one row shows, never its place in the list.
+- Back goes to the folders when a collection is open, and closes the screen when
+  the folders are already showing.
+- The screen's own light/dark colours follow the app: with X in **Lights out**
+  and the phone in light mode, the text stays readable and the background is not
+  white-on-dark.
+
+**Watch**
+- `adb logcat | grep -i "twb:"` — the patch logs its failures rather than
+  toasting them, and the gallery's HTTP failures (`401`, unreachable) land there.
+- Memory over a long list: the thumbnail cache is `LruCache` at heap/8 with
+  `inSampleSize`, which has never been measured on a real archive — and circular
+  avatars are a second entry per URL, so a long scroll holds both.
+- One request per visible post goes to `api.fxtwitter.com`; a burst of
+  `twb: could not read post …` lines in logcat means that service is refusing or
+  unreachable, which is a fallback rather than a bug — and the screen says so in one
+  line once it has seen three in a row.
+- `twb: N posts in a row came back empty; pausing live posts for 300s` is the pause
+  starting, and the three thread pools are visible in a dump as `twb-live-*` (the
+  live posts) and `twb-image-*` (the thumbnails): if the images stall while the
+  fetches are also stalled, the split has failed and that is a bug worth reporting.
+
+### H3 — Move and remove a bookmark from the phone
+
+The two curation rows on an already-saved tweet, which are the phone's half of
+[§5 G1](#5-curation--delete-move-and-restore-g1). Both write to the same endpoints
+the web gallery uses, so the database is the check that matters.
+
+**Steps**
+1. Open any tweet that is already in the archive (`✓ Saved`) and tap our button.
+2. Tap **Change collection…**, then pick a collection that is not the current one.
+3. Tap the button again: does the information row name the collection just picked?
+4. Tap **Change collection…** again and look at the list.
+5. Tap **Close**.
+6. Tap the button, tap **Remove from Bookmarker**, and read the confirmation.
+7. Tap **Keep**; then repeat and tap **Remove**.
+8. Tap the tweet's own button again.
+9. Check the database (spot-check block in §5, `deleted_bookmarks`) and the gallery.
+10. Reopen the collection picker on a tweet that is **not** saved yet and tap
+    **Close** without choosing a collection.
+
+**Expected**
+- The picker opens with a row per collection **other than the current one**, plus
+  **New collection…** and **Close**; the current collection is absent because moving
+  a bookmark to where it already is is a request that changes nothing.
+- One `PUT /v1/bookmarks/<id>/collection` with `{"slug":"<new>"}` — `200`, and
+  logcat shows `twb: PUT /v1/bookmarks/<id>/collection -> 200`. The saved date, the
+  stored text and the media are untouched: the row moved, nothing was re-saved.
+- The sheet's information row names the new collection on the next open, and the
+  mark on X's own button follows without a reload (`BookmarkerCache.remember`).
+- **Remove from Bookmarker** asks first, in a dialog that says the bookmark goes to
+  the backend's trash rather than being destroyed, and **Keep** sends nothing at all.
+- Confirming sends one `DELETE /v1/bookmarks/<id>` → `200`; the row leaves
+  `bookmarks`, appears in `deleted_bookmarks` with a `deleted_at` stamp, and the
+  tweet's own button goes back to its unsaved glyph in the same breath
+  (`BookmarkerCache.forget`, no refetch).
+- The removed bookmark is gone from the collection in the gallery, and the collection
+  counts in the popup drop by one after its next refresh.
+- **Close** dismisses the sheet and sends nothing — the whole point of the row is
+  that the drag gesture is no longer the only way out.
+
+**Watch**
+- A `404` from either endpoint is reported as "the backend has no such bookmark or
+  collection" and changes nothing: a stale picker opened before another device moved
+  or removed the same bookmark lands there rather than corrupting anything.
+- `401` on both rows means the token, not the row: nothing is written, and the
+  message says so.
+- The trash is a log, not a claim on the Status ID: re-saving the same tweet
+  afterwards is a `201`, and the `deleted_bookmarks` row stays behind on purpose.
+
+---
+
+## 7. Sign-off
 
 - [ ] A1–A5 pass
-- [ ] B1–B8 pass
+- [ ] B1–B12 pass
+- [ ] H1–H2 pass (device)
 - [ ] C1–C4 pass
 - [ ] D1–D3 pass
 - [ ] E1 passes

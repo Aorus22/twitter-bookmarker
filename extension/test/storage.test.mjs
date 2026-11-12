@@ -14,6 +14,8 @@ import { combineStore, normalizeDisplayMode, normalizeSettings } from "../src/sh
 
 const PRD_DEFAULT_SETTINGS = {
   unbookmarkAfterSave: false,
+  autoUnbookmarkSaved: false,
+  autoUnbookmarkSavedMode: "visible",
   displayMode: "popover",
   backendMode: "localhost",
   backendUrl: "http://127.0.0.1:43121",
@@ -32,6 +34,8 @@ test("normalizeSettings keeps valid values and clamps invalid ones", () => {
     normalizeSettings({
       settings: {
         unbookmarkAfterSave: true,
+        autoUnbookmarkSaved: true,
+        autoUnbookmarkSavedMode: "aggressive",
         displayMode: "inline",
         backendMode: "custom",
         backendUrl: "http://192.168.1.10:8080/",
@@ -40,6 +44,8 @@ test("normalizeSettings keeps valid values and clamps invalid ones", () => {
     }),
     {
       unbookmarkAfterSave: true,
+      autoUnbookmarkSaved: true,
+      autoUnbookmarkSavedMode: "aggressive",
       displayMode: "inline",
       backendMode: "custom",
       backendUrl: "http://192.168.1.10:8080",
@@ -51,6 +57,20 @@ test("normalizeSettings keeps valid values and clamps invalid ones", () => {
 
   assert.equal(normalizeSettings({ settings: { displayMode: "bogus" } }).displayMode, "popover");
   assert.equal(normalizeSettings({ settings: { backendMode: "bogus" } }).backendMode, "localhost");
+  assert.equal(
+    normalizeSettings({ settings: { autoUnbookmarkSaved: "yes" } }).autoUnbookmarkSaved,
+    false,
+    "a non-boolean watcher setting degrades to off",
+  );
+  assert.equal(
+    normalizeSettings({ settings: { autoUnbookmarkSavedMode: "aggressive" } }).autoUnbookmarkSavedMode,
+    "aggressive",
+  );
+  assert.equal(
+    normalizeSettings({ settings: { autoUnbookmarkSavedMode: "bogus" } }).autoUnbookmarkSavedMode,
+    "visible",
+    "an unknown watcher mode degrades to visible",
+  );
   assert.equal(
     normalizeSettings({ settings: { backendMode: "custom", backendUrl: "ftp://server/file" } }).backendUrl,
     "http://127.0.0.1:43121",

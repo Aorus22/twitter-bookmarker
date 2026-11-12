@@ -14,7 +14,9 @@ import {
   createCollection,
   fetchCollections,
   fetchSavedIndex,
+  moveBookmark,
   postBookmark,
+  removeBookmark,
   reorderCollections,
   updateCollection,
 } from "../src/shared/api.ts";
@@ -380,6 +382,67 @@ test("an unreachable backend on a collection call is backend_unavailable", async
   await assert.rejects(fetchCollections(), (error) => {
     assert.ok(error instanceof BackendUnavailableError);
     assert.equal(bgErrorFrom(error), "backend_unavailable");
+    return true;
+  });
+});
+
+test("moveBookmark PUTs the destination slug and returns the backend's echo", async () => {
+  const calls = captureFetch(() => jsonResponse(200, { status: "moved", tweet_id: "123", slug: "ai" }));
+  const result = await moveBookmark("123", "ai", "http://127.0.0.1:43121", "tok");
+
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/bookmarks/123/collection");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { slug: "ai" }, "the body names the destination only");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer tok");
+  assert.deepEqual(result, { status: "moved", tweet_id: "123", slug: "ai" });
+});
+
+test("moveBookmark failure codes follow the shared mapping", async () => {
+  for (const [status, code] of [
+    [400, "invalid_request"],
+    [404, "not_found"],
+    [500, "internal"],
+  ]) {
+    captureFetch(() => jsonResponse(status, {}));
+    await assert.rejects(moveBookmark("123", "nope"), (error) => {
+      assert.ok(error instanceof BackendRequestError, `status ${status} should be a BackendRequestError`);
+      assert.equal(error.code, code);
+      return true;
+    });
+  }
+});
+
+test("a malformed move echo is internal, never a silent success", async () => {
+  captureFetch(() => jsonResponse(200, { unexpected: true }));
+  await assert.rejects(moveBookmark("123", "ai"), (error) => {
+    assert.equal(error.code, "internal");
+    return true;
+  });
+});
+
+test("removeBookmark DELETEs the tweet and returns the trash contract", async () => {
+  const calls = captureFetch(() => jsonResponse(200, { status: "deleted", tweet_id: "123", recoverable: true }));
+  const result = await removeBookmark("123", "http://127.0.0.1:43121", "tok");
+
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/bookmarks/123");
+  assert.equal(calls[0].init.method, "DELETE");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer tok");
+  assert.equal(result.recoverable, true, "the backend's word that the row moved to the trash");
+});
+
+test("removeBookmark failure codes follow the shared mapping", async () => {
+  captureFetch(() => jsonResponse(404, {}));
+  await assert.rejects(removeBookmark("404-tweet"), (error) => {
+    assert.ok(error instanceof BackendRequestError);
+    assert.equal(error.code, "not_found");
+    return true;
+  });
+
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  await assert.rejects(removeBookmark("123"), (error) => {
+    assert.ok(error instanceof BackendUnavailableError);
     return true;
   });
 });

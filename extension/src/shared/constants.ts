@@ -78,6 +78,10 @@ export const HEALTH_TIMEOUT_MS = 4000;
 /** Default settings (PRD §50). */
 export const DEFAULT_SETTINGS: Settings = {
   unbookmarkAfterSave: false,
+  // The history watcher is a bulk, page-driven action, so it never starts on.
+  autoUnbookmarkSaved: false,
+  // The gentle mode is the default; aggressive is a deliberate choice.
+  autoUnbookmarkSavedMode: "visible",
   displayMode: "popover",
   backendMode: "localhost",
   // Pre-filled with the loopback address so switching to Custom starts from a

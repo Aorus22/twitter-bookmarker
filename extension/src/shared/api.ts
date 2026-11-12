@@ -32,8 +32,10 @@ import type {
   CollectionListResponse,
   CollectionResponse,
   CreateCollectionRequest,
+  DeleteResult,
   DuplicateResult,
   HealthResponse,
+  ReassignResult,
   ReorderCollectionsResponse,
   SavedIndex,
   SaveRequest,
@@ -176,6 +178,24 @@ function isDuplicateResult(value: unknown): value is DuplicateResult {
   return isRecord(value) && value.status === "duplicate" && typeof value.tweet_id === "string";
 }
 
+function isReassignResult(value: unknown): value is ReassignResult {
+  return (
+    isRecord(value) &&
+    typeof value.status === "string" &&
+    typeof value.tweet_id === "string" &&
+    typeof value.slug === "string"
+  );
+}
+
+function isDeleteResult(value: unknown): value is DeleteResult {
+  return (
+    isRecord(value) &&
+    typeof value.status === "string" &&
+    typeof value.tweet_id === "string" &&
+    typeof value.recoverable === "boolean"
+  );
+}
+
 /** Narrow a collection list body. The entries themselves are validated by the mapper. */
 function isCollectionList(value: unknown): value is CollectionListResponse {
   return isRecord(value) && Array.isArray(value.collections);
@@ -295,6 +315,46 @@ export async function postBookmark(
   const body = await readJson(response);
   if (!isSaveResult(body)) throw new BackendRequestError("internal", response.status, "malformed_result");
   return { kind: "saved", body };
+}
+
+/**
+ * Move a saved tweet into another collection
+ * (`PUT /v1/bookmarks/{tweet_id}/collection`).
+ *
+ * The body names the destination and nothing else — that path sets exactly one
+ * thing. An unknown tweet or slug is `not_found` (404); nothing is created by
+ * moving into it.
+ */
+export async function moveBookmark(
+  tweetId: string,
+  slug: string,
+  baseUrl: string = DEFAULT_BACKEND_BASE_URL,
+  token = "",
+): Promise<ReassignResult> {
+  const path = `${BOOKMARKS_PATH}/${encodeURIComponent(tweetId)}/collection`;
+  const body = await sendJson(baseUrl, token, path, "PUT", { slug });
+  if (!isReassignResult(body)) throw new BackendRequestError("internal", 0, "malformed_reassign");
+  return body;
+}
+
+/**
+ * Take a saved tweet out of the archive (`DELETE /v1/bookmarks/{tweet_id}`).
+ *
+ * The row moves to the backend's trash — the 200 body's `recoverable: true` is
+ * that promise — so this is a removal, not a destruction, and callers are
+ * expected to have confirmed with the user first.
+ */
+export async function removeBookmark(
+  tweetId: string,
+  baseUrl: string = DEFAULT_BACKEND_BASE_URL,
+  token = "",
+): Promise<DeleteResult> {
+  const path = `${BOOKMARKS_PATH}/${encodeURIComponent(tweetId)}`;
+  const response = await request(baseUrl, token, path, { method: "DELETE" }, REQUEST_TIMEOUT_MS);
+  if (!response.ok) throw errorFor(response);
+  const body = await readJson(response);
+  if (!isDeleteResult(body)) throw new BackendRequestError("internal", response.status, "malformed_delete");
+  return body;
 }
 
 /* -------------------------------------------------------------------------- */

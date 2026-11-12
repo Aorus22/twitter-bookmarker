@@ -165,10 +165,10 @@ export function createPlainTweet(overrides = {}) {
 }
 
 /** A store shaped like `chrome.storage.local`'s payload. */
-export function makeStore(categories, displayMode = "inline") {
+export function makeStore(categories, displayMode = "inline", settings = {}) {
   return {
     version: 3,
-    settings: { unbookmarkAfterSave: false, displayMode },
+    settings: { unbookmarkAfterSave: false, ...settings, displayMode },
     categories,
   };
 }

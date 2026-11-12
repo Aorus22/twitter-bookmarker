@@ -122,6 +122,10 @@ export const CATEGORY_ID_ATTRIBUTE = "data-category-id";
 export const CLICK_TS_ATTRIBUTE = "data-twitter-bookmarker-click-ts";
 /** Marks a root whose popover is currently open. */
 export const POPOVER_OPEN_ATTRIBUTE = "data-twitter-bookmarker-popover-open";
+/** Marks the modal backdrop mounted into `document.body`. */
+export const MODAL_ATTRIBUTE = "data-twitter-bookmarker-modal";
+/** Marks the dialog element inside a modal backdrop. */
+export const MODAL_DIALOG_ATTRIBUTE = "data-twitter-bookmarker-modal-dialog";
 
 /* -------------------------------------------------------------------------- */
 /* Query helpers                                                              */

@@ -29,7 +29,9 @@ import {
   createCollection,
   fetchCollections,
   fetchSavedIndex,
+  moveBookmark,
   postBookmark,
+  removeBookmark,
   reorderCollections,
   updateCollection,
 } from "../shared/api.ts";
@@ -136,6 +138,20 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         return outcome.kind === "saved"
           ? { ok: true, result: outcome.body }
           : { ok: true, duplicate: outcome.body };
+      } catch (error) {
+        return { ok: false, error: bgErrorFrom(error) };
+      }
+
+    case "MOVE_BOOKMARK":
+      try {
+        return { ok: true, result: await moveBookmark(message.tweetId, message.slug, baseUrl, token) };
+      } catch (error) {
+        return { ok: false, error: bgErrorFrom(error) };
+      }
+
+    case "REMOVE_BOOKMARK":
+      try {
+        return { ok: true, result: await removeBookmark(message.tweetId, baseUrl, token) };
       } catch (error) {
         return { ok: false, error: bgErrorFrom(error) };
       }

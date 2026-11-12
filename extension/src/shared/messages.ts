@@ -11,7 +11,9 @@
 
 import type {
   Category,
+  DeleteResult,
   DuplicateResult,
+  ReassignResult,
   SavedIndex,
   SavedIndexEntry,
   SaveRequest,
@@ -23,6 +25,8 @@ export type MessageType =
   | "HEALTH_CHECK"
   | "GET_SAVED_INDEX"
   | "SAVE_TWEET"
+  | "MOVE_BOOKMARK"
+  | "REMOVE_BOOKMARK"
   | "LIST_COLLECTIONS"
   | "CREATE_COLLECTION"
   | "UPDATE_COLLECTION"
@@ -55,6 +59,22 @@ export interface GetSavedIndexMessage {
 export interface SaveTweetMessage {
   type: "SAVE_TWEET";
   payload: SaveRequest;
+}
+
+/**
+ * Ask the service worker to move a saved tweet into another collection
+ * (`PUT /v1/bookmarks/{tweet_id}/collection`).
+ */
+export interface MoveBookmarkMessage {
+  type: "MOVE_BOOKMARK";
+  tweetId: string;
+  slug: string;
+}
+
+/** Ask the service worker to take a saved tweet out of the archive (`DELETE /v1/bookmarks/{tweet_id}`). */
+export interface RemoveBookmarkMessage {
+  type: "REMOVE_BOOKMARK";
+  tweetId: string;
 }
 
 /** Ask the service worker for the collection list (`GET /v1/collections`). */
@@ -93,6 +113,8 @@ export type ExtensionMessage =
   | HealthCheckMessage
   | GetSavedIndexMessage
   | SaveTweetMessage
+  | MoveBookmarkMessage
+  | RemoveBookmarkMessage
   | ListCollectionsMessage
   | CreateCollectionMessage
   | UpdateCollectionMessage
@@ -124,6 +146,26 @@ export interface SaveTweetResponse {
 }
 
 /**
+ * Response to {@link MoveBookmarkMessage}. `result` carries the backend's echo
+ * (`status`/`tweet_id`/`slug`) so the caller can trust what moved where.
+ */
+export interface MoveBookmarkResponse {
+  ok: boolean;
+  result?: ReassignResult;
+  error?: string;
+}
+
+/**
+ * Response to {@link RemoveBookmarkMessage}. `result.recoverable` is the
+ * backend's word that the row moved to its trash rather than being destroyed.
+ */
+export interface RemoveBookmarkResponse {
+  ok: boolean;
+  result?: DeleteResult;
+  error?: string;
+}
+
+/**
  * Response to every collection message.
  *
  * `collections` is the list as the backend holds it *after* the operation — the
@@ -142,6 +184,8 @@ export type ExtensionResponse =
   | HealthCheckResponse
   | GetSavedIndexResponse
   | SaveTweetResponse
+  | MoveBookmarkResponse
+  | RemoveBookmarkResponse
   | CollectionsResponse;
 
 /** Convenience alias for the index entry shape used by {@link SavedIndex}. */
@@ -161,6 +205,8 @@ const MESSAGE_TYPES: readonly string[] = [
   "HEALTH_CHECK",
   "GET_SAVED_INDEX",
   "SAVE_TWEET",
+  "MOVE_BOOKMARK",
+  "REMOVE_BOOKMARK",
   "LIST_COLLECTIONS",
   "CREATE_COLLECTION",
   "UPDATE_COLLECTION",

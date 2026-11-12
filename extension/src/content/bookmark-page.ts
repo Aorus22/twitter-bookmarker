@@ -16,18 +16,22 @@ import { DEFAULT_SETTINGS, createDefaultStore } from "../shared/constants.ts";
 import { sendExtensionMessage } from "../shared/messages.ts";
 import type { GetSavedIndexResponse } from "../shared/messages.ts";
 import { getStore } from "../shared/storage.ts";
-import type { Category, Settings, Store } from "../shared/types.ts";
+import type { Category, SavedIndex, Settings, Store } from "../shared/types.ts";
 import {
   createResilientObserver,
   createSavedIndexRefresher,
   runBoundedCleanup,
 } from "./hardening.ts";
 import type { ResilientObserver, SavedIndexRefresher } from "./hardening.ts";
+import { createHistoryWatcher } from "./history-watcher.ts";
+import type { HistoryWatcher, HistoryWatcherDeps } from "./history-watcher.ts";
 import { closeStalePopover } from "./organizer.ts";
 import type { OrganizerCallbacks, OrganizerVariant } from "./organizer.ts";
+import { closeStaleSaveModal } from "./save-modal.ts";
 import { dismissAllToasts } from "./toast.ts";
 import { EXTRACTION_ERROR, extractTweet } from "./tweet-extractor.ts";
 import type { ExtractionResult } from "./tweet-extractor.ts";
+import { unbookmarkTweet } from "./unbookmark.ts";
 import { injectOrganizer, removeAllOrganizers, rerenderAll, setSaved, setSaving } from "./ui-injector.ts";
 import type { InjectOrganizerOptions, RerenderAllInput } from "./ui-injector.ts";
 import {
@@ -65,7 +69,7 @@ export interface BookmarksPageDeps {
   /** Reads categories + settings (defaults to `getStore`). */
   loadStore?: () => Promise<Store>;
   /** Fetches the saved index once per page entry (defaults to the message contract). */
-  loadSavedIndex?: () => Promise<ReadonlySet<string>>;
+  loadSavedIndex?: () => Promise<SavedLookup>;
   /** Container-scoped extractor (defaults to `extractTweet`). */
   extract?: (article: HTMLElement) => ExtractionResult;
   /** Organizer injector (defaults to `injectOrganizer`). */
@@ -80,12 +84,18 @@ export interface BookmarksPageDeps {
   setSavingState?: (doc: Document, tweetId: string, saving: boolean) => void;
   /** Phase-3 no-op / Phase-4 real category selection handler. */
   onSelect?: OrganizerCallbacks["onSelect"];
+  /** Confirmed move of a saved tweet into another collection (bookmark surface). */
+  onMove?: OrganizerCallbacks["onMove"];
+  /** Confirmed removal of a saved tweet from the archive (bookmark surface). */
+  onRemove?: OrganizerCallbacks["onRemove"];
   /** Surfaces extraction failures (defaults to `console.warn`). */
   onExtractionError?: (article: HTMLElement, reason: string) => void;
   /** Removes every visible toast on route leave (defaults to `dismissAllToasts`). */
   dismissToasts?: () => void;
   /** Debounce override, default {@link SWEEP_DEBOUNCE_MS}. */
   sweepDebounceMs?: number;
+  /** Watcher factory (defaults to {@link createHistoryWatcher}); tests substitute a stub. */
+  createWatcher?: (deps: HistoryWatcherDeps) => HistoryWatcher;
   /**
    * Trigger style for the injected controls: `"organize"` on the bookmarks
    * timeline (the default), `"bookmark"` on any other X page, where the controls
@@ -100,7 +110,7 @@ interface ResolvedDeps {
   setTimeout: (handler: () => void, timeout: number) => number;
   clearTimeout: (id: number) => void;
   loadStore: () => Promise<Store>;
-  loadSavedIndex: () => Promise<ReadonlySet<string>>;
+  loadSavedIndex: () => Promise<SavedLookup>;
   extract: (article: HTMLElement) => ExtractionResult;
   inject: (options: InjectOrganizerOptions) => HTMLElement | null;
   removeAll: (doc: Document) => void;
@@ -108,10 +118,13 @@ interface ResolvedDeps {
   setSavedState: (doc: Document, tweetId: string, saved: boolean) => void;
   setSavingState: (doc: Document, tweetId: string, saving: boolean) => void;
   onSelect: OrganizerCallbacks["onSelect"];
+  onMove: OrganizerCallbacks["onMove"] | undefined;
+  onRemove: OrganizerCallbacks["onRemove"] | undefined;
   onExtractionError: (article: HTMLElement, reason: string) => void;
   dismissToasts: () => void;
   sweepDebounceMs: number;
   variant: OrganizerVariant;
+  createWatcher: (deps: HistoryWatcherDeps) => HistoryWatcher;
 }
 
 interface PageState {
@@ -123,8 +136,12 @@ interface PageState {
   categories: Category[];
   settings: Settings;
   savedIds: Set<string>;
+  /** Where each saved tweet lives (`tweetId → slug`), from the same index fetch. */
+  savedSlugs: Map<string, string>;
   /** Coalescing saved-index fetch (PRD §54). */
   refresher: SavedIndexRefresher;
+  /** The auto-unbookmark watcher, or `null` off the bookmarks timeline. */
+  watcher: HistoryWatcher | null;
 }
 
 let state: PageState | null = null;
@@ -146,23 +163,49 @@ function defaultOnExtractionError(_article: HTMLElement, reason: string): void {
 }
 
 /**
+ * What one saved-index fetch yields: the O(1) saved set the render path checks,
+ * plus the tweet-id → collection-slug map the "Saved in …" modal reads. Both
+ * come from the same `GET /v1/index` body — the entries already carry the slug —
+ * so neither costs an extra request.
+ */
+export interface SavedLookup {
+  /** Every tweet id the backend holds. */
+  ids: ReadonlySet<string>;
+  /** Where each saved tweet lives; entries without a usable slug are absent. */
+  slugsByTweetId: ReadonlyMap<string, string>;
+}
+
+const EMPTY_SAVED_LOOKUP: SavedLookup = { ids: new Set<string>(), slugsByTweetId: new Map<string, string>() };
+
+/** Turn a `GET /v1/index` response body into the lookup the page state keeps. */
+export function savedLookupFromIndex(index: SavedIndex): SavedLookup {
+  const ids = new Set<string>();
+  const slugsByTweetId = new Map<string, string>();
+  for (const [tweetId, entry] of Object.entries(index.items)) {
+    ids.add(tweetId);
+    if (entry.slug) slugsByTweetId.set(tweetId, entry.slug);
+  }
+  return { ids, slugsByTweetId };
+}
+
+/**
  * Fetch the saved index exactly once per Bookmarks entry. Any failure — a stub
  * service worker, `ok:false`, a thrown messaging error — degrades to an empty
- * Set with a warning; injection is never blocked (PRD §34, §54).
+ * lookup with a warning; injection is never blocked (PRD §34, §54).
  */
-export async function loadSavedIndexFromServiceWorker(): Promise<ReadonlySet<string>> {
+export async function loadSavedIndexFromServiceWorker(): Promise<SavedLookup> {
   try {
     const response = await sendExtensionMessage<GetSavedIndexResponse>({ type: "GET_SAVED_INDEX" });
     if (!response.ok || response.index === null) {
       console.warn(
         `[twitter-bookmarker] saved index unavailable (${response.error ?? "unknown"}); treating every tweet as unsaved`,
       );
-      return new Set<string>();
+      return EMPTY_SAVED_LOOKUP;
     }
-    return new Set<string>(Object.keys(response.index.items));
+    return savedLookupFromIndex(response.index);
   } catch (error) {
     console.warn("[twitter-bookmarker] saved index request failed; treating every tweet as unsaved", error);
-    return new Set<string>();
+    return EMPTY_SAVED_LOOKUP;
   }
 }
 
@@ -173,12 +216,12 @@ export async function loadSavedIndexFromServiceWorker(): Promise<ReadonlySet<str
  * remains the lenient, never-throwing variant for callers that cannot handle a
  * rejection.
  */
-export async function fetchSavedIndex(): Promise<ReadonlySet<string>> {
+export async function fetchSavedIndex(): Promise<SavedLookup> {
   const response = await sendExtensionMessage<GetSavedIndexResponse>({ type: "GET_SAVED_INDEX" });
   if (!response.ok || response.index === null) {
     throw new Error(response.error ?? "saved_index_unavailable");
   }
-  return new Set<string>(Object.keys(response.index.items));
+  return savedLookupFromIndex(response.index);
 }
 
 function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
@@ -196,10 +239,13 @@ function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
     setSavedState: user.setSavedState ?? ((doc, tweetId, saved) => setSaved(tweetId, saved, doc)),
     setSavingState: user.setSavingState ?? ((doc, tweetId, saving) => setSaving(tweetId, saving, doc)),
     onSelect: user.onSelect ?? defaultOnSelect,
+    onMove: user.onMove,
+    onRemove: user.onRemove,
     onExtractionError: user.onExtractionError ?? defaultOnExtractionError,
     dismissToasts: user.dismissToasts ?? dismissAllToasts,
     sweepDebounceMs: user.sweepDebounceMs ?? SWEEP_DEBOUNCE_MS,
     variant: user.variant ?? "organize",
+    createWatcher: user.createWatcher ?? createHistoryWatcher,
   };
 }
 
@@ -208,11 +254,24 @@ function resolveDeps(user: BookmarksPageDeps): ResolvedDeps {
 /* -------------------------------------------------------------------------- */
 
 function callbacksFor(current: PageState): OrganizerCallbacks {
-  return {
+  const callbacks: OrganizerCallbacks = {
     isSaved: (tweetId) => current.savedIds.has(tweetId),
     onSelect: current.deps.onSelect,
+    savedSlugOf: (tweetId) => current.savedSlugs.get(tweetId) ?? null,
     onExtractionError: current.deps.onExtractionError,
   };
+  // `exactOptionalPropertyTypes` wants "absent", not "present but undefined".
+  if (current.deps.onMove) callbacks.onMove = current.deps.onMove;
+  if (current.deps.onRemove) callbacks.onRemove = current.deps.onRemove;
+  return callbacks;
+}
+
+/** Start or stop the watcher to match the live settings (no-op off /history). */
+function syncWatcher(current: PageState): void {
+  const watcher = current.watcher;
+  if (!watcher) return;
+  watcher.setMode(current.settings.autoUnbookmarkSavedMode);
+  watcher.setEnabled(current.settings.autoUnbookmarkSaved);
 }
 
 function reportExtractionError(article: HTMLElement, reason: string, current: PageState): void {
@@ -252,7 +311,13 @@ function processArticle(article: HTMLElement, current: PageState): void {
       callbacks: callbacksFor(current),
       variant: current.deps.variant,
     });
-    if (!root) article.removeAttribute(INJECTED_ATTRIBUTE);
+    if (!root) {
+      article.removeAttribute(INJECTED_ATTRIBUTE);
+      return;
+    }
+    // Tracking is free for unsaved rows: the watcher re-reads the saved set
+    // when its wait ends, so a tweet saved mid-entry is still caught.
+    current.watcher?.track(article, result.tweet.tweetId);
   } catch (error) {
     article.removeAttribute(INJECTED_ATTRIBUTE);
     console.warn("[twitter-bookmarker] failed to inject organizer for a tweet", error);
@@ -264,6 +329,7 @@ function sweep(): void {
   const current = state;
   if (!current) return;
   closeStalePopover();
+  closeStaleSaveModal();
   for (const article of queryAll<HTMLElement>(current.deps.document, "tweetArticle")) {
     // Self-heal: a marked article with no root means X wiped our DOM without
     // replacing the container. Clearing the marker lets us inject once again.
@@ -305,8 +371,11 @@ function handleMutations(records: MutationRecord[]): void {
   for (const record of records) {
     if (isElement(record.target) && closestAny(record.target, "organizerRoot")) continue;
 
-    // A removed tweet may have owned the open popover.
-    if (record.removedNodes !== undefined && record.removedNodes.length > 0) closeStalePopover();
+    // A removed tweet may have owned the open popover or modal.
+    if (record.removedNodes !== undefined && record.removedNodes.length > 0) {
+      closeStalePopover();
+      closeStaleSaveModal();
+    }
 
     for (const node of Array.from(record.addedNodes ?? [])) {
       if (!isElement(node)) continue;
@@ -342,10 +411,11 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
   // so a fetch that resolves after a route change cannot touch dead state.
   const refresher = createSavedIndexRefresher({
     load: deps.loadSavedIndex,
-    apply: (savedIds) => {
+    apply: (lookup) => {
       const current = state;
       if (!current || current.token !== token) return;
-      current.savedIds = new Set<string>(savedIds);
+      current.savedIds = new Set<string>(lookup.ids);
+      current.savedSlugs = new Map<string, string>(lookup.slugsByTweetId);
       current.deps.rerenderAll(current.deps.document, {
         categories: current.categories,
         settings: current.settings,
@@ -353,12 +423,15 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
         callbacks: callbacksFor(current),
         variant: current.deps.variant,
       });
+      // The saved set just changed: rows that entered view before it arrived
+      // get another chance now — `setEnabled` re-arms the wait.
+      current.watcher?.setEnabled(current.settings.autoUnbookmarkSaved);
     },
     onError: (error) => {
       console.warn("[twitter-bookmarker] saved index unavailable; treating every tweet as unsaved", error);
     },
   });
-  state = {
+  const page: PageState = {
     token,
     deps,
     observer: null,
@@ -366,8 +439,24 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
     categories: [],
     settings: { ...DEFAULT_SETTINGS },
     savedIds: new Set<string>(),
+    savedSlugs: new Map<string, string>(),
     refresher,
+    watcher: null,
   };
+  state = page;
+
+  // The watcher is a bookmarks-timeline surface only: on any other page X is
+  // not holding the shown tweets in its bookmark list, so there is nothing to
+  // remove. It is created disabled; `syncWatcher` turns it on per settings.
+  if (deps.variant === "organize") {
+    page.watcher = deps.createWatcher({
+      isSaved: (tweetId) => page.savedIds.has(tweetId),
+      unbookmark: (article) => unbookmarkTweet(article),
+      onRemoval: (tweetId, outcome) => {
+        console.info(`[twitter-bookmarker] watcher unbookmarked tweet ${tweetId} (${outcome})`);
+      },
+    });
+  }
 
   const running = (): boolean => state !== null && state.token === token;
 
@@ -381,6 +470,7 @@ export async function startBookmarksPage(userDeps: BookmarksPageDeps = {}): Prom
     if (!running()) return;
     state.categories = [...store.categories];
     state.settings = { ...store.settings };
+    syncWatcher(state);
 
     // A failed fetch stays stale, so a later retry can re-fetch exactly once
     // without any per-tweet GET (PRD §54, TEST-05).
@@ -443,6 +533,7 @@ export function stopBookmarksPage(): void {
   const result = runBoundedCleanup(
     [
       { name: "disconnect-observer", run: () => current.observer?.disconnect() },
+      { name: "stop-watcher", run: () => current.watcher?.stop() },
       {
         name: "clear-sweep-timer",
         run: () => {
@@ -455,6 +546,7 @@ export function stopBookmarksPage(): void {
       { name: "remove-organizers", run: () => current.deps.removeAll(current.deps.document) },
       { name: "dismiss-toasts", run: () => current.deps.dismissToasts() },
       { name: "clear-saved-index", run: () => current.savedIds.clear() },
+      { name: "clear-saved-slugs", run: () => current.savedSlugs.clear() },
     ],
     (error) => console.warn("[twitter-bookmarker] route-leave cleanup step failed", error),
   );
@@ -478,6 +570,8 @@ export function refreshBookmarksPage(store: Store): void {
 
   current.categories = [...store.categories];
   current.settings = { ...store.settings };
+  // A flipped toggle takes effect on the open page, without a reload.
+  syncWatcher(current);
 
   try {
     current.deps.rerenderAll(current.deps.document, {
@@ -512,20 +606,34 @@ export function isTweetSaved(tweetId: string): boolean {
   return state?.savedIds.has(tweetId) ?? false;
 }
 
-/** Move a tweet into the saved state and render `✓ Saved` (PRD §34, §41). */
-export function markTweetSaved(tweetId: string): void {
+/** The collection a saved tweet lives in, or `null` when unknown (XI-03). */
+export function savedSlugFor(tweetId: string): string | null {
+  return state?.savedSlugs.get(tweetId) ?? null;
+}
+
+/** Move a tweet into the saved state and render it as saved (PRD §34, §41). */
+export function markTweetSaved(tweetId: string, slug?: string): void {
   const current = state;
   if (!current) return;
   current.savedIds.add(tweetId);
+  if (slug) current.savedSlugs.set(tweetId, slug);
   current.deps.setSavedState(current.deps.document, tweetId, true);
 }
 
-/** Return a tweet to the category controls (used when a save fails). */
+/** Return a tweet to the unsaved state (a confirmed removal, or a failed save). */
 export function markTweetUnsaved(tweetId: string): void {
   const current = state;
   if (!current) return;
   current.savedIds.delete(tweetId);
+  current.savedSlugs.delete(tweetId);
   current.deps.setSavedState(current.deps.document, tweetId, false);
+}
+
+/** Record that a saved tweet now lives in another collection (a confirmed move). */
+export function markTweetMoved(tweetId: string, slug: string): void {
+  const current = state;
+  if (!current) return;
+  current.savedSlugs.set(tweetId, slug);
 }
 
 /** Disable/enable a tweet's controls while a save is in flight (PRD §35). */

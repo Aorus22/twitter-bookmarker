@@ -12,6 +12,16 @@
 export type DisplayMode = "popover" | "inline";
 
 /**
+ * How the history watcher picks its targets.
+ *
+ * - `visible` is the gentle default: only rows currently on screen, after a
+ *   grace wait, one removal at a time with a cooldown;
+ * - `aggressive` drains every loaded row the archive already holds the moment
+ *   it becomes known — no visibility requirement, no grace wait.
+ */
+export type WatcherMode = "visible" | "aggressive";
+
+/**
  * Which backend the extension talks to (PRD §5, §50).
  *
  * - `localhost` uses the fixed loopback default (`DEFAULT_BACKEND_BASE_URL`);
@@ -115,6 +125,14 @@ export interface ReorderCollectionsResponse {
 export interface Settings {
   /** When true, remove the tweet from X Bookmarks after a confirmed save. */
   unbookmarkAfterSave: boolean;
+  /**
+   * When true, the history watcher removes tweets from X Bookmarks as they
+   * scroll into view on the bookmarks timeline (`/i/history`) — but only the
+   * ones this extension has already saved to the archive. Off by default.
+   */
+  autoUnbookmarkSaved: boolean;
+  /** How the watcher picks rows: on screen only, or everything loaded. */
+  autoUnbookmarkSavedMode: WatcherMode;
   /** How category controls are rendered on the X bookmarks page. */
   displayMode: DisplayMode;
   /** Which backend address the worker and the popup use. */
@@ -201,6 +219,21 @@ export interface SaveResult {
 export interface DuplicateResult {
   status: "duplicate";
   tweet_id: string;
+}
+
+/** 200 response body for `PUT /v1/bookmarks/{tweet_id}/collection` (a move). */
+export interface ReassignResult {
+  status: string;
+  tweet_id: string;
+  slug: string;
+}
+
+/** 200 response body for `DELETE /v1/bookmarks/{tweet_id}`. The row moves to the trash. */
+export interface DeleteResult {
+  status: string;
+  tweet_id: string;
+  /** The backend's contract that the row is recoverable, not destroyed. */
+  recoverable: boolean;
 }
 
 /** One entry of `GET /v1/index` (PRD §18). */

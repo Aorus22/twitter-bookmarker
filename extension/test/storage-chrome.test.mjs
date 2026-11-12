@@ -69,6 +69,8 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const PRD_DEFAULT_SETTINGS = {
   unbookmarkAfterSave: false,
+  autoUnbookmarkSaved: false,
+  autoUnbookmarkSavedMode: "visible",
   displayMode: "popover",
   backendMode: "localhost",
   backendUrl: "http://127.0.0.1:43121",

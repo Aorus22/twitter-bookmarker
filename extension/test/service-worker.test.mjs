@@ -409,3 +409,66 @@ test("every collection message carries the stored token", async () => {
   assert.equal(calls.length, 2, "one list, one reorder");
   for (const call of calls) assert.equal(call.init.headers.Authorization, "Bearer s3cret");
 });
+
+test("MOVE_BOOKMARK PUTs to the collection path and answers the echo", async () => {
+  await storeSettings({ backendMode: "localhost" });
+
+  const calls = captureFetch(() => jsonResponse(200, { status: "moved", tweet_id: "123", slug: "ai" }));
+  // `dispatch` returns the response as a promise, so it is the thing awaited.
+  const { response } = dispatch({ type: "MOVE_BOOKMARK", tweetId: "123", slug: "ai" });
+  assert.deepEqual(await response, { ok: true, result: { status: "moved", tweet_id: "123", slug: "ai" } });
+
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/bookmarks/123/collection");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { slug: "ai" });
+});
+
+test("MOVE_BOOKMARK failures follow the documented error mapping", async () => {
+  await storeSettings({ backendMode: "localhost" });
+
+  captureFetch(() => jsonResponse(404, {}));
+  assert.deepEqual(await dispatch({ type: "MOVE_BOOKMARK", tweetId: "123", slug: "nope" }).response, {
+    ok: false,
+    error: "not_found",
+  });
+
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  assert.deepEqual(await dispatch({ type: "MOVE_BOOKMARK", tweetId: "123", slug: "ai" }).response, {
+    ok: false,
+    error: "backend_unavailable",
+  });
+});
+
+test("REMOVE_BOOKMARK DELETEs the tweet and answers the trash contract", async () => {
+  await storeSettings({ backendMode: "localhost" });
+
+  const calls = captureFetch(() => jsonResponse(200, { status: "deleted", tweet_id: "123", recoverable: true }));
+  const { response } = dispatch({ type: "REMOVE_BOOKMARK", tweetId: "123" });
+  assert.deepEqual(await response, {
+    ok: true,
+    result: { status: "deleted", tweet_id: "123", recoverable: true },
+  });
+
+  assert.equal(calls[0].url, "http://127.0.0.1:43121/v1/bookmarks/123");
+  assert.equal(calls[0].init.method, "DELETE");
+});
+
+test("REMOVE_BOOKMARK failures follow the documented error mapping", async () => {
+  await storeSettings({ backendMode: "localhost" });
+
+  captureFetch(() => jsonResponse(404, {}));
+  assert.deepEqual(await dispatch({ type: "REMOVE_BOOKMARK", tweetId: "123" }).response, {
+    ok: false,
+    error: "not_found",
+  });
+
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  assert.deepEqual(await dispatch({ type: "REMOVE_BOOKMARK", tweetId: "123" }).response, {
+    ok: false,
+    error: "backend_unavailable",
+  });
+});

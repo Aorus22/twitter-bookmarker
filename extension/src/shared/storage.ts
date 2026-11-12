@@ -31,9 +31,10 @@ import {
   normalizeCollectionsCache,
 } from "./collections.ts";
 import type { CollectionsCache } from "./collections.ts";
-import type { Category, DisplayMode, Settings, Store } from "./types.ts";
+import type { Category, DisplayMode, Settings, Store, WatcherMode } from "./types.ts";
 
 const DISPLAY_MODES: readonly DisplayMode[] = ["popover", "inline"];
+const WATCHER_MODES: readonly WatcherMode[] = ["visible", "aggressive"];
 
 /* -------------------------------------------------------------------------- */
 /* Pure helpers (exported for unit testing; they never touch chrome APIs)      */
@@ -46,6 +47,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Coerce an unknown value into a valid display mode. */
 export function normalizeDisplayMode(value: unknown): DisplayMode {
   return DISPLAY_MODES.includes(value as DisplayMode) ? (value as DisplayMode) : DEFAULT_SETTINGS.displayMode;
+}
+
+/** Coerce an unknown value into a valid watcher mode. */
+export function normalizeWatcherMode(value: unknown): WatcherMode {
+  return WATCHER_MODES.includes(value as WatcherMode) ? (value as WatcherMode) : DEFAULT_SETTINGS.autoUnbookmarkSavedMode;
 }
 
 /**
@@ -63,6 +69,11 @@ export function normalizeSettings(raw: unknown): Settings {
       typeof rawSettings.unbookmarkAfterSave === "boolean"
         ? rawSettings.unbookmarkAfterSave
         : DEFAULT_SETTINGS.unbookmarkAfterSave,
+    autoUnbookmarkSaved:
+      typeof rawSettings.autoUnbookmarkSaved === "boolean"
+        ? rawSettings.autoUnbookmarkSaved
+        : DEFAULT_SETTINGS.autoUnbookmarkSaved,
+    autoUnbookmarkSavedMode: normalizeWatcherMode(rawSettings.autoUnbookmarkSavedMode),
     displayMode: normalizeDisplayMode(rawSettings.displayMode),
     backendMode: normalizeBackendMode(rawSettings.backendMode),
     // A record without a custom URL falls back to the loopback default rather
@@ -150,6 +161,14 @@ export async function setSettings(partial: Partial<Settings>): Promise<Settings>
       typeof partial.unbookmarkAfterSave === "boolean"
         ? partial.unbookmarkAfterSave
         : current.unbookmarkAfterSave,
+    autoUnbookmarkSaved:
+      typeof partial.autoUnbookmarkSaved === "boolean"
+        ? partial.autoUnbookmarkSaved
+        : current.autoUnbookmarkSaved,
+    autoUnbookmarkSavedMode:
+      partial.autoUnbookmarkSavedMode === undefined
+        ? current.autoUnbookmarkSavedMode
+        : normalizeWatcherMode(partial.autoUnbookmarkSavedMode),
     displayMode: partial.displayMode === undefined ? current.displayMode : normalizeDisplayMode(partial.displayMode),
     backendMode: partial.backendMode === undefined ? current.backendMode : normalizeBackendMode(partial.backendMode),
     // An unparseable URL keeps the previously saved one instead of clobbering it;

@@ -108,6 +108,29 @@
         </div>
 
         <div class="setting-row">
+          <label class="setting-label" for="setting-auto-unbookmark-saved">Unbookmark saved on /history</label>
+          <input
+            id="setting-auto-unbookmark-saved"
+            type="checkbox"
+            class="switch"
+            role="switch"
+            aria-label="Unbookmark saved tweets on /history"
+          />
+        </div>
+
+        <div class="setting-row">
+          <span class="setting-label" id="watcher-mode-label">Watcher mode</span>
+          <div id="watcher-mode" class="segmented" role="radiogroup" aria-labelledby="watcher-mode-label">
+            <button type="button" class="segmented-option" data-watcher-mode="visible" role="radio" aria-checked="true">
+              Visible
+            </button>
+            <button type="button" class="segmented-option" data-watcher-mode="aggressive" role="radio" aria-checked="false">
+              Aggressive
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-row">
           <span class="setting-label" id="display-mode-label">Category display</span>
           <div id="display-mode" class="segmented" role="radiogroup" aria-labelledby="display-mode-label">
             <button type="button" class="segmented-option" data-mode="popover" role="radio" aria-checked="true">

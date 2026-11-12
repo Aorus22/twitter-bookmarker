@@ -26,7 +26,8 @@ export const MASONRY_MIN_COLUMNS = 1
 /** PRD-2 §21 — desktop targets 4–5 columns. */
 export const MASONRY_MAX_COLUMNS = 5
 
-function clampColumns(columns: number): number {
+/** Coerce any count into the supported 1…5 column range. */
+export function clampMasonryColumns(columns: number): number {
   const value = Number.isFinite(columns)
     ? Math.trunc(columns)
     : MASONRY_MIN_COLUMNS
@@ -39,8 +40,23 @@ function clampColumns(columns: number): number {
  * stretched past the Figma card width.
  */
 export function masonryContainerWidth(columns: number): number {
-  const count = clampColumns(columns)
+  const count = clampMasonryColumns(columns)
   return count * MASONRY_CARD_WIDTH + (count - 1) * MASONRY_COLUMN_GAP
+}
+
+/**
+ * The `max-width` the grid/page column should carry, or `undefined` for one
+ * column.
+ *
+ * A single column must **not** be capped at the 292px Figma card measure: on a
+ * phone the page column then sat as a narrow ribbon in the middle of the
+ * viewport while the 440px toolbar overflowed it. With one column the cards
+ * stretch to the available content width, and the cap only appears once there
+ * are two or more exact-fit columns to line up.
+ */
+export function masonryMaxWidth(columns: number): number | undefined {
+  const count = clampMasonryColumns(columns)
+  return count === 1 ? undefined : masonryContainerWidth(count)
 }
 
 /**
@@ -119,7 +135,7 @@ export function distributeMasonryKeys(
   columnHeights: readonly number[] = [],
   estimatedHeight = 0
 ): number[][] {
-  const count = clampColumns(columnCount)
+  const count = clampMasonryColumns(columnCount)
 
   // Forget keys that are no longer rendered (a filter, sort or collection
   // change) so the map cannot grow without bound across a session.

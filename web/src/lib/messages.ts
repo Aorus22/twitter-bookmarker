@@ -89,6 +89,15 @@ export const INVERTED_RANGE_MESSAGE = "From must be on or before To."
 /** PRD-2 §24 — the link that opens the original post on X. */
 export const OPEN_ON_X_LABEL = "Open on X ↗"
 
+/** Accessible name of the collection toolbar's layout switcher. */
+export const VIEW_MODE_LABEL = "Layout"
+
+/** The NSFW chip on a blurred collection cover. */
+export const NSFW_LABEL = "NSFW"
+
+/** The action that lifts the NSFW blur for one cover. */
+export const NSFW_REVEAL_LABEL = "Show preview"
+
 /** PRD-2 §23 — the controlled-clamp affordance. */
 export const SHOW_MORE_LABEL = "Show more"
 

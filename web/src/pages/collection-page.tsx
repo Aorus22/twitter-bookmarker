@@ -16,16 +16,20 @@ import {
   MediaLightbox,
   MovePostDialog,
   PostCard,
+  PostGrid,
+  PostRow,
+  PostRowList,
 } from "@/components/gallery"
 import {
   useGalleryQuery,
   useMasonryColumns,
   useMediaLightbox,
   usePosts,
+  useViewMode,
 } from "@/hooks"
 import { deleteBookmark, moveBookmark } from "@/lib/api"
 import { formatCollectionCounts } from "@/lib/collection-meta"
-import { masonryContainerWidth } from "@/lib/masonry"
+import { masonryMaxWidth } from "@/lib/masonry"
 import {
   BACK_TO_COLLECTIONS_LABEL,
   DELETE_POST_FAILED_MESSAGE,
@@ -106,6 +110,11 @@ export function CollectionPage() {
     refetch,
     removePost,
   } = usePosts(slug, requestParams)
+
+  // Layout preference (owner request, Nov 2026): masonry / grid / rows,
+  // persisted across visits. It is presentation only — search, filters, sort and
+  // paging are unaffected.
+  const { viewMode, setViewMode } = useViewMode()
 
   // The lightbox is driven entirely by the accumulated loaded list: its
   // flattened media sequence is derived from `posts`, so it can never request a
@@ -263,6 +272,9 @@ export function CollectionPage() {
   // deadlock `GalleryMasonry` documents for its own list.
   const columnProbeRef = useRef<HTMLDivElement>(null)
   const columnCount = useMasonryColumns(columnProbeRef)
+  // One column is not capped: on a phone the 292px Figma measure would leave the
+  // content as a narrow centred ribbon while the 440px toolbar overflowed it.
+  const columnWidth = masonryMaxWidth(columnCount)
 
   // PRD-2 §77: on any search/filter/sort change the loaded pages and cursor are
   // already reset by `usePosts`' request key; this adds the "scroll near the
@@ -291,7 +303,11 @@ export function CollectionPage() {
       <div
         data-testid="collection-column"
         className="mx-auto flex w-full flex-col pb-10"
-        style={{ maxWidth: `${masonryContainerWidth(columnCount)}px` }}
+        style={
+          columnWidth === undefined
+            ? undefined
+            : { maxWidth: `${columnWidth}px` }
+        }
       >
         <Link
           to="/"
@@ -346,6 +362,8 @@ export function CollectionPage() {
           }
           sort={query.sort}
           onSortChange={setSort}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
 
         {curationError === null ? null : (
@@ -362,6 +380,7 @@ export function CollectionPage() {
           className="mt-6"
           data-testid="collection-content"
           data-view-state={viewState}
+          data-view-mode={viewMode}
         >
           {viewState === "loading" ? (
             <MasonrySkeleton label={LOADING_POSTS_LABEL} />
@@ -379,18 +398,47 @@ export function CollectionPage() {
 
           {viewState === "posts" ? (
             <>
-              <GalleryMasonry columns={columnCount}>
-                {posts.map((post, postIndex) => (
-                  <PostCard
-                    key={post.tweet_id}
-                    post={post}
-                    actions={cardActions}
-                    onOpenMedia={(mediaIndex, trigger) => {
-                      lightbox.open(postIndex, mediaIndex, trigger)
-                    }}
-                  />
-                ))}
-              </GalleryMasonry>
+              {viewMode === "rows" ? (
+                <PostRowList>
+                  {posts.map((post, postIndex) => (
+                    <PostRow
+                      key={post.tweet_id}
+                      post={post}
+                      actions={cardActions}
+                      onOpenMedia={(mediaIndex, trigger) => {
+                        lightbox.open(postIndex, mediaIndex, trigger)
+                      }}
+                    />
+                  ))}
+                </PostRowList>
+              ) : viewMode === "grid" ? (
+                <PostGrid columns={columnCount}>
+                  {posts.map((post, postIndex) => (
+                    <PostCard
+                      key={post.tweet_id}
+                      post={post}
+                      variant="grid"
+                      actions={cardActions}
+                      onOpenMedia={(mediaIndex, trigger) => {
+                        lightbox.open(postIndex, mediaIndex, trigger)
+                      }}
+                    />
+                  ))}
+                </PostGrid>
+              ) : (
+                <GalleryMasonry columns={columnCount}>
+                  {posts.map((post, postIndex) => (
+                    <PostCard
+                      key={post.tweet_id}
+                      post={post}
+                      actions={cardActions}
+                      onOpenMedia={(mediaIndex, trigger) => {
+                        lightbox.open(postIndex, mediaIndex, trigger)
+                      }}
+                    />
+                  ))}
+                </GalleryMasonry>
+              )}
               {/* A page load never hides the cards above: only this compact row
                   appears (PRD-2 §35). */}
               {isLoadingMore ? <GalleryBottomLoader /> : null}

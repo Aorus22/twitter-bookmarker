@@ -315,7 +315,7 @@ describe("CollectionPage — masonry (COLL-02, COLL-03)", () => {
 })
 
 describe("CollectionPage — post content (COLL-04…COLL-09, COLL-11)", () => {
-  it("renders a text-only post's quote panel without any img (COLL-05)", async () => {
+  it("renders a text-only post as plain text without any img (COLL-05)", async () => {
     stubGalleryFetch({
       posts: postsRoute(),
       collections: () => jsonResponse({ collections: [LINUX] }),
@@ -330,8 +330,11 @@ describe("CollectionPage — post content (COLL-04…COLL-09, COLL-11)", () => {
 
     expect(textCard).toBeDefined()
     expect(
-      within(textCard as HTMLElement).getByTestId("text-post-card")
+      within(textCard as HTMLElement).getByTestId("post-text")
     ).toBeInTheDocument()
+    expect(
+      within(textCard as HTMLElement).queryByTestId("text-post-card")
+    ).not.toBeInTheDocument()
     expect(
       within(textCard as HTMLElement).queryByTestId("media-image")
     ).not.toBeInTheDocument()

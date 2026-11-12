@@ -49,7 +49,9 @@ export function ClampedPostText({
             ? "font-display text-[22px] leading-[1.35] text-white"
             : variant === "lightbox"
               ? "text-[13px] leading-[1.4] text-ink"
-              : "text-[11px] leading-[1.45] text-ink",
+              : variant === "row"
+                ? "text-[11.5px] leading-[1.45] text-ink"
+                : "text-[11px] leading-[1.45] text-ink",
           clampClassName(variant, !collapsed)
         )}
       >

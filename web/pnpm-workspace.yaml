@@ -1,5 +1,6 @@
 packages: []
 
 allowBuilds:
+  "@astryxdesign/core": false
   esbuild: true
   msw: false

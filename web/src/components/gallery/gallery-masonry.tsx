@@ -206,7 +206,13 @@ export function GalleryMasonry({
         data-columns={count}
         style={{
           columnGap: `${MASONRY_COLUMN_GAP}px`,
-          maxWidth: `${masonryContainerWidth(count)}px`,
+          // One column is the phone layout: let the card use the width it has
+          // (capped on tablets) instead of pinning a 292px card inside a
+          // 390px screen. Two or more columns keep the exact-fit design width.
+          maxWidth:
+            count === 1
+              ? "min(100%, 420px)"
+              : `${masonryContainerWidth(count)}px`,
         }}
         className={cn("flex w-full items-start", className)}
       >

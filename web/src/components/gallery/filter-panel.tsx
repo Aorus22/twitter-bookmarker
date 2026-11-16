@@ -77,12 +77,12 @@ export function FilterPanel({
     >
       <header className="flex flex-col">
         {title ?? (
-          <h2 className="font-display text-[24px] leading-[1.15] font-bold text-ink">
+          <h2 className="text-[18px]! leading-[1.2]! font-semibold tracking-[-0.015em] text-ink">
             {FILTER_TITLE}
           </h2>
         )}
         {subtitle ?? (
-          <p className="mt-1 text-[11px] leading-[1.4] font-normal text-muted">
+          <p className="mt-1 text-[11.5px] leading-[1.45] font-normal text-muted">
             {FILTER_SUBTITLE}
           </p>
         )}
@@ -142,8 +142,8 @@ export function FilterPanel({
                   className={cn(
                     PILL_BASE,
                     isActive
-                      ? "bg-grad-brand font-semibold text-accent"
-                      : "border border-border bg-surface-warm font-medium text-muted"
+                      ? "bg-ink font-semibold text-surface"
+                      : "border border-border bg-surface font-medium text-muted hover:text-ink"
                   )}
                 >
                   {preset.shortLabel}
@@ -159,7 +159,7 @@ export function FilterPanel({
           type="button"
           data-testid="filter-reset"
           onClick={onReset}
-          className="h-10 w-[78px] shrink-0 rounded-sm border border-border bg-surface-warm text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="h-10 w-[78px] shrink-0 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/30"
         >
           {FILTER_RESET_LABEL}
         </button>
@@ -167,7 +167,7 @@ export function FilterPanel({
           type="button"
           data-testid="filter-apply"
           onClick={onApply}
-          className="h-10 w-[92px] shrink-0 rounded-sm bg-grad-brand text-[11px] leading-[1.4] font-semibold text-white transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="h-10 w-[92px] shrink-0 rounded-sm bg-ink text-[11px] leading-[1.4] font-semibold text-surface transition-opacity outline-none hover:opacity-85 focus-visible:ring-3 focus-visible:ring-ring/30"
         >
           {FILTER_APPLY_LABEL}
         </button>

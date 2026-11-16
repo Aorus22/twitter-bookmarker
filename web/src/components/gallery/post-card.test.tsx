@@ -173,7 +173,7 @@ describe("PostCard — media post", () => {
 })
 
 describe("PostCard — text-only post (COLL-05)", () => {
-  it("renders the gradient quote panel and no img at all", () => {
+  it("renders the paper quote panel and no img at all", () => {
     const { container } = render(
       <PostCard
         now={POST_NOW}
@@ -189,7 +189,8 @@ describe("PostCard — text-only post (COLL-05)", () => {
 
     const panel = screen.getByTestId("text-post-card")
     expect(panel).toBeInTheDocument()
-    expect(panel.style.backgroundImage).toContain("--grad-ph-")
+    expect(panel.className).toContain("bg-surface-warm")
+    expect(panel.style.backgroundImage).toBe("")
     expect(screen.getByTestId("post-card")).toHaveAttribute(
       "data-media-count",
       "0"

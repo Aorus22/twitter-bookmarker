@@ -121,7 +121,7 @@ afterEach(() => {
 })
 
 describe("CollectionPage — header (COLL-01)", () => {
-  it("renders the back link, deterministic icon, title and counts meta", async () => {
+  it("renders the back link, neutral icon, title and counts meta", async () => {
     stubGalleryFetch({
       posts: postsRoute(),
       collections: () => jsonResponse({ collections: [LINUX] }),
@@ -140,9 +140,11 @@ describe("CollectionPage — header (COLL-01)", () => {
     ).toBeInTheDocument()
 
     const icon = screen.getByTestId("collection-icon")
-    expect(icon.className).toContain("size-24")
-    expect(icon.className).toContain("rounded-2xl")
-    expect(icon.style.backgroundImage).toContain("--grad-ph-")
+    expect(icon.className).toContain("size-14")
+    expect(icon.className).toContain("rounded-xl")
+    expect(icon.className).toContain("bg-surface-warm")
+    // No gradient art: the shell is monochrome, the covers carry the colour.
+    expect(icon.style.backgroundImage).toBe("")
   })
 
   it("renders the toolbar with all three controls (COLL-01)", async () => {

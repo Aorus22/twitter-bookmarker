@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <meta
+      name="theme-color"
+      content="#f5f4f1"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0d0d0c"
+      media="(prefers-color-scheme: dark)"
+    />
+    <meta
       name="description"
       content="A local, media-first gallery of your saved tweets, powered by your own archive."
     />
@@ -31,7 +41,7 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root" data-astryx-theme="app"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,22 +1,22 @@
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@astryxdesign/core/Skeleton"
+
+import { Astryx } from "@/app/astryx"
 
 /**
- * Skeleton cards for the collection grid (PRD-2 §35, design spec §3.6).
- *
- * The page must never be blank while the collections request is in flight, so
- * the loading state is a full grid of card-shaped skeletons rather than a
- * spinner. Phase 7 reuses `MasonrySkeleton` for the post masonry.
+ * Card-shaped loading placeholders. The page never goes blank while a request
+ * is in flight; the skeleton borrows the card's proportions so the layout does
+ * not jump when the data lands.
  */
-
 export function CollectionCardSkeleton() {
   return (
-    <li data-testid="collection-card-skeleton" className="w-[244px] max-w-full">
-      <div className="flex h-[330px] w-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-card">
-        <Skeleton className="h-[181px] w-full rounded-none" />
-        <div className="flex flex-1 flex-col gap-2 px-[18px] pt-[17px] pb-7">
-          <Skeleton className="h-5 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-          <Skeleton className="mt-auto h-3 w-2/3" />
+    <li data-testid="collection-card-skeleton" className="min-w-0">
+      <div className="flex w-full flex-col rounded-xl border border-border bg-surface p-2">
+        <div className="aspect-[4/3] w-full overflow-hidden rounded-lg bg-surface-warm">
+          <Skeleton width="100%" height="100%" radius={2} index={0} />
+        </div>
+        <div className="mt-3 flex flex-col gap-2 px-1 pb-1">
+          <Skeleton width="58%" height={11} radius={1} index={1} />
+          <Skeleton width="82%" height={9} radius={1} index={2} />
         </div>
       </div>
     </li>
@@ -24,7 +24,7 @@ export function CollectionCardSkeleton() {
 }
 
 export interface MasonrySkeletonProps {
-  /** Number of placeholder cards; the default fills a 1312px row plus slack. */
+  /** Number of placeholder cards; the default fills a desktop row. */
   count?: number
   /** Accessible label; the collection page announces `Loading posts`. */
   label?: string
@@ -35,13 +35,18 @@ export function MasonrySkeleton({
   label = "Loading collections",
 }: MasonrySkeletonProps) {
   return (
-    <div role="status" aria-label={label}>
-      <span className="sr-only">{label}…</span>
-      <ul aria-hidden="true" className="flex flex-wrap gap-[18px]">
-        {Array.from({ length: count }, (_, index) => (
-          <CollectionCardSkeleton key={index} />
-        ))}
-      </ul>
-    </div>
+    <Astryx>
+      <div role="status" aria-label={label}>
+        <span className="sr-only">{label}…</span>
+        <ul
+          aria-hidden="true"
+          className="grid grid-cols-2 gap-x-5 gap-y-9 sm:grid-cols-3 xl:grid-cols-4"
+        >
+          {Array.from({ length: count }, (_, index) => (
+            <CollectionCardSkeleton key={index} />
+          ))}
+        </ul>
+      </div>
+    </Astryx>
   )
 }

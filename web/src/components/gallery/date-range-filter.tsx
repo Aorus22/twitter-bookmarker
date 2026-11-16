@@ -37,7 +37,7 @@ export interface DateRangeFilterProps {
 }
 
 const DATE_INPUT_CLASS =
-  "h-9 min-w-0 flex-1 rounded-sm bg-transparent px-1 text-[11px] leading-[1.4] font-medium text-ink outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+  "h-9 min-w-0 flex-1 rounded-sm bg-transparent px-1 text-[11.5px] leading-[1.4] font-medium text-ink outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 
 export function DateRangeFilter({
   id,
@@ -68,7 +68,7 @@ export function DateRangeFilter({
         {label}
       </h3>
 
-      <div className="mt-2 flex h-[42px] w-full max-w-[346px] items-center gap-1 rounded-sm border border-border bg-surface-warm px-2">
+      <div className="mt-2 flex h-[42px] w-full max-w-[346px] items-center gap-1 rounded-sm border border-border bg-surface px-2 transition-colors focus-within:border-ink/25">
         <label className="sr-only" htmlFor={`${id}-date-from`}>
           {DATE_RANGE_FROM_LABEL}
         </label>
@@ -120,7 +120,7 @@ export function DateRangeFilter({
         <p
           role="alert"
           data-testid={`date-range-${id}-error`}
-          className="mt-1 text-[11px] leading-[1.4] font-medium text-accent"
+          className="mt-1 text-[11px] leading-[1.4] font-medium text-destructive"
         >
           {INVERTED_RANGE_MESSAGE}
         </p>

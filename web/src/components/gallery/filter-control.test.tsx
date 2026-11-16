@@ -139,7 +139,7 @@ describe("FilterControl — design spec §3.4 contents (DISC-02)", () => {
     expect(reset.className).toContain("h-10")
     expect(apply.className).toContain("w-[92px]")
     expect(apply.className).toContain("h-10")
-    expect(apply.className).toContain("bg-grad-brand")
+    expect(apply.className).toContain("bg-ink")
   })
 
   it("shows the active dot on the trigger when a date filter is committed", () => {

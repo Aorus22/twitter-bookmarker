@@ -46,12 +46,12 @@ export function ClampedPostText({
         className={cn(
           "whitespace-pre-line",
           variant === "quote"
-            ? "font-display text-[22px] leading-[1.35] text-white"
+            ? "text-[17px] leading-[1.55] font-medium tracking-[-0.01em] text-ink"
             : variant === "lightbox"
-              ? "text-[13px] leading-[1.4] text-ink"
+              ? "text-[13px] leading-[1.55] text-ink"
               : variant === "row"
-                ? "text-[11.5px] leading-[1.45] text-ink"
-                : "text-[11px] leading-[1.45] text-ink",
+                ? "text-[12px] leading-[1.5] text-ink"
+                : "text-[12px] leading-[1.55] text-ink",
           clampClassName(variant, !collapsed)
         )}
       >
@@ -67,10 +67,8 @@ export function ClampedPostText({
             setExpanded((current) => !current)
           }}
           className={cn(
-            "mt-1.5 rounded-sm text-[10px] leading-[1.4] font-semibold transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-            variant === "quote"
-              ? "text-white/90 hover:text-white"
-              : "text-accent hover:text-ink"
+            "mt-1.5 rounded-sm text-[10px] leading-[1.4] font-semibold underline decoration-ink/25 underline-offset-2 transition-colors outline-none hover:decoration-ink focus-visible:ring-3 focus-visible:ring-ring/30",
+            "text-muted hover:text-ink"
           )}
         >
           {expanded ? SHOW_LESS_LABEL : SHOW_MORE_LABEL}

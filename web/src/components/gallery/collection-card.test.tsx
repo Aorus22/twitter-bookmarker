@@ -38,8 +38,8 @@ describe("CollectionCard", () => {
     renderCard()
 
     expect(screen.getByRole("heading", { name: "Linux" })).toBeInTheDocument()
-    // The description slot shows the human name, never the bare slug.
-    expect(screen.getAllByText("Linux")).toHaveLength(2)
+    // The name appears once: the meta row carries the facts, not a repeat.
+    expect(screen.getAllByText("Linux")).toHaveLength(1)
     expect(
       screen.getByText("83 posts · 126 media · Last saved Sep 27")
     ).toBeInTheDocument()

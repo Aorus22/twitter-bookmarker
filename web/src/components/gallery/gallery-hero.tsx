@@ -1,4 +1,6 @@
-import { CollectionCover } from "@/components/gallery/collection-cover"
+import { ArrowUpRight, Bookmark } from "lucide-react"
+
+import { MediaImage } from "@/components/gallery/media-image"
 import { formatCount, sumCounts } from "@/lib/collection-meta"
 import { sliceCoverMedia } from "@/lib/cover"
 import { isNsfwCollection } from "@/lib/nsfw"
@@ -6,46 +8,54 @@ import { cn } from "@/lib/utils"
 import type { GalleryCollection } from "@/types"
 
 /**
- * Homepage hero (design spec §3.2, frame `6:16`).
+ * Homepage masthead.
  *
- * `grad-hero`, r-2xl, `shadow-hero`, padding 36; eyebrow, Playfair Bold 46
- * headline, Inter 14 body copy and the `grad-cta` CTA. The CTA is a real
- * in-page anchor to the collections grid — not a dead link — so it works
- * without JS and is keyboard reachable.
- *
- * The hero art is **placeholder art**: it is assembled from the newest
- * `cover_media` across collections when media exists and degrades to
- * deterministic gradient tiles otherwise. Because it reuses
- * `CollectionCover`/`MediaImage`, a missing or broken image set can never break
- * the hero layout.
+ * The archive speaks for itself, so the hero is type and a small strip of the
+ * newest covers rather than a gradient panel. The counts are set as the
+ * caption line, which is the only place the whole archive is summed.
  */
 
 export interface HeroArtProps {
   media: readonly string[]
-  caption: string
+  caption?: string
   className?: string
 }
 
-export function HeroArt({ media, caption, className }: HeroArtProps) {
+export function HeroArt({ media, className }: HeroArtProps) {
+  // Three tiles: one tall feature and two stacked. A fourth would be a tile
+  // with nowhere to go in the 3×2 frame.
+  const tiles = sliceCoverMedia(media).slice(0, 3)
+
   return (
     <div
       data-testid="hero-art"
       className={cn(
-        "relative h-[272px] w-full max-w-[560px] shrink-0 overflow-hidden rounded-2xl border border-border",
+        "grid h-[248px] w-full grid-cols-3 grid-rows-2 gap-1.5 overflow-hidden rounded-xl border border-border bg-surface-warm sm:h-[280px] lg:h-[264px]",
         className
       )}
     >
-      <CollectionCover
-        media={media}
-        seed="gallery-hero-art"
-        className="h-full w-full"
-      />
-      {/* `max-w` keeps the pill clear of the art's border when the summary wraps
-          to a second line at narrow widths — without it the box ran right up to
-          the edge, which read as an overflow rather than as a caption. */}
-      <p className="absolute bottom-4 left-4 max-w-[calc(100%-2rem)] rounded-md bg-black/35 px-3 py-1.5 font-display text-[20px] leading-[1.3] text-white">
-        {caption}
-      </p>
+      {tiles.length === 0 ? (
+        <span
+          aria-hidden="true"
+          className="col-span-3 row-span-2 flex flex-col items-center justify-center gap-3 bg-surface-warm text-muted"
+        >
+          <Bookmark className="size-5" strokeWidth={1.4} />
+          <span className="micro">No covers yet</span>
+        </span>
+      ) : (
+        tiles.map((src, index) => (
+          <MediaImage
+            key={`${src}-${index}`}
+            src={src}
+            fallbackSeed={`gallery-hero-art:${index}`}
+            loading="eager"
+            className={cn(
+              "size-full",
+              index === 0 ? "col-span-2 row-span-2" : ""
+            )}
+          />
+        ))
+      )}
     </div>
   )
 }
@@ -65,9 +75,6 @@ export function GalleryHero({ collections }: GalleryHeroProps) {
       .flatMap((collection) => collection.cover_media)
   )
   const mediaTotal = sumCounts(collections, (c) => c.media_count)
-  // The archive-wide bookmark (post) total. The per-collection rows each carry
-  // their own count; this is the only place the whole archive is summed up, so
-  // the caption answers "how much have I saved" without opening a single folder.
   const postTotal = sumCounts(collections, (c) => c.post_count)
   const caption =
     collections.length === 0
@@ -82,35 +89,41 @@ export function GalleryHero({ collections }: GalleryHeroProps) {
     <section
       aria-labelledby="gallery-heading"
       data-testid="gallery-hero"
-      className="rounded-2xl bg-grad-hero p-9 shadow-hero"
+      className="grid gap-8 border-b border-border pb-10 sm:gap-10 sm:pb-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] lg:items-end lg:gap-16"
     >
-      <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <p className="text-[10px] leading-[1.4] font-semibold tracking-[0.12em] text-accent uppercase">
-            Your Twitter archive, reimagined
-          </p>
-          <h1
-            id="gallery-heading"
-            className="mt-3 max-w-[520px] font-display text-[46px] leading-[1.05] font-bold text-ink"
-          >
-            Save. Organize.
-            <br />
-            Relive inspiration.
-          </h1>
-          <p className="mt-4 max-w-[510px] text-sm leading-[1.45] text-muted">
-            Every collection in your local archive, rendered as a gallery. No
-            cloud, no algorithmic feed — just your saved things.
-          </p>
+      <div className="min-w-0">
+        <p className="micro">Local archive</p>
+        <h1
+          id="gallery-heading"
+          className="mt-4 max-w-[620px] text-[38px]! leading-[1.0]! font-semibold tracking-[-0.04em] text-ink sm:text-[44px]! md:text-[56px]! md:tracking-[-0.045em]"
+        >
+          Save. Organize.
+          <br />
+          Relive inspiration.
+        </h1>
+        <p className="mt-6 max-w-[440px] text-[14px] leading-[1.65] text-muted">
+          Every collection in your local archive, rendered as a gallery. No
+          cloud, no algorithmic feed — just your saved things.
+        </p>
+
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
           <a
             href="#collections-grid"
-            className="mt-6 inline-flex h-[42px] w-[134px] items-center justify-center rounded-md border border-white/15 bg-grad-cta text-xs leading-[1.4] font-semibold text-white outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="group inline-flex items-center gap-1.5 rounded-sm text-[13px] leading-[1.4] font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
           >
-            Explore gallery
+            <span className="border-b border-ink/30 pb-0.5 transition-colors group-hover:border-ink">
+              Explore gallery
+            </span>
+            <ArrowUpRight
+              aria-hidden="true"
+              className="size-3.5 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+            />
           </a>
+          <p className="tnum text-[12px] leading-[1.4] text-muted">{caption}</p>
         </div>
-
-        <HeroArt media={media} caption={caption} />
       </div>
+
+      <HeroArt media={media} />
     </section>
   )
 }

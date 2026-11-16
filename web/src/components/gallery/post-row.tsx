@@ -5,7 +5,6 @@ import { PostActionsMenu } from "@/components/gallery/post-actions-menu"
 import { PostMediaThumb } from "@/components/gallery/post-media-thumb"
 import type { PortalContainer } from "@/components/ui/dialog"
 import { OPEN_ON_X_LABEL } from "@/lib/messages"
-import { pickPlaceholderGradient } from "@/lib/placeholder"
 import { displayHandle, formatPostMeta } from "@/lib/post-meta"
 import { cn } from "@/lib/utils"
 import type { GalleryPost } from "@/types"
@@ -40,7 +39,7 @@ export interface PostRowProps {
 export function PostRow({ post, now, onOpenMedia, actions }: PostRowProps) {
   const meta = formatPostMeta(post, now === undefined ? {} : { now })
   const handle = displayHandle(post.username)
-  const avatar = pickPlaceholderGradient(post.username)
+  const initial = (post.author.trim() || handle).charAt(0).toUpperCase()
   const hasMedia = post.media.length > 0
   const mediaLabel =
     post.media.length === 1
@@ -66,7 +65,7 @@ export function PostRow({ post, now, onOpenMedia, actions }: PostRowProps) {
         </div>
       )}
 
-      <div className="w-[92px] shrink-0 sm:w-[120px]">
+      <div className="w-[88px] shrink-0 sm:w-[96px]">
         {hasMedia ? (
           <PostMediaThumb
             media={post.media}
@@ -95,9 +94,10 @@ export function PostRow({ post, now, onOpenMedia, actions }: PostRowProps) {
           <span
             aria-hidden="true"
             data-testid="post-avatar"
-            style={{ backgroundImage: avatar.value }}
-            className="size-6 shrink-0 rounded-full"
-          />
+            className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-surface-warm text-[9.5px] leading-none font-semibold text-muted"
+          >
+            {initial}
+          </span>
           <p className="min-w-0 flex-1 truncate text-[11px] leading-[1.4]">
             <span className="font-semibold text-ink">{post.author}</span>{" "}
             <span className="text-[9px] font-normal text-muted">{handle}</span>
@@ -106,10 +106,10 @@ export function PostRow({ post, now, onOpenMedia, actions }: PostRowProps) {
 
         <ClampedPostText text={post.text} variant="row" className="mt-2 pr-1" />
 
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pt-2">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <p
             data-testid="post-meta"
-            className="text-[9px] leading-[1.4] text-muted"
+            className="tnum text-[10.5px] leading-[1.4] text-muted"
           >
             {meta}
           </p>
@@ -118,7 +118,7 @@ export function PostRow({ post, now, onOpenMedia, actions }: PostRowProps) {
             href={post.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-fit rounded-sm text-[10px] leading-[1.4] font-semibold text-ink transition-colors outline-none hover:text-accent focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="w-fit rounded-sm text-[11px] leading-[1.4] font-semibold text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/30"
           >
             {OPEN_ON_X_LABEL}
           </a>

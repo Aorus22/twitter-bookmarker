@@ -10,6 +10,14 @@
 > (neutral light/dark), which is *not* used by this design.
 
 **Status:** Approved direction · extracted 2026-09-27 via the Figma Desktop Bridge.
+
+> **Visual refresh (2026-11):** the gallery's *behaviour, copy, layout geometry
+> and accessibility contracts* in this document still hold. Its *skin* does not:
+> the Playfair/gradient editorial styling has been replaced by a monochrome
+> Astryx shell with Figtree, hairline borders and neutral placeholder art. Read
+> §2's colours, §2.3's fonts and §2.6's gradients as the previous skin; the
+> current tokens live in `web/src/index.css` and the Astryx theme in
+> `web/src/app/astryx-theme.ts`.
 **Consumers:** every frontend phase (3–10). Backend phases only need §2 for the `cover_media` count rules.
 
 ---

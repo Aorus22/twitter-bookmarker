@@ -48,7 +48,7 @@ const REGION_STYLE: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gridTemplateRows: "repeat(2, minmax(0, 1fr))",
-  gap: "5px",
+  gap: "3px",
 }
 
 export function CollectionCover({
@@ -71,22 +71,12 @@ export function CollectionCover({
       {layout.kind === "placeholder" ? (
         <span
           data-testid="cover-placeholder"
-          className="col-span-2 row-span-2 flex items-center justify-center rounded-md"
+          className="col-span-2 row-span-2 flex items-center justify-center"
           style={{ backgroundImage: placeholder.value }}
         >
-          <svg
-            viewBox="0 0 24 24"
-            className="size-7 text-white/70"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="4" width="18" height="16" rx="3" />
-            <circle cx="8.5" cy="9.5" r="1.5" />
-            <path d="m4 17 5-5 4 4 3-2 4 4" />
-          </svg>
+          <span className="text-[26px] leading-none font-semibold tracking-[-0.02em] text-ink/35">
+            {(seed.replace(/[^a-zA-Z0-9]/g, " ").trim().charAt(0) || "·").toUpperCase()}
+          </span>
         </span>
       ) : (
         tiles.map((src, index) => (
@@ -95,7 +85,7 @@ export function CollectionCover({
             src={src}
             fallbackSeed={`${seed}:${index}`}
             className={cn(
-              "h-full w-full rounded-md",
+              "h-full w-full rounded-[4px]",
               tileSpanClass(layout.kind, index)
             )}
           />

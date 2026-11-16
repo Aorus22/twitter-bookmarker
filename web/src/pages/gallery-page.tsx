@@ -9,22 +9,21 @@ import { useCollections } from "@/hooks"
 import { formatCount } from "@/lib/collection-meta"
 
 /**
- * Homepage route `/` (design spec §3.2, PRD-2 §16/§38/§59/§61).
+ * Homepage route `/`.
  *
- * Hero → section header → exactly one grid state:
- *   loading  → `MasonrySkeleton` (never a blank page, PRD-2 §35)
- *   error    → `GalleryErrorState` with the PRD-2 §61 copy and a working Retry
- *   success  → cards, or `GalleryEmptyState` when there are no collections
+ * Masthead → collection index → one grid state:
+ *   loading → card-shaped skeletons (never a blank page)
+ *   error   → the connection copy with a working Retry
+ *   success → cards, or the empty-archive state
  *
- * `Recently updated ▾` is a **static label**, not a menu: PRD-2 §38 fixes the
- * ordering to `last_saved_at DESC`, so there is nothing to choose. The footer
- * line closes the frame per spec §3.2.
+ * The ordering is fixed to `last_saved_at DESC` by the backend, so the label on
+ * the right is static text, not a menu with one option.
  */
 export function GalleryPage() {
   const { collections, status, errorMessage, refetch } = useCollections()
 
   return (
-    <div className="flex flex-col gap-10 py-4">
+    <div className="flex flex-col gap-14 py-2">
       <GalleryHero collections={collections} />
 
       <section
@@ -36,19 +35,17 @@ export function GalleryPage() {
           <div className="flex items-baseline gap-3">
             <h2
               id="collections-heading"
-              className="font-display text-[28px] leading-[1.2] font-bold text-ink"
+              className="text-[20px]! leading-[1.2]! font-semibold tracking-[-0.02em] text-ink"
             >
               My Collections
             </h2>
             {status === "success" ? (
-              <span className="text-[11px] leading-[1.4] font-medium text-muted">
+              <span className="tnum text-[11px] leading-[1.4] font-medium text-muted">
                 {formatCount(collections.length, "collection")}
               </span>
             ) : null}
           </div>
-          <span className="text-[11px] leading-[1.4] font-medium text-muted">
-            Recently updated ▾
-          </span>
+          <span className="micro">Recently updated ▾</span>
         </div>
 
         <div className="mt-6">
@@ -63,14 +60,7 @@ export function GalleryPage() {
           ) : null}
 
           {status === "success" && collections.length > 0 ? (
-            // justify-center, not flex-start: the cards are a fixed 244px wide
-            // inside the shell's rail, so a row of 4 in a 1312px rail leaves
-            // ~282px of slack and a row of 3 leaves more still. Flushing them
-            // left piled all of it against the right edge, which read as a
-            // broken layout. Centring shares the slack between both sides.
-            // The section header above stays justify-between on purpose: it is
-            // a title row spanning the rail, not part of this grid.
-            <ul className="flex flex-wrap justify-center gap-[18px]">
+            <ul className="grid grid-cols-2 gap-x-5 gap-y-9 sm:grid-cols-3 xl:grid-cols-4">
               {collections.map((collection) => (
                 <CollectionCard key={collection.slug} collection={collection} />
               ))}
@@ -79,7 +69,7 @@ export function GalleryPage() {
         </div>
       </section>
 
-      <p className="text-[11px] leading-[1.4] text-muted">
+      <p className="border-t border-border/70 pt-6 text-[11px] leading-[1.4] text-muted">
         Local-only · Powered by your local archive · No cloud, no algorithmic
         feed
       </p>

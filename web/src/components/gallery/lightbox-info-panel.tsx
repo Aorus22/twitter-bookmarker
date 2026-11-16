@@ -6,37 +6,19 @@ import { LIGHTBOX_CLOSE_LABEL, OPEN_ON_X_LABEL } from "@/lib/messages"
 import type { GalleryPost } from "@/types"
 
 /**
- * The lightbox metadata panel (LIGHT-01/LIGHT-02, PRD-2 §26, design spec §3.5).
+ * The lightbox metadata panel: author, text, dates, and the one outbound link.
  *
- * `330×760`, r20, `surface-warm`, padding 22 on desktop; full width and
- * auto-height when it stacks under the media below the breakpoint. Exactly the
- * five things PRD-2 §26 requires are present:
- *
- *   1. author Inter SemiBold 13 and `@username` Inter Regular 10 muted;
- *   2. the post text Inter Regular 13 `ink`, clamped with a working
- *      `Show more` (the Phase 5 `ClampedPostText`, `lightbox` variant);
- *   3. the three-line meta block Inter Regular 10 muted — `Posted <date>` /
- *      `Saved <date>` / `Collection <name>` — where the collection name is the
- *      backend `DisplayName` the caller got from the posts hook;
- *   4. `Open on X ↗` as a real 286×42 r12 `surface`+border anchor to the stored
- *      URL with `target="_blank" rel="noopener noreferrer"`, pinned near the
- *      panel's bottom;
- *   5. the `×` close control (Inter Medium 22) at the panel's top-right, with
- *      the per-post kebab menu beside it.
+ * The facts are split between the top (who and what) and the foot (when and
+ * where) so the middle of a tall panel is not a dead white column. The close and
+ * kebab controls stay in the top-right corner.
  */
 export interface LightboxInfoPanelProps {
   post: GalleryPost
   /** Backend collection `DisplayName` — never the slug. */
   collectionName: string
-  /** Closes the lightbox (the `×` control). */
   onClose: () => void
-  /** Reference "today" for the year-aware date format; defaults to the clock. */
   now?: Date
-  /**
-   * Curation actions. When present, a kebab menu sits beside the `×`. Its
-   * `portalContainer` must be the lightbox content element, or the menu would
-   * mount on `document.body` and escape the dialog's focus trap.
-   */
+  /** Curation actions; the menu portals into the lightbox content element. */
   actions?: PostCardActions
 }
 
@@ -52,6 +34,8 @@ export function LightboxInfoPanel({
     collectionName,
     now === undefined ? {} : { now }
   )
+  const handle = displayHandle(post.username)
+  const initial = (post.author.trim() || handle).charAt(0).toUpperCase()
 
   return (
     <aside
@@ -63,15 +47,13 @@ export function LightboxInfoPanel({
         data-testid="lightbox-close"
         aria-label={LIGHTBOX_CLOSE_LABEL}
         onClick={onClose}
-        className="absolute top-4 right-4 flex size-8 items-center justify-center rounded-sm text-[22px] leading-none font-medium text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="absolute top-4 right-4 flex size-7 items-center justify-center rounded-md text-[20px] leading-none font-normal text-muted transition-colors outline-none hover:bg-surface hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/30"
       >
         ×
       </button>
 
       {actions === undefined ? null : (
-        // Left of the `×`, inside the panel's own padding so it never overlaps
-        // the close control.
-        <div className="absolute top-4 right-14">
+        <div className="absolute top-4 right-12">
           <PostActionsMenu
             post={post}
             onRequestDelete={actions.onRequestDelete}
@@ -81,39 +63,53 @@ export function LightboxInfoPanel({
         </div>
       )}
 
-      <p
-        data-testid="lightbox-author"
-        className="pr-24 text-[13px] leading-[1.4] font-semibold text-ink"
-      >
-        {post.author}
-      </p>
-      <p
-        data-testid="lightbox-username"
-        className="text-[10px] leading-[1.4] text-muted"
-      >
-        {displayHandle(post.username)}
-      </p>
-
-      <ClampedPostText variant="lightbox" text={post.text} className="mt-4" />
-
-      <div
-        data-testid="lightbox-meta"
-        className="mt-4 flex flex-col text-[10px] leading-[1.4] text-muted"
-      >
-        <p data-testid="lightbox-posted">{meta.posted}</p>
-        <p data-testid="lightbox-saved">{meta.saved}</p>
-        <p data-testid="lightbox-collection">{meta.collection}</p>
+      <div className="flex items-center gap-2.5 pr-20">
+        <span
+          aria-hidden="true"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-[11px] leading-none font-semibold text-muted"
+        >
+          {initial}
+        </span>
+        <div className="min-w-0">
+          <p
+            data-testid="lightbox-author"
+            className="truncate text-[12.5px] leading-[1.35] font-semibold text-ink"
+          >
+            {post.author}
+          </p>
+          <p
+            data-testid="lightbox-username"
+            className="truncate text-[10.5px] leading-[1.4] text-muted"
+          >
+            {handle}
+          </p>
+        </div>
       </div>
 
-      <a
-        data-testid="lightbox-open-on-x"
-        href={post.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-auto flex h-[42px] w-full items-center justify-center rounded-sm border border-border bg-surface text-[12px] leading-[1.4] font-semibold text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        {OPEN_ON_X_LABEL}
-      </a>
+      <div aria-hidden="true" className="mt-5 h-px w-full bg-border" />
+
+      <ClampedPostText variant="lightbox" text={post.text} className="mt-5" />
+
+      <div className="mt-auto pt-10">
+        <div
+          data-testid="lightbox-meta"
+          className="tnum flex flex-col gap-0.5 border-t border-border pt-4 text-[10.5px] leading-[1.5] text-muted"
+        >
+          <p data-testid="lightbox-posted">{meta.posted}</p>
+          <p data-testid="lightbox-saved">{meta.saved}</p>
+          <p data-testid="lightbox-collection">{meta.collection}</p>
+        </div>
+
+        <a
+          data-testid="lightbox-open-on-x"
+          href={post.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 flex h-10 w-full items-center justify-center rounded-md border border-border bg-surface text-[11.5px] leading-[1.4] font-semibold text-ink transition-colors outline-none hover:border-ink/25 focus-visible:ring-3 focus-visible:ring-ring/30"
+        >
+          {OPEN_ON_X_LABEL}
+        </a>
+      </div>
     </aside>
   )
 }

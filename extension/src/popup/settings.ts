@@ -7,7 +7,7 @@
  */
 
 import { setSettings } from "../shared/storage.ts";
-import type { DisplayMode, Settings, Store } from "../shared/types.ts";
+import type { DisplayMode, Settings, Store, WatcherMode } from "../shared/types.ts";
 
 export interface SettingsPanel {
   /** Push persisted values into the controls without re-triggering a write. */
@@ -22,6 +22,9 @@ function requireEl<T extends Element>(id: string): T {
 
 export function initSettings(): SettingsPanel {
   const toggle = requireEl<HTMLInputElement>("setting-unbookmark");
+  const watcherToggle = requireEl<HTMLInputElement>("setting-auto-unbookmark-saved");
+  const watcherMode = requireEl<HTMLDivElement>("watcher-mode");
+  const watcherModeOptions = Array.from(watcherMode.querySelectorAll<HTMLButtonElement>(".segmented-option"));
   const segmented = requireEl<HTMLDivElement>("display-mode");
   const options = Array.from(segmented.querySelectorAll<HTMLButtonElement>(".segmented-option"));
 
@@ -31,6 +34,12 @@ export function initSettings(): SettingsPanel {
   function applyDisplayMode(mode: DisplayMode): void {
     for (const option of options) {
       option.setAttribute("aria-checked", String(option.dataset.mode === mode));
+    }
+  }
+
+  function applyWatcherMode(mode: WatcherMode): void {
+    for (const option of watcherModeOptions) {
+      option.setAttribute("aria-checked", String(option.dataset.watcherMode === mode));
     }
   }
 
@@ -45,6 +54,21 @@ export function initSettings(): SettingsPanel {
     persist({ unbookmarkAfterSave: toggle.checked });
   });
 
+  watcherToggle.addEventListener("change", () => {
+    if (syncing) return;
+    persist({ autoUnbookmarkSaved: watcherToggle.checked });
+  });
+
+  for (const option of watcherModeOptions) {
+    option.addEventListener("click", () => {
+      const mode = option.dataset.watcherMode;
+      if (mode !== "visible" && mode !== "aggressive") return;
+      applyWatcherMode(mode);
+      if (syncing) return;
+      persist({ autoUnbookmarkSavedMode: mode });
+    });
+  }
+
   for (const option of options) {
     option.addEventListener("click", () => {
       const mode = option.dataset.mode;
@@ -58,6 +82,8 @@ export function initSettings(): SettingsPanel {
   function render(store: Store): void {
     syncing = true;
     toggle.checked = store.settings.unbookmarkAfterSave;
+    watcherToggle.checked = store.settings.autoUnbookmarkSaved;
+    applyWatcherMode(store.settings.autoUnbookmarkSavedMode);
     applyDisplayMode(store.settings.displayMode);
     syncing = false;
   }

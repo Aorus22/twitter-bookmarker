@@ -84,8 +84,8 @@ export interface SaveControllerOptions {
   toast?: (kind: ToastKind, message: string) => void;
   /** Saving transition; defaults to the bookmark-page seam. */
   setSaving?: (tweetId: string, saving: boolean) => void;
-  /** Saved transition; defaults to the bookmark-page seam. */
-  setSaved?: (tweetId: string) => void;
+  /** Saved transition; defaults to the bookmark-page seam, which records the slug. */
+  setSaved?: (tweetId: string, slug?: string) => void;
 }
 
 /** Fallback reason when the extractor itself throws instead of failing typed. */
@@ -144,7 +144,8 @@ export function createSaveController(options: SaveControllerOptions): OrganizerC
       // persisted and rendered as `✓ Saved` *before* any unbookmark is even
       // attempted. The persisted state is never touched again below, so the
       // window between save success and an unbookmark failure can never alter it.
-      setSaved(tweetId);
+      // The slug travels with the mark so the "Saved in …" surface can name it.
+      setSaved(tweetId, category.slug);
       toast("success", savedToast(category.name));
 
       // `onSaved` carries the Phase-5 verified unbookmark. It is deliberately

@@ -16,23 +16,26 @@ import {
   MediaLightbox,
   MovePostDialog,
   PostCard,
+  PostGrid,
+  PostRow,
+  PostRowList,
 } from "@/components/gallery"
 import {
   useGalleryQuery,
   useMasonryColumns,
   useMediaLightbox,
   usePosts,
+  useViewMode,
 } from "@/hooks"
 import { deleteBookmark, moveBookmark } from "@/lib/api"
 import { formatCollectionCounts } from "@/lib/collection-meta"
-import { masonryContainerWidth } from "@/lib/masonry"
+import { masonryMaxWidth } from "@/lib/masonry"
 import {
   BACK_TO_COLLECTIONS_LABEL,
   DELETE_POST_FAILED_MESSAGE,
   LOADING_POSTS_LABEL,
   MOVE_POST_FAILED_MESSAGE,
 } from "@/lib/messages"
-import { pickPlaceholderGradient } from "@/lib/placeholder"
 import { selectPostsViewState } from "@/lib/posts-state"
 import { scrollNearTop } from "@/lib/scroll"
 import type { GalleryPost } from "@/types"
@@ -106,6 +109,11 @@ export function CollectionPage() {
     refetch,
     removePost,
   } = usePosts(slug, requestParams)
+
+  // Layout preference (owner request, Nov 2026): masonry / grid / rows,
+  // persisted across visits. It is presentation only — search, filters, sort and
+  // paging are unaffected.
+  const { viewMode, setViewMode } = useViewMode()
 
   // The lightbox is driven entirely by the accumulated loaded list: its
   // flattened media sequence is derived from `posts`, so it can never request a
@@ -263,6 +271,9 @@ export function CollectionPage() {
   // deadlock `GalleryMasonry` documents for its own list.
   const columnProbeRef = useRef<HTMLDivElement>(null)
   const columnCount = useMasonryColumns(columnProbeRef)
+  // One column is not capped: on a phone the 292px Figma measure would leave the
+  // content as a narrow centred ribbon while the 440px toolbar overflowed it.
+  const columnWidth = masonryMaxWidth(columnCount)
 
   // PRD-2 §77: on any search/filter/sort change the loaded pages and cursor are
   // already reset by `usePosts`' request key; this adds the "scroll near the
@@ -284,32 +295,34 @@ export function CollectionPage() {
     collection !== undefined && collection.name.trim() !== ""
       ? collection.name
       : (slug ?? "Collection")
-  const icon = pickPlaceholderGradient(slug ?? "collection")
 
   return (
     <div ref={columnProbeRef} className="w-full">
       <div
         data-testid="collection-column"
         className="mx-auto flex w-full flex-col pb-10"
-        style={{ maxWidth: `${masonryContainerWidth(columnCount)}px` }}
+        style={
+          columnWidth === undefined
+            ? undefined
+            : { maxWidth: `${columnWidth}px` }
+        }
       >
         <Link
           to="/"
-          className="w-fit text-[11px] leading-[1.4] font-medium text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="inline-flex w-fit items-center gap-1.5 rounded-sm text-[11.5px] leading-[1.4] font-medium text-muted transition-colors outline-none hover:text-ink focus-visible:ring-3 focus-visible:ring-ring/30"
         >
           {BACK_TO_COLLECTIONS_LABEL}
         </Link>
 
-        <header className="mt-4 flex items-start gap-6">
+        <header className="mt-7 flex items-start gap-5 border-b border-border pb-8">
           <span
             aria-hidden="true"
             data-testid="collection-icon"
-            style={{ backgroundImage: icon.value }}
-            className="flex size-24 shrink-0 items-center justify-center rounded-2xl text-white/80"
+            className="flex size-14 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-warm text-muted"
           >
-            <Images className="size-9" />
+            <Images className="size-5" />
           </span>
-          <div className="flex h-24 min-w-0 flex-col justify-between py-0.5">
+          <div className="min-w-0">
             <h1
               id="collection-heading"
               data-testid="collection-heading"
@@ -317,14 +330,14 @@ export function CollectionPage() {
               // Programmatic-only focus target: `-1` keeps it out of the tab
               // order while still letting the removal effect move focus here.
               tabIndex={-1}
-              className="rounded-sm text-[28px] leading-[1.1] font-bold break-words text-ink outline-none focus-visible:ring-3 focus-visible:ring-ring/50 md:text-[38px]"
+              className="rounded-sm text-[30px]! leading-[1.08]! font-semibold tracking-[-0.035em] break-words text-ink outline-none focus-visible:ring-3 focus-visible:ring-ring/30 md:text-[40px]!"
             >
               {displayName}
             </h1>
             {collection === undefined ? null : (
               <p
                 data-testid="collection-counts"
-                className="text-xl leading-[1.4] font-medium text-muted md:text-2xl"
+                className="tnum mt-2 text-[12.5px] leading-[1.4] font-medium text-muted"
               >
                 {formatCollectionCounts(collection)}
               </p>
@@ -333,7 +346,7 @@ export function CollectionPage() {
         </header>
 
         <CollectionToolbar
-          className="mt-[52px]"
+          className="mt-6"
           search={search}
           onSearchChange={setSearch}
           filterActive={filterActive}
@@ -346,6 +359,8 @@ export function CollectionPage() {
           }
           sort={query.sort}
           onSortChange={setSort}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
 
         {curationError === null ? null : (
@@ -362,6 +377,7 @@ export function CollectionPage() {
           className="mt-6"
           data-testid="collection-content"
           data-view-state={viewState}
+          data-view-mode={viewMode}
         >
           {viewState === "loading" ? (
             <MasonrySkeleton label={LOADING_POSTS_LABEL} />
@@ -379,18 +395,47 @@ export function CollectionPage() {
 
           {viewState === "posts" ? (
             <>
-              <GalleryMasonry columns={columnCount}>
-                {posts.map((post, postIndex) => (
-                  <PostCard
-                    key={post.tweet_id}
-                    post={post}
-                    actions={cardActions}
-                    onOpenMedia={(mediaIndex, trigger) => {
-                      lightbox.open(postIndex, mediaIndex, trigger)
-                    }}
-                  />
-                ))}
-              </GalleryMasonry>
+              {viewMode === "rows" ? (
+                <PostRowList>
+                  {posts.map((post, postIndex) => (
+                    <PostRow
+                      key={post.tweet_id}
+                      post={post}
+                      actions={cardActions}
+                      onOpenMedia={(mediaIndex, trigger) => {
+                        lightbox.open(postIndex, mediaIndex, trigger)
+                      }}
+                    />
+                  ))}
+                </PostRowList>
+              ) : viewMode === "grid" ? (
+                <PostGrid columns={columnCount}>
+                  {posts.map((post, postIndex) => (
+                    <PostCard
+                      key={post.tweet_id}
+                      post={post}
+                      variant="grid"
+                      actions={cardActions}
+                      onOpenMedia={(mediaIndex, trigger) => {
+                        lightbox.open(postIndex, mediaIndex, trigger)
+                      }}
+                    />
+                  ))}
+                </PostGrid>
+              ) : (
+                <GalleryMasonry columns={columnCount}>
+                  {posts.map((post, postIndex) => (
+                    <PostCard
+                      key={post.tweet_id}
+                      post={post}
+                      actions={cardActions}
+                      onOpenMedia={(mediaIndex, trigger) => {
+                        lightbox.open(postIndex, mediaIndex, trigger)
+                      }}
+                    />
+                  ))}
+                </GalleryMasonry>
+              )}
               {/* A page load never hides the cards above: only this compact row
                   appears (PRD-2 §35). */}
               {isLoadingMore ? <GalleryBottomLoader /> : null}

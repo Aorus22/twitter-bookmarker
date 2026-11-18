@@ -14,3 +14,5 @@ export {
 } from "./use-media-query"
 export { useMediaLightbox } from "./use-media-lightbox"
 export type { UseMediaLightboxResult } from "./use-media-lightbox"
+export { useViewMode } from "./use-view-mode"
+export type { UseViewModeResult } from "./use-view-mode"

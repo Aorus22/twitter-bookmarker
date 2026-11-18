@@ -48,7 +48,7 @@ export interface FilterControlProps {
 }
 
 const TRIGGER_CLASS =
-  "flex h-10 w-[86px] shrink-0 items-center justify-center gap-1.5 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink outline-none transition-colors hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
+  "flex h-10 w-[86px] shrink-0 items-center justify-center gap-1.5 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink outline-none transition-colors hover:bg-surface-warm data-[filter-active=true]:border-ink/25 focus-visible:ring-2 focus-visible:ring-ring/20"
 
 export function FilterControl({
   active,
@@ -97,7 +97,7 @@ export function FilterControl({
         <span
           aria-hidden="true"
           data-testid="collection-filter-dot"
-          className="size-1.5 rounded-full bg-accent"
+          className="size-1.5 rounded-full bg-ink"
         />
       ) : null}
     </button>
@@ -110,6 +110,13 @@ export function FilterControl({
       onReset={handleReset}
       onApply={handleApply}
       now={now}
+      // Inside the mobile sheet the panel is the sheet, not a card floating in
+      // one: drop the border, radius and shadow, keep only the padding.
+      className={
+        isDesktop
+          ? undefined
+          : "w-full max-w-none rounded-none border-0 bg-transparent p-5 shadow-none"
+      }
     />
   )
 
@@ -118,15 +125,21 @@ export function FilterControl({
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetTrigger asChild>{trigger}</SheetTrigger>
         <SheetContent
-          side="right"
+          side="bottom"
           data-testid="filter-sheet"
-          className="w-full max-w-[390px] gap-0 bg-surface p-0"
+          className="max-h-[88svh] w-full gap-0 rounded-t-2xl border-t border-border bg-surface p-0"
         >
           <SheetTitle className="sr-only">{FILTER_TITLE}</SheetTitle>
           <SheetDescription className="sr-only">
             {FILTER_SUBTITLE}
           </SheetDescription>
-          <div className="overflow-y-auto">{panel}</div>
+          <span
+            aria-hidden="true"
+            className="mx-auto mt-2.5 h-1 w-9 shrink-0 rounded-full bg-border"
+          />
+          <div className="overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+            {panel}
+          </div>
         </SheetContent>
       </Sheet>
     )

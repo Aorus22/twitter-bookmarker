@@ -1,6 +1,7 @@
+import { IconButton } from "@astryxdesign/core/IconButton"
 import { Monitor, Moon, Sun } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Astryx } from "@/app/astryx"
 import { useTheme, type Theme } from "@/hooks/use-theme"
 
 const ORDER: readonly Theme[] = ["light", "dark", "system"]
@@ -17,10 +18,8 @@ function nextTheme(theme: Theme): Theme {
 }
 
 /**
- * Cycles light → dark → system (PRD-2 §64). `system` follows the OS setting.
- *
- * A real `<button>` with an accessible name and a visible tooltip-ish title, so
- * it is keyboard reachable and screen-reader announced.
+ * Cycles light → dark → system. The control is a real button with an accessible
+ * name and a tooltip title, so it stays keyboard reachable.
  */
 export function ThemeToggle() {
   const { theme, resolvedTheme, setTheme } = useTheme()
@@ -30,17 +29,24 @@ export function ThemeToggle() {
     theme === "system" ? Monitor : resolvedTheme === "dark" ? Moon : Sun
 
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      onClick={() => setTheme(next)}
-      title={`Theme: ${LABELS[theme]} — switch to ${LABELS[next]}`}
-      aria-label={`Theme: ${LABELS[theme]}. Switch to ${LABELS[next]} theme.`}
+    <span
       data-theme-preference={theme}
       data-theme-resolved={resolvedTheme}
     >
-      <Icon aria-hidden="true" />
-    </Button>
+      <Astryx mode={resolvedTheme}>
+        <span title={`Theme: ${LABELS[theme]} — switch to ${LABELS[next]}`}>
+          <IconButton
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon={<Icon aria-hidden="true" className="size-4" />}
+            label={`Theme: ${LABELS[theme]}. Switch to ${LABELS[next]} theme.`}
+            onClick={() => {
+              setTheme(next)
+            }}
+          />
+        </span>
+      </Astryx>
+    </span>
   )
 }

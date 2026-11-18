@@ -15,15 +15,29 @@ import {
   setSaving,
 } from "../src/content/ui-injector.ts";
 import { closeStalePopover, isPopoverOpen } from "../src/content/organizer.ts";
+import {
+  ACCENT_BLUE,
+  closeSaveModal,
+  isSaveModalOpenFor,
+} from "../src/content/save-modal.ts";
 import { createEvent } from "./helpers/fake-dom.mjs";
 import { createTweetDocument, sampleCategories } from "./helpers/tweet-fixtures.mjs";
 
 const SETTINGS = { unbookmarkAfterSave: false, displayMode: "popover" };
 
-function makeCallbacks({ savedIds = new Set(), onSelect = () => {} } = {}) {
+function makeCallbacks({
+  savedIds = new Set(),
+  onSelect = () => {},
+  savedSlugOf = () => null,
+  onMove = () => {},
+  onRemove = () => {},
+} = {}) {
   return {
     isSaved: (tweetId) => savedIds.has(tweetId),
     onSelect,
+    savedSlugOf,
+    onMove,
+    onRemove,
   };
 }
 
@@ -122,7 +136,7 @@ test("popover mode: single trigger, ordered panel, visible colours (XI-09)", () 
   const buttons = panel.querySelectorAll("[data-category-id]");
   assert.deepEqual(
     buttons.map((button) => button.getAttribute("data-category-id")),
-    ["cat-ai", "cat-linux"],
+    ["ai", "linux"],
     "order follows category.order (AI=0 before Linux=1)",
   );
   assert.deepEqual(
@@ -149,7 +163,7 @@ test("inline mode renders every category in order with colour (XI-10)", () => {
   const buttons = root.querySelectorAll("[data-category-id]");
   assert.deepEqual(
     buttons.map((button) => button.getAttribute("data-category-id")),
-    ["cat-ai", "cat-linux"],
+    ["ai", "linux"],
   );
   assert.deepEqual(
     buttons.map((button) => button.querySelector("[data-twitter-bookmarker-color]").style.backgroundColor),
@@ -202,18 +216,18 @@ test("popover closes on category selection and fires onSelect once (XI-09)", () 
   trigger.click();
   assert.equal(panel.hidden, false);
 
-  root.querySelector('[data-category-id="cat-linux"]').click();
+  root.querySelector('[data-category-id="linux"]').click();
   assert.equal(panel.hidden, true, "selecting closes the popover");
-  assert.deepEqual(selections, [["cat-linux", "42", true]]);
+  assert.deepEqual(selections, [["linux", "42", true]]);
 
   // A fast double-click collapses into one selection.
   trigger.click();
-  const ai = root.querySelector('[data-category-id="cat-ai"]');
+  const ai = root.querySelector('[data-category-id="ai"]');
   ai.click();
   ai.click();
   assert.deepEqual(selections, [
-    ["cat-linux", "42", true],
-    ["cat-ai", "42", true],
+    ["linux", "42", true],
+    ["ai", "42", true],
   ]);
   assert.ok(doc);
 });
@@ -366,4 +380,220 @@ test("a fresh article node with no marker receives controls exactly once (marker
   inject(replacement);
   inject(replacement);
   assert.equal(rootsIn(replacement).length, 1, "fresh node gets exactly one organizer");
+});
+
+/* -------------------------------------------------------------------------- */
+/* The general-page variant                                                   */
+/* -------------------------------------------------------------------------- */
+
+test("the bookmark variant renders the icon-only action-bar button", () => {
+  const { article, actionBar } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  // Placement: inside the action bar, as a sibling of the native actions — the
+  // web twin of the phone's action-bar button, not another row above it.
+  assert.equal(root.parentElement, actionBar);
+  assert.equal(actionBar.children[actionBar.children.length - 1], root);
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.ok(trigger, "the trigger is still the organizer trigger");
+  assert.equal(trigger.querySelector(".twb-trigger-label"), null, "icon-only: no text label");
+  assert.equal(trigger.getAttribute("aria-label"), "Save to Twitter Bookmarker");
+
+  // The glyph is inline SVG: an <img> to a chrome-extension:// URL would be blocked
+  // by X's own img-src policy, so it has to be built from nodes. Outline while
+  // unsaved, at X's own action-icon size.
+  const glyph = trigger.querySelector("svg");
+  assert.ok(glyph, "the button carries its icon");
+  assert.equal(glyph.getAttribute("aria-hidden"), "true");
+  assert.equal(glyph.getAttribute("fill"), "none", "the unsaved glyph is the outline");
+  assert.equal(glyph.getAttribute("width"), "18.75");
+  assert.equal(glyph.querySelector("path").getAttribute("d").startsWith("M17 3a2 2"), true);
+
+  // No popover on this surface: the modal lives in document.body, opened on tap.
+  assert.equal(root.querySelector("[data-twitter-bookmarker-panel]"), null);
+  assert.equal(root.querySelectorAll("[data-category-id]").length, 0);
+});
+
+test("tapping the bookmark icon opens the folder modal in document.body", () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const picked = [];
+  const root = inject(article, {
+    variant: "bookmark",
+    callbacks: makeCallbacks({ onSelect: (category) => picked.push(category) }),
+  });
+
+  root.querySelector("[data-twitter-bookmarker-trigger]").click();
+
+  const backdrop = doc.body.querySelector("[data-twitter-bookmarker-modal]");
+  assert.ok(backdrop, "the modal is mounted into document.body");
+  const dialog = backdrop.querySelector("[data-twitter-bookmarker-modal-dialog]");
+  assert.equal(dialog.getAttribute("role"), "dialog");
+  assert.equal(dialog.getAttribute("aria-modal"), "true");
+  assert.ok(isSaveModalOpenFor("1234567890"));
+
+  const rows = dialog.querySelectorAll("[data-category-id]");
+  assert.deepEqual(
+    rows.map((button) => button.getAttribute("data-category-id")),
+    ["ai", "linux"],
+    "the picker lists the categories in the backend's order",
+  );
+  assert.deepEqual(
+    rows.map((button) => button.textContent),
+    ["AI", "Linux"],
+  );
+
+  // A pick closes the modal and hands the choice to the save controller.
+  rows[1].click();
+  assert.equal(picked.length, 1);
+  assert.equal(picked[0].slug, "linux");
+  assert.equal(doc.body.querySelector("[data-twitter-bookmarker-modal]"), null, "the modal closed");
+  assert.equal(isSaveModalOpenFor("1234567890"), false);
+});
+
+test("the saved bookmark icon is the filled accent glyph and opens the saved sheet", () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const moved = [];
+  const removed = [];
+  const root = inject(article, {
+    variant: "bookmark",
+    saved: true,
+    callbacks: makeCallbacks({
+      savedSlugOf: () => "linux",
+      onMove: (category) => moved.push(category),
+      onRemove: () => removed.push(true),
+    }),
+  });
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.getAttribute("aria-label"), "Saved in Linux");
+  const glyph = trigger.querySelector("svg");
+  assert.equal(glyph.getAttribute("fill"), "currentColor", "the saved glyph is filled");
+  assert.equal(trigger.style.color, ACCENT_BLUE);
+
+  trigger.click();
+
+  const dialog = doc.body.querySelector("[data-twitter-bookmarker-modal-dialog]");
+  assert.ok(dialog);
+  assert.equal(dialog.querySelector("h2").textContent, "Saved in Linux", "the sheet names where it lives");
+
+  const rows = dialog.querySelectorAll("[data-category-id]");
+  assert.deepEqual(
+    rows.map((button) => button.getAttribute("data-category-id")),
+    ["ai"],
+    "the current collection is left out of the move list",
+  );
+
+  rows[0].click();
+  assert.equal(moved.length, 1);
+  assert.equal(moved[0].slug, "ai");
+  assert.equal(doc.body.querySelector("[data-twitter-bookmarker-modal]"), null, "a move closes the sheet");
+
+  // Remove confirms inline before writing.
+  root.querySelector("[data-twitter-bookmarker-trigger]").click();
+  const reopened = doc.body.querySelector("[data-twitter-bookmarker-modal-dialog]");
+  reopened.querySelector(".twb-modal-remove").click();
+  const confirm = reopened.querySelector(".twb-modal-remove-confirm");
+  assert.ok(confirm, "the remove row swaps to a confirm step");
+  reopened.querySelector(".twb-modal-remove-cancel").click();
+  assert.ok(reopened.querySelector(".twb-modal-remove"), "Keep returns to the list");
+
+  reopened.querySelector(".twb-modal-remove").click();
+  reopened.querySelector(".twb-modal-remove-confirm").click();
+  assert.equal(removed.length, 1, "the confirmed removal reached the callback");
+  assert.equal(doc.body.querySelector("[data-twitter-bookmarker-modal]"), null);
+});
+
+test("Escape closes the folder modal", () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+  root.querySelector("[data-twitter-bookmarker-trigger]").click();
+  assert.ok(doc.body.querySelector("[data-twitter-bookmarker-modal]"));
+
+  doc.dispatchEvent(createEvent("keydown", { key: "Escape" }));
+  assert.equal(doc.body.querySelector("[data-twitter-bookmarker-modal]"), null);
+});
+
+test("a click outside the dialog closes the folder modal", () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+  root.querySelector("[data-twitter-bookmarker-trigger]").click();
+  assert.ok(doc.body.querySelector("[data-twitter-bookmarker-modal]"));
+
+  doc.body.dispatchEvent(createEvent("click"));
+  assert.equal(doc.body.querySelector("[data-twitter-bookmarker-modal]"), null);
+});
+
+test("a saved bookmark icon with an unknown slug falls back to the generic title", () => {
+  const { doc, article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, {
+    variant: "bookmark",
+    saved: true,
+    callbacks: makeCallbacks({ savedSlugOf: () => null }),
+  });
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.getAttribute("aria-label"), "Saved in Twitter Bookmarker");
+  trigger.click();
+
+  const dialog = doc.body.querySelector("[data-twitter-bookmarker-modal-dialog]");
+  assert.ok(dialog.textContent.includes("Saved"), "the sheet still opens, generically titled");
+  closeSaveModal();
+});
+
+test("the organize variant keeps the plain text trigger", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "organize" });
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.textContent, "Organize");
+  assert.equal(trigger.querySelector("svg"), null);
+  assert.equal(trigger.getAttribute("aria-label"), null);
+});
+
+test("saving dims and disables the icon; no label swap on this surface", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  setSaving("1234567890", true, root.ownerDocument);
+  let trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.disabled, true);
+  assert.equal(trigger.style.opacity, "0.5");
+  assert.ok(trigger.querySelector("svg"), "the glyph survives the state change");
+
+  setSaving("1234567890", false, root.ownerDocument);
+  trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.disabled, false);
+  assert.equal(trigger.style.opacity, "");
+  assert.ok(trigger.querySelector("svg"));
+});
+
+test("a rerender keeps the variant it was given", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  rerenderAll(root.ownerDocument, {
+    categories: sampleCategories(),
+    settings: SETTINGS,
+    savedIds: new Set(),
+    callbacks: makeCallbacks(),
+    variant: "bookmark",
+  });
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.equal(trigger.querySelector(".twb-trigger-label"), null);
+  assert.equal(trigger.getAttribute("aria-label"), "Save to Twitter Bookmarker");
+});
+
+test("a saved bookmark flip re-renders the icon in place, not a ✓ Saved pill", () => {
+  const { article } = createTweetDocument({ text: "hi" });
+  const root = inject(article, { variant: "bookmark" });
+
+  setSaved("1234567890", true, root.ownerDocument);
+
+  const trigger = root.querySelector("[data-twitter-bookmarker-trigger]");
+  assert.ok(trigger, "the icon stays on this surface");
+  assert.equal(root.querySelector("[data-twitter-bookmarker-saved]"), null, "no pill on the bookmark surface");
+  assert.equal(trigger.querySelector("svg").getAttribute("fill"), "currentColor");
+  assert.equal(trigger.style.color, ACCENT_BLUE);
 });

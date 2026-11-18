@@ -59,6 +59,32 @@ case "$JAVA_MAJOR" in
     *) note "warning: java $JAVA_MAJOR; upstream CI uses 17, and newer JDKs may be rejected by the Android plugin" ;;
 esac
 
+# The gallery screen exists in two halves that a rename can desynchronise: the
+# <activity> entry this patch writes into the manifest, and the class in the
+# extension dex it points at. The build below cannot see the second one (it only
+# checks that classes.dex and twitter.mpe are present, not what is inside them),
+# and a manifest naming a class that does not exist only fails on a phone, at the
+# moment the user taps the row. Comparing the two files here is one grep.
+gallery_activity="app.morphe.extension.twitter.patches.bookmarker.BookmarkerGalleryActivity"
+gallery_manifest="$ROOT/overlay/patches/src/main/kotlin/app/crimera/patches/twitter/bookmarker/BookmarkerGalleryResourcePatch.kt"
+gallery_source="$ROOT/overlay/extensions/twitter/src/main/java/app/morphe/extension/twitter/patches/bookmarker/BookmarkerGalleryActivity.java"
+grep -q "$gallery_activity" "$gallery_manifest" ||
+    die "$(basename "$gallery_manifest") no longer registers $gallery_activity"
+[ -f "$gallery_source" ] || die "the gallery Activity source is missing: $gallery_source"
+grep -q "class BookmarkerGalleryActivity" "$gallery_source" ||
+    die "$(basename "$gallery_source") no longer declares BookmarkerGalleryActivity"
+
+# The tap target for a post is a class name from X's own build, and that name was
+# wrong once: every tap fell through to a browser, which only a phone could show.
+# The two needles below keep the fix in place — the name Piko's fingerprints use
+# for the link interpreter, and the package-manager check that keeps the browser
+# from being reached by a name that no longer exists.
+grep -q "com.twitter.deeplink.implementation.UrlInterpreterActivity" "$gallery_source" ||
+    die "$(basename "$gallery_source") no longer lists X's link interpreter"
+grep -q "resolveActivity" "$gallery_source" ||
+    die "$(basename "$gallery_source") no longer checks its intent before starting it"
+unset gallery_activity gallery_manifest gallery_source
+
 if [ -z "${ANDROID_HOME:-}" ] && [ -z "${ANDROID_SDK_ROOT:-}" ]; then
     if [ -d "$HOME/Android/Sdk" ]; then
         export ANDROID_HOME="$HOME/Android/Sdk"

@@ -71,49 +71,66 @@ func (r *Reader) open() (*sql.DB, error) {
 	return conn, nil
 }
 
-// listCollections returns every collection slug in the database, ordered by slug
-// (GAL-01).
+// catalogEntry is one collection as the database stores it: everything the
+// gallery shows about a category that is not derived from its bookmarks.
+type catalogEntry struct {
+	slug  string
+	name  string
+	color string
+	order int
+}
+
+// catalog returns every collection's stored fields, in *display* order: the
+// `sort_order` the user arranged, with `created_at` and the slug as deterministic
+// tie-breaks (GAL-01).
 //
-// The database is authoritative, so this is a plain SELECT: there is no
-// directory scan and nothing to exclude. A slug that does not satisfy
-// storage.ValidateSlug can only arrive through a hand-edited row, so it is
-// skipped with a warning rather than trusted.
-func (r *Reader) listCollections(conn *sql.DB) ([]string, error) {
-	rows, err := conn.Query(`SELECT slug FROM collections ORDER BY slug`)
+// The database is authoritative, so this is a plain SELECT: there is no directory
+// scan and nothing to exclude. A slug that does not satisfy storage.ValidateSlug
+// can only arrive through a hand-edited row, so it is skipped with a warning
+// rather than trusted.
+//
+// The order here is not the order the homepage uses — that is decided after the
+// summaries are built, because a collection with no valid row sorts last. This
+// call only fixes the tie-break inside each group.
+func (r *Reader) catalog(conn *sql.DB) ([]catalogEntry, error) {
+	rows, err := conn.Query(
+		`SELECT slug, name, color, sort_order FROM collections ORDER BY sort_order, created_at, slug`,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("gallery: list collections: %w", err)
 	}
 	defer rows.Close()
 
-	slugs := make([]string, 0, 16)
+	entries := make([]catalogEntry, 0, 16)
 	for rows.Next() {
-		var slug string
-		if err := rows.Scan(&slug); err != nil {
+		var entry catalogEntry
+		if err := rows.Scan(&entry.slug, &entry.name, &entry.color, &entry.order); err != nil {
 			return nil, fmt.Errorf("gallery: list collections: %w", err)
 		}
-		if err := storage.ValidateSlug(slug); err != nil {
-			r.warn("gallery: skipping collection with an unusable slug", "slug", slug)
+		if err := storage.ValidateSlug(entry.slug); err != nil {
+			r.warn("gallery: skipping collection with an unusable slug", "slug", entry.slug)
 			continue
 		}
-		slugs = append(slugs, slug)
+		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("gallery: list collections: %w", err)
 	}
-	return slugs, nil
+	return entries, nil
 }
 
-// collectionName returns the stored display name for one slug.
-func (r *Reader) collectionName(conn *sql.DB, slug string) (string, error) {
-	var name string
-	err := conn.QueryRow(`SELECT name FROM collections WHERE slug = ?`, slug).Scan(&name)
+// collectionExists reports whether the slug names a collection, and is what turns
+// an unknown slug into ErrCollectionNotFound (404).
+func (r *Reader) collectionExists(conn *sql.DB, slug string) error {
+	var exists int
+	err := conn.QueryRow(`SELECT 1 FROM collections WHERE slug = ?`, slug).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("%w: %s", ErrCollectionNotFound, slug)
+		return fmt.Errorf("%w: %s", ErrCollectionNotFound, slug)
 	}
 	if err != nil {
-		return "", fmt.Errorf("gallery: look up collection %s: %w", slug, err)
+		return fmt.Errorf("gallery: look up collection %s: %w", slug, err)
 	}
-	return name, nil
+	return nil
 }
 
 // bookmarkRow is one raw row as stored. Every value is read as TEXT and
@@ -140,7 +157,7 @@ func (r *Reader) readRows(conn *sql.DB, slug string) ([]parsedRow, error) {
 	if err := storage.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
-	if _, err := r.collectionName(conn, slug); err != nil {
+	if err := r.collectionExists(conn, slug); err != nil {
 		return nil, err
 	}
 
@@ -254,9 +271,16 @@ func (r *Reader) warn(msg string, args ...any) {
 	r.log.Slog().Warn(msg, args...)
 }
 
-// Collections returns one summary per collection, ordered by last_saved_at DESC
-// with timestamp-less collections last (GAL-01…GAL-04). A single unreadable
-// collection is skipped with a warning rather than failing every other one.
+// Collections returns one summary per collection, in the order the user arranged
+// (`sort_order`), with a collection that has no valid row moved to the end
+// (GAL-01…GAL-04). A single unreadable collection is skipped with a warning rather
+// than failing every other one.
+//
+// Ordering used to be `last_saved_at DESC`, derived from the bookmarks; it is
+// stored data now, because the extension and the phone change it and both have to
+// see the same list. The "timestamp-less last" rule survives as a presentation
+// rule, so a brand-new category with nothing in it does not push the populated
+// ones down the page.
 //
 // A storage directory with no database yet is an empty gallery, not an error:
 // that is the fresh-install state.
@@ -270,24 +294,19 @@ func (r *Reader) Collections() ([]Collection, error) {
 	}
 	defer conn.Close()
 
-	slugs, err := r.listCollections(conn)
+	entries, err := r.catalog(conn)
 	if err != nil {
 		return nil, err
 	}
 
-	summaries := make([]collectionSummary, 0, len(slugs))
-	for _, slug := range slugs {
-		name, err := r.collectionName(conn, slug)
+	summaries := make([]collectionSummary, 0, len(entries))
+	for _, entry := range entries {
+		rows, err := r.readRows(conn, entry.slug)
 		if err != nil {
-			r.warn("gallery: skipping unreadable collection", "slug", slug, "error", err)
+			r.warn("gallery: skipping unreadable collection", "slug", entry.slug, "error", err)
 			continue
 		}
-		rows, err := r.readRows(conn, slug)
-		if err != nil {
-			r.warn("gallery: skipping unreadable collection", "slug", slug, "error", err)
-			continue
-		}
-		summaries = append(summaries, summarize(slug, name, rows))
+		summaries = append(summaries, summarize(entry, rows))
 	}
 	sortSummaries(summaries)
 

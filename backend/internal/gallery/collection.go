@@ -29,12 +29,15 @@ type collectionSummary struct {
 	hasLast    bool
 }
 
-// summarize computes the GAL-04 fields for one collection.
-func summarize(slug, name string, rows []parsedRow) collectionSummary {
+// summarize computes the GAL-04 fields for one collection from its stored catalog
+// entry and its rows.
+func summarize(entry catalogEntry, rows []parsedRow) collectionSummary {
 	summary := collectionSummary{
 		collection: Collection{
-			Slug:       slug,
-			Name:       displayName(slug, name),
+			Slug:       entry.slug,
+			Name:       displayName(entry.slug, entry.name),
+			Color:      entry.color,
+			Order:      entry.order,
 			PostCount:  len(rows),
 			CoverMedia: []string{},
 		},
@@ -78,22 +81,25 @@ func summarize(slug, name string, rows []parsedRow) collectionSummary {
 	return summary
 }
 
-// sortSummaries orders collections by last_saved_at DESC with timestamp-less
-// collections last; the slug is the deterministic tie-break (GAL-03).
+// sortSummaries orders collections the way the user arranged them: by the stored
+// `sort_order`, with a collection that has no valid row pushed to the end
+// (GAL-03).
+//
+// The push-to-end rule is presentation, not storage: a category the user just
+// created and has not saved into yet should not push the populated ones down the
+// page, but it must not lose the position it was given either — clearing the
+// filter restores exactly where it belongs. Within each group the stored order
+// decides, and the slug breaks a tie two collections can only reach if their rows
+// share a position.
 func sortSummaries(summaries []collectionSummary) {
 	sort.SliceStable(summaries, func(i, j int) bool {
 		a, b := summaries[i], summaries[j]
-		switch {
-		case !a.hasLast && !b.hasLast:
-			return a.collection.Slug < b.collection.Slug
-		case !a.hasLast:
-			return false
-		case !b.hasLast:
-			return true
+		if a.hasLast != b.hasLast {
+			return a.hasLast
 		}
-		if a.lastSaved.Equal(b.lastSaved) {
-			return a.collection.Slug < b.collection.Slug
+		if a.collection.Order != b.collection.Order {
+			return a.collection.Order < b.collection.Order
 		}
-		return a.lastSaved.After(b.lastSaved)
+		return a.collection.Slug < b.collection.Slug
 	})
 }

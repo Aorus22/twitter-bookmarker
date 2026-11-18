@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -195,6 +195,39 @@ describe("CollectionToolbar — controls (design spec §3.3)", () => {
       screen.queryByTestId("collection-filter-dot")
     ).not.toBeInTheDocument()
     expect(onFilterClick).not.toHaveBeenCalled()
+  })
+})
+
+describe("CollectionToolbar — layout switcher (owner request)", () => {
+  it("renders the three modes with the active one pressed", () => {
+    renderToolbar({ onViewModeChange: vi.fn() })
+
+    const group = screen.getByRole("group", { name: "Layout" })
+    expect(within(group).getAllByRole("button")).toHaveLength(3)
+    expect(screen.getByTestId("view-mode-masonry")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("view-mode-grid")).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
+  })
+
+  it("emits the chosen mode", async () => {
+    const user = userEvent.setup()
+    const onViewModeChange = vi.fn()
+    renderToolbar({ onViewModeChange })
+
+    await user.click(screen.getByTestId("view-mode-rows"))
+
+    expect(onViewModeChange).toHaveBeenCalledWith("rows")
+  })
+
+  it("does not render a dead switcher without an owner", () => {
+    renderToolbar()
+
+    expect(screen.queryByTestId("view-mode-toggle")).not.toBeInTheDocument()
   })
 })
 

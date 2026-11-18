@@ -1,103 +1,55 @@
+// The collection-slug validator.
+//
+// The extension no longer derives slugs — the backend does, from the name, in
+// `storage.Slugify`. What is left here is the check applied to a slug arriving
+// *from* elsewhere (a cache, a hand-edited `chrome.storage.local`, a backend), and
+// it is a security boundary: the value ends up in a request path.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SLUG_PATTERN, isValidSlug, shortId, slugify } from "../src/shared/slug.ts";
+import { SLUG_PATTERN, isValidSlug } from "../src/shared/slug.ts";
 
-const UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
-
-test("PRD §8 examples produce the exact expected slugs", () => {
-  assert.equal(slugify("Linux", UUID), "linux");
-  assert.equal(slugify("AI & LLM", UUID), "ai-llm");
-  assert.equal(slugify("Read Later", UUID), "read-later");
-});
-
-test("empty slug falls back to category-<short-id>", () => {
-  const slug = slugify("!!!", UUID);
-  assert.equal(slug, "category-3f2504e0");
-  assert.match(slug, SLUG_PATTERN);
-});
-
-test("unicode-only and whitespace-only names fall back too", () => {
-  for (const name of ["\u{1F427}", "   ", "***", "&", "---"]) {
-    const slug = slugify(name, UUID);
-    assert.match(slug, SLUG_PATTERN, `name=${JSON.stringify(name)} -> ${slug}`);
-    assert.equal(slug, "category-3f2504e0");
-  }
-});
-
-test("fallback stays valid even when the id sanitizes to nothing", () => {
-  for (const id of ["", "!!!", "%%%", "\u{1F427}"]) {
-    const slug = slugify("!!!", id);
-    assert.match(slug, SLUG_PATTERN, `id=${JSON.stringify(id)} -> ${slug}`);
-  }
-});
-
-test("generated slugs always match the backend regex", () => {
-  const names = [
-    "Linux",
-    "AI & LLM",
-    "Read Later",
-    "  Mixed CASE  ",
-    "Café ☕ Notes",
-    "a/b\\c",
-    "..",
-    "../../etc/passwd",
-    "~/.ssh",
-    "100% Design",
-    "f#!@$%^&*()",
-    "ééé",
-    "hello___world",
-    "Leading-trailing-",
-    "-leading",
-    "-",
-    "0",
-    "9lives",
-  ];
-
-  for (const name of names) {
-    const slug = slugify(name, UUID);
-    assert.match(slug, SLUG_PATTERN, `name=${JSON.stringify(name)} -> ${slug}`);
-    assert.ok(isValidSlug(slug));
-  }
-});
-
-test("slug rules: lowercase, spaces to '-', unsafe chars stripped, runs collapsed", () => {
-  assert.equal(slugify("LINUX", UUID), "linux");
-  assert.equal(slugify("  Read   Later  ", UUID), "read-later");
-  assert.equal(slugify("a---b", UUID), "a-b");
-  assert.equal(slugify("Café", UUID), "cafe");
-  assert.equal(slugify("100% Design", UUID), "100-design");
-  assert.equal(slugify("-leading-trailing-", UUID), "leading-trailing");
-});
-
-test("path-traversal characters can never survive slugging", () => {
-  for (const name of ["../../something", "/etc/passwd", "~/.ssh/id_rsa", "..\\..\\win"]) {
-    const slug = slugify(name, UUID);
-    assert.doesNotMatch(slug, /[/\\~]/);
-    assert.doesNotMatch(slug, /\.\./);
+test("isValidSlug accepts the slugs the backend produces", () => {
+  for (const slug of ["linux", "ai-llm", "read-later", "category-3f2504e0", "100-design", "linux-"]) {
+    assert.ok(isValidSlug(slug), `${slug} should be valid`);
     assert.match(slug, SLUG_PATTERN);
   }
 });
 
-test("isValidSlug mirrors the backend regex", () => {
-  assert.ok(isValidSlug("linux"));
-  assert.ok(isValidSlug("ai-llm"));
-  assert.ok(isValidSlug("category-3f2504e0"));
-  assert.ok(!isValidSlug("Linux"));
-  assert.ok(!isValidSlug("../linux"));
-  assert.ok(!isValidSlug("linux.txt"));
-  assert.ok(!isValidSlug("linux.csv"));
-  assert.ok(!isValidSlug(""));
-  assert.ok(!isValidSlug("-linux"));
-  assert.ok(!isValidSlug("linux slug"));
-  // The backend regex allows a trailing/doubled "-" (the first char may not be
-  // "-"); slugify is stricter and never emits one.
-  assert.ok(isValidSlug("linux-"));
-  assert.equal(slugify("linux-", "11111111-1111"), "linux");
+test("isValidSlug rejects anything that could not be a collection key", () => {
+  const rejected = [
+    "Linux",
+    "AI & LLM",
+    "linux slug",
+    "linux.csv",
+    "linux.txt",
+    "../linux",
+    "..",
+    "../../etc/passwd",
+    "/etc/passwd",
+    "-linux",
+    "_linux",
+    "linux/extra",
+    "linux?x=1",
+    "linux#frag",
+    "linux%2F",
+    "café",
+    "",
+    " ",
+  ];
+  for (const slug of rejected) {
+    assert.ok(!isValidSlug(slug), `${JSON.stringify(slug)} must be rejected`);
+  }
 });
 
-test("shortId is deterministic, lowercase, and alphanumeric", () => {
-  assert.equal(shortId(UUID), "3f2504e0");
-  assert.equal(shortId("ABCDEFGH-IJKL"), "abcdefgh");
-  assert.equal(shortId(""), "00000000");
+test("isValidSlug only accepts strings", () => {
+  for (const value of [undefined, null, 42, {}, [], true]) {
+    assert.ok(!isValidSlug(value), `${JSON.stringify(value)} must be rejected`);
+  }
+});
+
+test("SLUG_PATTERN is anchored at both ends", () => {
+  assert.ok(!SLUG_PATTERN.test("linux\n"), "a trailing newline must not slip through");
+  assert.ok(!SLUG_PATTERN.test(" linux"), "leading whitespace must not slip through");
 });

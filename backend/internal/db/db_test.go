@@ -3,9 +3,11 @@ package db_test
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"twitter-bookmarker/internal/config"
@@ -101,10 +103,14 @@ func TestOpenRWDoesNotChangeAnExistingDatabaseMode(t *testing.T) {
 // database from outside this binary: a plain `sqlite3` shell, and the data
 // repository's own scripts. A change here is a change to that contract, and this
 // test is where it has to be made deliberately.
+//
+// Version 3 is why `collections` grew `color` and `sort_order`: a category is a
+// backend resource now, shared by the extension and the phone, so its colour and
+// its position live next to its name.
 func TestSchemaColumnContract(t *testing.T) {
 	conn, _ := openRW(t)
 
-	collections := []string{"id", "slug", "name", "created_at"}
+	collections := []string{"id", "slug", "name", "created_at", "color", "sort_order"}
 	if got := dbtest.Columns(t, conn, "collections"); !reflect.DeepEqual(got, collections) {
 		t.Errorf("collections columns = %v, want %v", got, collections)
 	}
@@ -443,6 +449,194 @@ func TestOpenRWUpgradeIsIdempotent(t *testing.T) {
 		if err := conn.Close(); err != nil {
 			t.Fatalf("close %d: %v", i, err)
 		}
+	}
+}
+
+// schemaV2 is the version-2 DDL: the version-1 schema plus the trash table that
+// version 2 added. Like schemaV1 it is written out here rather than imported from
+// the package under test, so the fixture keeps the *old* shape as the code moves.
+const schemaV2 = schemaV1 + `
+CREATE TABLE deleted_bookmarks (
+  id            INTEGER PRIMARY KEY,
+  tweet_id      TEXT NOT NULL,
+  collection_id INTEGER NOT NULL,
+  url           TEXT NOT NULL,
+  author        TEXT NOT NULL,
+  username      TEXT NOT NULL,
+  tweet_date    TEXT NOT NULL,
+  saved_at      TEXT NOT NULL,
+  text          TEXT NOT NULL DEFAULT '',
+  media         TEXT NOT NULL DEFAULT '[]',
+  deleted_at    TEXT NOT NULL
+);
+
+CREATE INDEX deleted_bookmarks_by_tweet
+  ON deleted_bookmarks(tweet_id, deleted_at DESC);
+`
+
+// writeV2 creates a version-2 database shaped to prove the order backfill, and
+// returns the path plus the collection ids keyed by slug.
+//
+// The fixture is deliberately not in slug order: "beta" has the newest bookmark,
+// "gamma" the oldest, and "alpha" and "zulu" have none at all. A backfill that
+// merely numbered the rows by slug or by id would therefore produce a visibly
+// different answer, which is the whole point of the test.
+func writeV2(t *testing.T) (string, map[string]int64) {
+	t.Helper()
+	dir := t.TempDir()
+	path := config.DBPath(dir)
+
+	conn, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.Exec(schemaV2); err != nil {
+		t.Fatalf("apply version-2 schema: %v", err)
+	}
+
+	ids := map[string]int64{}
+	for _, slug := range []string{"alpha", "beta", "gamma", "zulu"} {
+		result, err := conn.Exec(
+			`INSERT INTO collections (slug, name, created_at) VALUES (?, ?, ?)`,
+			slug, strings.ToUpper(slug[:1])+slug[1:], "2026-01-01T00:00:00Z",
+		)
+		if err != nil {
+			t.Fatalf("insert collection %s: %v", slug, err)
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			t.Fatalf("collection id for %s: %v", slug, err)
+		}
+		ids[slug] = id
+	}
+
+	// beta: saved 2026-09-20. gamma: saved 2026-08-01. Newest first, so beta
+	// ranks before gamma even though gamma sorts first alphabetically.
+	for _, row := range []struct {
+		slug    string
+		tweetID string
+		savedAt string
+	}{
+		{"beta", "2001", "2026-09-20T00:00:00Z"},
+		{"gamma", "2002", "2026-08-01T00:00:00Z"},
+	} {
+		if _, err := conn.Exec(
+			`INSERT INTO bookmarks (tweet_id, collection_id, url, author, username, tweet_date, saved_at, text, media)
+			 VALUES (?, ?, ?, 'Ann', '@ann', '2026-07-01T00:00:00Z', ?, 'hello', '[]')`,
+			row.tweetID, ids[row.slug], "https://x.com/a/status/"+row.tweetID, row.savedAt,
+		); err != nil {
+			t.Fatalf("insert bookmark for %s: %v", row.slug, err)
+		}
+	}
+
+	if _, err := conn.Exec(`PRAGMA user_version = 2`); err != nil {
+		t.Fatalf("stamp version 2: %v", err)
+	}
+	return path, ids
+}
+
+// TestOpenRWUpgradesAVersionTwoDatabase proves a version-2 file gains the two
+// collection columns and that the order backfill reproduces the ordering the
+// gallery used before version 3: newest `saved_at` first, empty collections last,
+// ties broken by slug.
+//
+// Ordering became data in version 3, so an upgrade that left every `sort_order` at
+// its 0 default would silently scramble an existing archive's homepage. That is
+// what this test exists to prevent.
+func TestOpenRWUpgradesAVersionTwoDatabase(t *testing.T) {
+	path, ids := writeV2(t)
+
+	conn, err := db.OpenRW(path)
+	if err != nil {
+		t.Fatalf("db.OpenRW() on a version-2 file error = %v", err)
+	}
+	defer conn.Close()
+
+	var version int
+	if err := conn.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != db.Version {
+		t.Errorf("user_version after upgrade = %d, want %d", version, db.Version)
+	}
+
+	want := []string{"id", "slug", "name", "created_at", "color", "sort_order"}
+	if got := dbtest.Columns(t, conn, "collections"); !reflect.DeepEqual(got, want) {
+		t.Errorf("collections columns after upgrade = %v, want %v", got, want)
+	}
+
+	// The backfilled ranks, in order: beta (newest), gamma, then the two that
+	// have no valid row, alphabetically.
+	for rank, slug := range []string{"beta", "gamma", "alpha", "zulu"} {
+		var got int
+		if err := conn.QueryRow(`SELECT sort_order FROM collections WHERE slug = ?`, slug).Scan(&got); err != nil {
+			t.Fatalf("read sort_order for %s: %v", slug, err)
+		}
+		if got != rank {
+			t.Errorf("sort_order for %s = %d, want %d", slug, got, rank)
+		}
+	}
+
+	// Every row survived, and the new colour defaults to the empty string the
+	// clients read as "no colour chosen".
+	if got := dbtest.Count(t, conn, `SELECT count(*) FROM collections`); got != len(ids) {
+		t.Errorf("collections after upgrade = %d, want %d", got, len(ids))
+	}
+	if got := dbtest.Count(t, conn, `SELECT count(*) FROM bookmarks`); got != 2 {
+		t.Errorf("bookmarks after upgrade = %d, want 2", got)
+	}
+	if got := dbtest.Text(t, conn, `SELECT color FROM collections WHERE slug = 'beta'`); got != "" {
+		t.Errorf("color after upgrade = %q, want the empty default", got)
+	}
+}
+
+// TestOpenRWUpgradeFromVersionOneAlsoBackfillsOrder proves the version-1 path
+// walks all the way to the current schema in one open: the trash table *and* the
+// collection columns, with a real backfill rather than a default 0.
+func TestOpenRWUpgradeFromVersionOneAlsoBackfillsOrder(t *testing.T) {
+	path := writeV1(t)
+
+	conn, err := db.OpenRW(path)
+	if err != nil {
+		t.Fatalf("db.OpenRW() on a version-1 file error = %v", err)
+	}
+	defer conn.Close()
+
+	want := []string{"id", "slug", "name", "created_at", "color", "sort_order"}
+	if got := dbtest.Columns(t, conn, "collections"); !reflect.DeepEqual(got, want) {
+		t.Errorf("collections columns after upgrade = %v, want %v", got, want)
+	}
+	if got := dbtest.Count(t, conn, `SELECT sort_order FROM collections WHERE slug = 'linux'`); got != 0 {
+		t.Errorf("sort_order for the only collection = %d, want 0 (the first rank)", got)
+	}
+}
+
+// TestOpenRWRefusesACurrentDatabaseMissingTheVersionThreeColumns proves the
+// column check is real: a file that kept its version stamp but lost an ALTER is
+// refused at startup instead of failing at the first collection query.
+func TestOpenRWRefusesACurrentDatabaseMissingTheVersionThreeColumns(t *testing.T) {
+	dir := t.TempDir()
+	path := config.DBPath(dir)
+
+	// A version-2 database, but stamped as current.
+	conn, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := conn.Exec(schemaV2); err != nil {
+		t.Fatalf("apply version-2 schema: %v", err)
+	}
+	if _, err := conn.Exec(fmt.Sprintf("PRAGMA user_version = %d", db.Version)); err != nil {
+		t.Fatalf("stamp current version: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if _, err := db.OpenRW(path); err == nil {
+		t.Fatal("db.OpenRW() accepted a current database without the version-3 columns, want a refusal")
 	}
 }
 

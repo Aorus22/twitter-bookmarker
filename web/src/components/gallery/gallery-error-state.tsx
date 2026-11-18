@@ -1,16 +1,13 @@
+import { Button } from "@astryxdesign/core/Button"
 import { TriangleAlert } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Astryx } from "@/app/astryx"
+
 import { RETRY_LABEL } from "@/lib/messages"
-import { pickPlaceholderGradient } from "@/lib/placeholder"
 
 /**
- * Error state with a working retry action (PRD-2 §61, design spec §3.6).
- *
- * The caller supplies the message so the same component serves the homepage
- * (the PRD §61 `Could not connect to Twitter Bookmarker backend` copy for a
- * transport failure) and, in Phase 5, a collection load failure. The message is
- * rendered verbatim as the state heading — no paraphrase, no invented copy.
+ * Error state with a working retry action. The caller supplies the exact
+ * connection/load message, which is rendered verbatim as the heading.
  */
 export interface GalleryErrorStateProps {
   /** Exact PRD copy for the failure, e.g. the §61 connection message. */
@@ -27,31 +24,32 @@ export function GalleryErrorState({
       role="alert"
       aria-labelledby="gallery-error-heading"
       data-testid="gallery-error-state"
-      className="w-full max-w-[292px] rounded-xl border border-border bg-surface p-5 shadow-card"
+      className="flex w-full max-w-[390px] flex-col rounded-xl border border-border bg-surface p-6"
     >
-      <div
+      <span
         aria-hidden="true"
-        className="flex h-[110px] w-full items-center justify-center rounded-2xl"
-        style={{
-          backgroundImage: pickPlaceholderGradient("gallery-error").value,
-        }}
+        className="flex size-10 items-center justify-center rounded-lg border border-border bg-surface-warm text-muted"
       >
-        <TriangleAlert className="size-7 text-white/80" />
-      </div>
+        <TriangleAlert className="size-4" />
+      </span>
       <h2
         id="gallery-error-heading"
-        className="mt-5 font-display text-[20px] leading-[1.3] font-bold text-ink"
+        className="mt-5 text-[17px]! leading-[1.35]! font-semibold tracking-[-0.01em] text-ink"
       >
         {message}
       </h2>
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={onRetry}
-        className="mt-4 rounded-sm"
-      >
-        {RETRY_LABEL}
-      </Button>
+      <div className="mt-5">
+        <Astryx>
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            label={RETRY_LABEL}
+            className="rounded-md border border-border bg-surface px-3"
+            onClick={onRetry}
+          />
+        </Astryx>
+      </div>
     </section>
   )
 }

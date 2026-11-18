@@ -103,7 +103,7 @@ function baseDeps(doc, observers, timers, overrides = {}) {
     setTimeout: timers.setTimeout,
     clearTimeout: timers.clearTimeout,
     loadStore: async () => makeStore(sampleCategories()),
-    loadSavedIndex: async () => new Set(),
+    loadSavedIndex: async () => ({ ids: new Set(), slugsByTweetId: new Map() }),
     ...overrides,
   };
 }
@@ -395,7 +395,7 @@ test("a stale saved index is re-fetched exactly once once the backend is confirm
       loadSavedIndex: async () => {
         calls += 1;
         if (calls === 1) throw new Error("backend_unavailable");
-        return new Set(["1234567890"]);
+        return { ids: new Set(["1234567890"]), slugsByTweetId: new Map() };
       },
     }),
   );

@@ -33,10 +33,14 @@ import (
 // explicit local struct (rather than the api package's unexported DTO) pins the
 // exact JSON field names and types across the package boundary.
 type galleryCollectionDTO struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	PostCount   int      `json:"post_count"`
-	MediaCount  int      `json:"media_count"`
+	Slug       string `json:"slug"`
+	Name       string `json:"name"`
+	Color      string `json:"color"`
+	Order      int    `json:"order"`
+	PostCount  int    `json:"post_count"`
+	MediaCount int    `json:"media_count"`
+	// LastSavedAt is the maximum saved_at as UTC RFC3339, or nil when the
+	// collection has no valid row. JSON is null in that case.
 	LastSavedAt *string  `json:"last_saved_at"`
 	CoverMedia  []string `json:"cover_media"`
 }
@@ -332,15 +336,17 @@ func TestGalleryCollectionsEndpoint(t *testing.T) {
 		}
 	}
 
-	// The collection object carries exactly the six documented fields.
+	// The collection object carries exactly the documented fields. Version 3 added
+	// `color` and `order`, because a category is a backend resource now and the
+	// gallery card needs the colour and the position the user chose.
 	var shape struct {
 		Collections []map[string]json.RawMessage `json:"collections"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &shape); err != nil {
 		t.Fatalf("decode raw collections: %v", err)
 	}
-	if got := len(shape.Collections[0]); got != 6 {
-		t.Errorf("collection object has %d fields, want 6: %v", got, shape.Collections[0])
+	if got := len(shape.Collections[0]); got != 8 {
+		t.Errorf("collection object has %d fields, want 8: %v", got, shape.Collections[0])
 	}
 }
 

@@ -1,6 +1,7 @@
 import { ChevronDownIcon, ListFilter } from "lucide-react"
 import type { ReactNode } from "react"
 
+import { ViewModeToggle } from "@/components/gallery/view-mode-toggle"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +15,7 @@ import {
   FILTER_LABEL,
   SORT_LABEL,
 } from "@/lib/messages"
+import { DEFAULT_VIEW_MODE, type GalleryViewMode } from "@/lib/view-mode"
 import { cn } from "@/lib/utils"
 import type { GallerySort } from "@/types"
 
@@ -75,6 +77,13 @@ export interface CollectionToolbarProps {
   /** Current sort mode. */
   sort: GallerySort
   onSortChange: (value: GallerySort) => void
+  /**
+   * Current layout (owner request, Nov 2026). The switcher only renders when
+   * `onViewModeChange` is supplied, so a toolbar rendered without a page to own
+   * the choice shows no dead controls.
+   */
+  viewMode?: GalleryViewMode
+  onViewModeChange?: (mode: GalleryViewMode) => void
   className?: string
 }
 
@@ -86,12 +95,14 @@ export function CollectionToolbar({
   filterControl,
   sort,
   onSortChange,
+  viewMode = DEFAULT_VIEW_MODE,
+  onViewModeChange,
   className,
 }: CollectionToolbarProps) {
   return (
     <div
       data-testid="collection-toolbar"
-      className={cn("flex flex-wrap items-center gap-3", className)}
+      className={cn("flex flex-wrap items-center gap-2.5", className)}
     >
       <input
         type="search"
@@ -102,7 +113,7 @@ export function CollectionToolbar({
         }}
         placeholder={COLLECTION_SEARCH_PLACEHOLDER}
         aria-label={COLLECTION_SEARCH_PLACEHOLDER}
-        className="h-10 w-full max-w-[440px] shrink-0 rounded-sm border border-border bg-surface px-3 text-[12px] leading-[1.4] font-medium text-ink outline-none placeholder:text-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-[440px]"
+        className="h-10 w-full max-w-[440px] shrink-0 rounded-sm border border-border bg-surface px-3 text-[12.5px] leading-[1.4] font-normal text-ink outline-none transition-colors placeholder:text-muted focus-visible:border-ink/30 focus-visible:ring-2 focus-visible:ring-ring/20 sm:w-[440px]"
       />
 
       {filterControl ?? (
@@ -111,7 +122,7 @@ export function CollectionToolbar({
           data-testid="collection-filter"
           data-filter-active={filterActive}
           onClick={onFilterClick}
-          className="flex h-10 w-[86px] shrink-0 items-center justify-center gap-1.5 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex h-10 w-[86px] shrink-0 items-center justify-center gap-1.5 rounded-sm border border-border bg-surface text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-2 focus-visible:ring-ring/20"
         >
           <ListFilter className="size-3.5" aria-hidden="true" />
           {FILTER_LABEL}
@@ -131,7 +142,7 @@ export function CollectionToolbar({
             type="button"
             data-testid="collection-sort"
             aria-label={SORT_LABEL}
-            className="flex h-10 w-[150px] shrink-0 items-center justify-between gap-1.5 rounded-sm border border-border bg-surface px-2 text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex h-10 w-[150px] shrink-0 items-center justify-between gap-1.5 rounded-sm border border-border bg-surface px-2.5 text-[11px] leading-[1.4] font-medium text-ink transition-colors outline-none hover:bg-surface-warm focus-visible:ring-2 focus-visible:ring-ring/20"
           >
             <span className="line-clamp-1">{sortLabel(sort)}</span>
             <ChevronDownIcon
@@ -143,7 +154,7 @@ export function CollectionToolbar({
         <DropdownMenuContent
           align="start"
           sideOffset={4}
-          className="min-w-[150px] text-[11px]"
+          className="min-w-[150px] text-[11.5px]"
         >
           <DropdownMenuRadioGroup
             value={sort}
@@ -157,7 +168,7 @@ export function CollectionToolbar({
                 value={option.value}
                 data-testid="collection-sort-option"
                 data-value={option.value}
-                className="text-[11px] leading-[1.4]"
+                className="text-[11.5px] leading-[1.4]"
               >
                 {option.label}
               </DropdownMenuRadioItem>
@@ -165,6 +176,14 @@ export function CollectionToolbar({
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {onViewModeChange === undefined ? null : (
+        <ViewModeToggle
+          value={viewMode}
+          onChange={onViewModeChange}
+          className="ml-auto"
+        />
+      )}
     </div>
   )
 }

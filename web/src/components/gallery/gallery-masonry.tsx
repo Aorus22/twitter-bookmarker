@@ -13,7 +13,7 @@ import {
   MASONRY_COLUMN_GAP,
   MASONRY_ROW_GAP,
   distributeMasonryKeys,
-  masonryContainerWidth,
+  masonryMaxWidth,
 } from "@/lib/masonry"
 import { cn } from "@/lib/utils"
 
@@ -33,7 +33,9 @@ import { cn } from "@/lib/utils"
  * move on their own while I scroll" bug. Packing keys ourselves makes the
  * layout **append-only**: a key that already has a column keeps it for the life
  * of the view, so a new page can only add cards at the bottom of a column,
- * never displace one above them.
+ * never displace one above them. The same rule covers a focus refresh that
+ * discovers newer bookmarks: those cards are prepended, but every card already
+ * on screen stays in its column (only the brand-new keys are placed).
  *
  * The cost is that the DOM is column-major rather than a single logical list.
  * Within a column the logical (sorted) order is preserved, a column-major order
@@ -147,13 +149,25 @@ export function GalleryMasonry({
   useLayoutEffect(() => {
     const memory = memoryRef.current
 
-    // A page append is a pure prefix extension of what is already packed.
-    // Anything else — a new collection, a filter, a re-sort, a column-count
-    // change — is a new generation and legitimately re-packs from scratch.
+    // A page append is a pure prefix extension of what is already packed, and a
+    // focus refresh may insert a few new cards **in front** of it (PRD-2 §47/§78)
+    // or a filter may remove some in the middle. Both keep every surviving key in
+    // its relative order, so all of them keep the column they were assigned and
+    // only genuinely new keys get placed. Anything else — a new collection, a
+    // re-sort, a column-count change — reorders the keys and is a new generation
+    // that legitimately re-packs from scratch.
+    const positions = new Map(keys.map((key, index) => [key, index]))
+    let lastPosition = -1
     const continues =
       memory.columnCount === count &&
-      memory.keys.length <= keys.length &&
-      memory.keys.every((key, index) => key === keys[index])
+      memory.keys.every((key) => {
+        const position = positions.get(key)
+        if (position === undefined || position <= lastPosition) {
+          return false
+        }
+        lastPosition = position
+        return true
+      })
 
     if (!continues) {
       memory.assigned = new Map<string, number>()
@@ -206,7 +220,10 @@ export function GalleryMasonry({
         data-columns={count}
         style={{
           columnGap: `${MASONRY_COLUMN_GAP}px`,
-          maxWidth: `${masonryContainerWidth(count)}px`,
+          maxWidth:
+            masonryMaxWidth(count) === undefined
+              ? undefined
+              : `${masonryMaxWidth(count)}px`,
         }}
         className={cn("flex w-full items-start", className)}
       >

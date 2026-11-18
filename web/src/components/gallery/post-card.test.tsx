@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 
@@ -173,7 +173,7 @@ describe("PostCard — media post", () => {
 })
 
 describe("PostCard — text-only post (COLL-05)", () => {
-  it("renders the gradient quote panel and no img at all", () => {
+  it("renders the tweet as plain text with no image at all", () => {
     const { container } = render(
       <PostCard
         now={POST_NOW}
@@ -187,15 +187,14 @@ describe("PostCard — text-only post (COLL-05)", () => {
       />
     )
 
-    const panel = screen.getByTestId("text-post-card")
-    expect(panel).toBeInTheDocument()
-    expect(panel.style.backgroundImage).toContain("--grad-ph-")
-    expect(screen.getByTestId("post-card")).toHaveAttribute(
-      "data-media-count",
-      "0"
+    const card = screen.getByTestId("post-card")
+    expect(card).toHaveAttribute("data-media-count", "0")
+    // The text is the card's body now, not a gradient panel standing in for an
+    // image (owner request, Nov 2026: follow X's order — header, text, media).
+    expect(screen.getByTestId("post-text")).toHaveTextContent(
+      "Interesting thread about Linux."
     )
-
-    // No artificial image placeholder and no media semantics.
+    expect(screen.queryByTestId("text-post-card")).not.toBeInTheDocument()
     expect(screen.queryByTestId("media-image")).not.toBeInTheDocument()
     expect(screen.queryByTestId("media-placeholder")).not.toBeInTheDocument()
     expect(screen.queryByTestId("post-media-grid")).not.toBeInTheDocument()
@@ -226,7 +225,7 @@ describe("PostCard — text-only post (COLL-05)", () => {
     )
   })
 
-  it("clamps long quote text and expands it inside the panel", async () => {
+  it("clamps long text and expands it in place", async () => {
     const user = userEvent.setup()
     render(
       <PostCard
@@ -240,6 +239,36 @@ describe("PostCard — text-only post (COLL-05)", () => {
     expect(screen.getByTestId("post-text").className).not.toContain(
       "line-clamp"
     )
+  })
+})
+
+describe("PostCard — X's content order (owner request)", () => {
+  it("renders header, then text, then media", () => {
+    render(
+      <PostCard
+        now={POST_NOW}
+        post={makePost({
+          tweet_id: "300",
+          author: "Ada Lovelace",
+          username: "@ada",
+          media: [pbsUrl("a")],
+          text: "Text comes before the image.",
+        })}
+      />
+    )
+
+    const card = screen.getByTestId("post-card")
+    const header = screen.getByTestId("post-avatar")
+    const text = within(card).getByTestId("post-text")
+    const media = within(card).getByTestId("post-media-grid")
+
+    const position = (node: Element) => {
+      const index = Array.from(card.querySelectorAll("*")).indexOf(node)
+      return index
+    }
+
+    expect(position(header)).toBeLessThan(position(text))
+    expect(position(text)).toBeLessThan(position(media))
   })
 })
 

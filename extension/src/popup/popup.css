@@ -438,9 +438,24 @@ body {
     color 0.15s ease;
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background: var(--surface-warm);
   color: var(--accent);
+}
+
+/*
+ * The first row cannot move up and the last cannot move down. Dimming the control
+ * is the only signal available in a 24px button, so the disabled state has to read
+ * as "nothing to do here" rather than as "broken".
+ */
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .empty-state {

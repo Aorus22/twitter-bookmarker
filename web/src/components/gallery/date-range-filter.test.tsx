@@ -40,14 +40,14 @@ describe("DateRangeFilter — field (design spec §3.4)", () => {
     expect(to).toHaveAttribute("type", "date")
   })
 
-  it("dresses the field as the spec's 346×42 r12 surface-warm control", () => {
+  it("dresses the field as the 346×42 r12 hairline control", () => {
     renderFilter()
 
     const field = screen.getByLabelText("Tweet date from").parentElement
     expect(field?.className).toContain("max-w-[346px]")
     expect(field?.className).toContain("h-[42px]")
     expect(field?.className).toContain("rounded-sm")
-    expect(field?.className).toContain("bg-surface-warm")
+    expect(field?.className).toContain("bg-surface")
     expect(field?.className).toContain("border-border")
   })
 

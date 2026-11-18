@@ -1,13 +1,25 @@
 /**
  * Shared domain types for the Twitter Bookmarker extension.
  *
- * The extension is the sole owner of category configuration and settings; the
- * backend only ever receives a `slug`, the category's display name, and tweet
- * metadata (PRD §4.3, §16).
+ * The backend owns categories: `collections` is its table, `/v1/collections` is
+ * the resource that creates, renames, colours and orders them, and every client
+ * reads the same list in the same order. The extension keeps a *cache* of that
+ * list so a popup or a timeline can render without a round trip, but it never
+ * invents a category, recomputes a slug, or decides an order (PRD §4.3, §16).
  */
 
 /** How category controls are rendered on an X bookmark tweet (PRD §32, §33). */
 export type DisplayMode = "popover" | "inline";
+
+/**
+ * How the history watcher picks its targets.
+ *
+ * - `visible` is the gentle default: only rows currently on screen, after a
+ *   grace wait, one removal at a time with a cooldown;
+ * - `aggressive` drains every loaded row the archive already holds the moment
+ *   it becomes known — no visibility requirement, no grace wait.
+ */
+export type WatcherMode = "visible" | "aggressive";
 
 /**
  * Which backend the extension talks to (PRD §5, §50).
@@ -17,24 +29,110 @@ export type DisplayMode = "popover" | "inline";
  */
 export type BackendMode = "localhost" | "custom";
 
-/** A user-defined bookmark category, persisted in `chrome.storage.local` (PRD §7). */
+/**
+ * A category as the extension renders it: one row of the backend's collection
+ * list, in the backend's order, with the backend's colour.
+ *
+ * It is a *view*, not configuration. `id` carries the collection slug, which is
+ * the backend's key and what a save sends; it is kept as a separate field only
+ * because the injected controls and their DOM attributes were built around a
+ * row identity, and the slug is exactly that.
+ */
 export interface Category {
-  /** Stable internal identifier; never changes across renames. */
+  /** Row identity: the collection slug, e.g. "ai-llm". Never recomputed here. */
   id: string;
-  /** Human-readable name, e.g. "AI & LLM". Sent to the backend on every save. */
+  /** Human-readable name, e.g. "AI & LLM". */
   name: string;
-  /** Derived collection slug, e.g. "ai-llm". Recomputed only on rename. */
+  /** The backend's key for this category, e.g. "ai-llm". Equal to `id`. */
   slug: string;
-  /** UI-only colour (hex). Never sent to the backend. */
+  /**
+   * The category's colour as `#rrggbb`, or an empty string when none is set —
+   * in which case the UI falls back to `DEFAULT_CATEGORY_COLOR`. The backend
+   * validates the value, so anything else here is a cache from an older build.
+   */
   color: string;
-  /** Position, always normalized to 0..n-1 in storage order. */
+  /** Display position, exactly the backend's order. Clients never renumber it. */
   order: number;
+}
+
+/**
+ * One collection as `GET /v1/collections` returns it.
+ *
+ * The counts and the cover are the gallery's own projection of a collection; the
+ * extension ignores them today, and they are typed so a future popup row can show
+ * "12 posts" without a second request.
+ */
+export interface Collection {
+  slug: string;
+  name: string;
+  /** `#rrggbb` or `""` for "no colour chosen". */
+  color: string;
+  /** Display position; the list arrives already sorted by it. */
+  order: number;
+  post_count: number;
+  media_count: number;
+  last_saved_at: string | null;
+  cover_media: string[];
+}
+
+/** Body of `GET /v1/collections`. */
+export interface CollectionListResponse {
+  collections: Collection[];
+}
+
+/** Body of `POST /v1/collections` (201) and `PUT /v1/collections/{slug}` (200). */
+export interface CollectionResponse {
+  status: string;
+  collection: Collection;
+}
+
+/** Request body for `POST /v1/collections`. The backend derives the slug. */
+export interface CreateCollectionRequest {
+  name: string;
+  /**
+   * Optional `#rrggbb`; omitted or empty means "no colour chosen". `undefined` is
+   * spelled out because this project compiles with `exactOptionalPropertyTypes`,
+   * and a caller with a possibly-missing colour must be able to say "omit it".
+   */
+  color?: string | undefined;
+}
+
+/**
+ * Request body for `PUT /v1/collections/{slug}`.
+ *
+ * Every field is optional and absent means "leave it alone", so a colour change
+ * cannot accidentally rename a category. An empty `color` string is a real
+ * instruction: it clears the colour back to the default.
+ */
+export interface UpdateCollectionRequest {
+  name?: string | undefined;
+  color?: string | undefined;
+  order?: number | undefined;
+}
+
+/** Request body for `PUT /v1/collections/order`: the whole list, in order. */
+export interface ReorderCollectionsRequest {
+  slugs: string[];
+}
+
+/** Body of `PUT /v1/collections/order`. */
+export interface ReorderCollectionsResponse {
+  status: string;
+  collections: Collection[];
 }
 
 /** Persisted extension settings (PRD §50). */
 export interface Settings {
   /** When true, remove the tweet from X Bookmarks after a confirmed save. */
   unbookmarkAfterSave: boolean;
+  /**
+   * When true, the history watcher removes tweets from X Bookmarks as they
+   * scroll into view on the bookmarks timeline (`/i/history`) — but only the
+   * ones this extension has already saved to the archive. Off by default.
+   */
+  autoUnbookmarkSaved: boolean;
+  /** How the watcher picks rows: on screen only, or everything loaded. */
+  autoUnbookmarkSavedMode: WatcherMode;
   /** How category controls are rendered on the X bookmarks page. */
   displayMode: DisplayMode;
   /** Which backend address the worker and the popup use. */
@@ -55,14 +153,20 @@ export interface Settings {
   backendToken: string;
 }
 
-/** The whole `chrome.storage.local` payload, under a single documented key. */
+/**
+ * The runtime snapshot the injected controls and the popup render from.
+ *
+ * `settings` is the only part the extension *owns* and persists. `categories` is
+ * a snapshot of the backend's list, read from the collections cache so a render
+ * never waits on the network; a refresh replaces it wholesale.
+ */
 export interface Store {
-  version: 2;
+  version: 3;
   settings: Settings;
   categories: Category[];
 }
 
-/** Metadata extracted from a single tweet container by the Phase 3 content script (PRD §28). */
+/** Metadata extracted from a single tweet container by the content script (PRD §28). */
 export interface ExtractedTweet {
   /** Absolute tweet URL (canonicalized by the backend). */
   url: string;
@@ -115,6 +219,21 @@ export interface SaveResult {
 export interface DuplicateResult {
   status: "duplicate";
   tweet_id: string;
+}
+
+/** 200 response body for `PUT /v1/bookmarks/{tweet_id}/collection` (a move). */
+export interface ReassignResult {
+  status: string;
+  tweet_id: string;
+  slug: string;
+}
+
+/** 200 response body for `DELETE /v1/bookmarks/{tweet_id}`. The row moves to the trash. */
+export interface DeleteResult {
+  status: string;
+  tweet_id: string;
+  /** The backend's contract that the row is recoverable, not destroyed. */
+  recoverable: boolean;
 }
 
 /** One entry of `GET /v1/index` (PRD §18). */

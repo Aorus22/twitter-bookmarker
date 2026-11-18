@@ -184,14 +184,14 @@ export function createResilientObserver(deps: ResilientObserverDeps): ResilientO
 /* -------------------------------------------------------------------------- */
 
 /** Options for {@link createSavedIndexRefresher}. */
-export interface SavedIndexRefresherOptions {
+export interface SavedIndexRefresherOptions<T = unknown> {
   /**
    * Performs the one index fetch. It must **reject** when the index is
    * unavailable; that is what keeps the refresher stale for a later retry.
    */
-  load: () => Promise<ReadonlySet<string>>;
+  load: () => Promise<T>;
   /** Applies a successfully fetched index to the live page state. */
-  apply: (savedIds: ReadonlySet<string>) => void;
+  apply: (lookup: T) => void;
   /** Receives fetch/apply failures. */
   onError?: ErrorSink;
 }
@@ -216,14 +216,14 @@ export interface SavedIndexRefresher {
  * entry fetches once; a failed fetch leaves it stale, so the next explicit
  * retry (backend confirmed available) fetches again — never per tweet.
  */
-export function createSavedIndexRefresher(options: SavedIndexRefresherOptions): SavedIndexRefresher {
+export function createSavedIndexRefresher<T>(options: SavedIndexRefresherOptions<T>): SavedIndexRefresher {
   let stale = true;
   let inFlight: Promise<boolean> | null = null;
 
   const fetchOnce = async (): Promise<boolean> => {
     try {
-      const savedIds = await options.load();
-      options.apply(savedIds);
+      const lookup = await options.load();
+      options.apply(lookup);
       stale = false;
       return true;
     } catch (error) {

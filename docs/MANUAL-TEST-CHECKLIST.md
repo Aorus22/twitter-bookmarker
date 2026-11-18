@@ -792,7 +792,7 @@ TWITTER_BOOKMARKER_DIR="$FIXTURE" TWITTER_BOOKMARKER_WEB_DIR="$PWD/web/dist" \
 | # | Step | Expected |
 |---|---|---|
 | 22 | Save a new tweet through the extension (or `POST /v1/bookmarks` with `{"slug":"scenario","name":"Scenario","tweet":{…}}`) | `201 Created`; the row is inserted into the live database |
-| 23 | Return to the gallery (or refocus the window) | The collection list and the open collection re-read the database on `focus` |
+| 23 | Return to the gallery (or refocus the window) | The collection list and the open collection re-read the database on `focus`. The open collection **keeps the pages already loaded and the scroll position**: new rows appear in front, and a failed re-read leaves the visible posts untouched |
 | 24 | Look at the gallery | The new collection/post appears **without restarting the backend**; `/health` still answers from the same process |
 
 Inspect step 22 directly in the database:

@@ -10,7 +10,8 @@ import type { GalleryCollection } from "@/types"
  *
  * - One `GET /api/gallery/collections` per mount and per `refetch()`.
  * - A `window` `focus` listener refetches when the user comes back from another
- *   window or tab; there is no polling and no interval.
+ *   window or tab; there is no polling and no interval. A failed background
+ *   refetch keeps the last successful list instead of blanking the grid.
  * - Stale resolutions are dropped via a per-effect `cancelled` flag, so a slow
  *   first request cannot overwrite a newer retry.
  * - The received backend order is preserved (`orderCollections` only moves
@@ -73,7 +74,15 @@ export function useCollections(): UseCollectionsResult {
         if (cancelled) {
           return
         }
-        setState({ collections: [], status: "error", error })
+        // A failed background refresh keeps the list that is already on screen:
+        // the focus listener re-reads for freshness, and replacing a readable
+        // grid with an error card is a worse outcome than slightly stale counts.
+        // Only a load that has never succeeded falls through to the error state.
+        setState((prev) =>
+          prev.status === "success"
+            ? prev
+            : { collections: [], status: "error", error }
+        )
       }
     )
 

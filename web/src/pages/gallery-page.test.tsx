@@ -316,4 +316,34 @@ describe("GalleryPage — states", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })
   })
+
+  it("keeps the rendered grid when a focus refresh fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ collections: [LINUX] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ status: "error", reason: "backend asleep" }, 500)
+      )
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    await screen.findByTestId("collection-card")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // A background re-read that fails keeps the archive readable.
+    expect(screen.getAllByTestId("collection-card")).not.toHaveLength(0)
+    expect(screen.queryByTestId("gallery-error-state")).toBeNull()
+  })
 })

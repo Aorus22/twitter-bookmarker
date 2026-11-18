@@ -31,11 +31,15 @@ import type { GalleryCollection, GalleryPost, GallerySort } from "@/types"
  * - State is **keyed by the request signature**: the moment a search/filter/sort
  *   change alters the query, the hook returns `loading` with no posts and a null
  *   cursor (PRD-2 §77's "clear current pages, reset cursor") while a same-query
- *   refetch (focus, Retry) keeps the current posts on screen. A monotonic request
+ *   refetch (Retry) keeps the current posts on screen. A monotonic request
  *   *generation* additionally discards an in-flight page that a query change or
  *   refetch has superseded, so a stale page can never be appended to the new list.
- * - `window` `focus` refetches page 1 (PRD-2 §47/§78). Nothing polls: no timer
- *   is ever scheduled by this hook to drive a request.
+ * - **`window` `focus` refreshes without resetting** (PRD-2 §47/§78). It re-reads
+ *   page 1 and merges it in front of the pages already loaded, so a user who has
+ *   scrolled through five pages keeps all five and keeps their scroll position.
+ *   A focus refresh that fails leaves the on-screen list untouched: a background
+ *   re-read must never replace readable posts with an error state. Nothing polls:
+ *   no timer is ever scheduled by this hook to drive a request.
  *
  * `options` is intentionally a set of primitive fields rather than a params
  * object: an object literal rebuilt on every render would either churn the
@@ -72,7 +76,10 @@ export interface UsePostsResult {
   isLoadingMore: boolean
   /** Append the next page. No-op at the end, while in flight, or after reset. */
   loadMore: () => void
-  /** Re-run the first-page request and reset paging (focus, Retry). */
+  /**
+   * Re-run the first page **and reset paging** (the `Retry` action). The focus
+   * refresh is internal: it merges page 1 instead of discarding the loaded pages.
+   */
   refetch: () => void
   /**
    * Drop one post from the loaded pages, after a delete or a move.
@@ -94,6 +101,14 @@ interface PostsState {
   nextCursor: string | null
   hasMore: boolean
   loadingMore: boolean
+  /**
+   * How many cursor pages the held `posts` came from (page 1 alone is `1`).
+   *
+   * A focus refresh may only take the fresh response's paging metadata when the
+   * view is still on page one; once a deeper page has been appended, that page
+   * (and its terminal `has_more: false`) is the authority.
+   */
+  pagesLoaded: number
 }
 
 const EMPTY_POSTS_STATE = {
@@ -103,6 +118,24 @@ const EMPTY_POSTS_STATE = {
   nextCursor: null,
   hasMore: false,
   loadingMore: false,
+  pagesLoaded: 0,
+}
+
+/**
+ * Whether two rendered lists carry exactly the same tweets in the same order.
+ *
+ * A focus refresh that finds nothing new must not commit a new array: React would
+ * re-render the whole gallery and the masonry would re-pack it, which is a visible
+ * shuffle for a user who has scrolled away from the top.
+ */
+function samePostIds(
+  left: readonly GalleryPost[],
+  right: readonly GalleryPost[]
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((post, index) => post.tweet_id === right[index]?.tweet_id)
+  )
 }
 
 export function usePosts(
@@ -248,6 +281,7 @@ export function usePosts(
           nextCursor,
           hasMore,
           loadingMore: false,
+          pagesLoaded: 1,
         })
       },
       (error: unknown) => {
@@ -262,6 +296,7 @@ export function usePosts(
           nextCursor: null,
           hasMore: false,
           loadingMore: false,
+          pagesLoaded: 0,
         })
       }
     )
@@ -357,6 +392,7 @@ export function usePosts(
             nextCursor,
             hasMore,
             loadingMore: false,
+            pagesLoaded: prev.pagesLoaded + 1,
           }
         })
       },
@@ -385,16 +421,126 @@ export function usePosts(
     saved_to,
   ])
 
+  /**
+   * Re-read page 1 in the background and merge it in front of what is loaded.
+   *
+   * This is the `focus` path (PRD-2 §47/§78). It deliberately does **not** go
+   * through `refetch()`: a reset is right after a filter change or an error, but
+   * on a tab switch it used to discard every page the user had scrolled through,
+   * shrink the document, and let the browser clamp the scroll back to the top.
+   * Merging keeps the loaded pages, the cursor and the scroll position.
+   *
+   * Nothing is committed when the fresh page holds the same tweets, and a failure
+   * keeps the on-screen list and its `success` status: a background re-read has
+   * no user action to report an error against.
+   */
+  const refresh = useCallback(async () => {
+    if (!hasSlug) {
+      return
+    }
+
+    const current = stateRef.current
+
+    // Let the initial load, a query change's load, or a page request finish:
+    // their bookkeeping is what this refresh would race against.
+    if (loadingMoreRef.current || current.key !== requestKey) {
+      return
+    }
+    if (current.status === "loading") {
+      return
+    }
+
+    const generation = generationRef.current
+
+    try {
+      const response = await fetchPosts(slug, {
+        limit: effectiveLimit,
+        sort,
+        q,
+        tweet_from,
+        tweet_to,
+        saved_from,
+        saved_to,
+      })
+      if (generationRef.current !== generation) {
+        return
+      }
+
+      const { nextCursor, hasMore } = resolveNextPage(response)
+      setState((prev) => {
+        if (prev.key !== requestKey) {
+          return prev
+        }
+
+        const freshIds = new Set(response.items.map((post) => post.tweet_id))
+        const merged = [
+          ...response.items,
+          ...prev.posts.filter((post) => !freshIds.has(post.tweet_id)),
+        ]
+
+        // Nothing new: committing a fresh array would re-render the gallery and
+        // re-pack the masonry for no change at all.
+        if (samePostIds(merged, prev.posts)) {
+          return prev
+        }
+
+        // Only one page is loaded: the fresh response owns the paging metadata.
+        // Once a deeper page is loaded, that page (and its terminal
+        // `has_more: false`) stays the authority.
+        const adoptPaging = prev.pagesLoaded <= 1
+
+        return {
+          ...prev,
+          posts: merged,
+          status: "success",
+          error: null,
+          nextCursor: adoptPaging ? nextCursor : prev.nextCursor,
+          hasMore: adoptPaging ? hasMore : prev.hasMore,
+        }
+      })
+    } catch {
+      // Keep the readable list: the next focus retries, and `Retry` still exists
+      // for a list that never loaded at all.
+    }
+
+    // The header counts are part of the same refresh, and a failure here stays
+    // invisible for the same reason.
+    fetchCollections().then(
+      (collections) => {
+        if (generationRef.current !== generation) {
+          return
+        }
+        setCollection(
+          collections.find((entry) => entry.slug === slug) ?? undefined
+        )
+      },
+      () => {
+        // Summary-only failure: keep whatever was already shown.
+      }
+    )
+  }, [
+    hasSlug,
+    slug,
+    requestKey,
+    effectiveLimit,
+    sort,
+    q,
+    tweet_from,
+    tweet_to,
+    saved_from,
+    saved_to,
+  ])
+
   useEffect(() => {
     const onFocus = () => {
-      refetch()
+      void refresh()
     }
 
     window.addEventListener("focus", onFocus)
     return () => {
       window.removeEventListener("focus", onFocus)
     }
-  }, [refetch])
+  }, [refresh])
 
   if (!hasSlug) {
     return {

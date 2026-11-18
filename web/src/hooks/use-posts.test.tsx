@@ -183,11 +183,76 @@ describe("usePosts — failure handling (PRD-2 §61)", () => {
   })
 })
 
-describe("usePosts — refresh (PRD-2 §47/§78)", () => {
-  it("refetches the first page when the window regains focus", async () => {
+describe("usePosts — refresh merges instead of resetting (PRD-2 §47/§78)", () => {
+  it("keeps every loaded page and prepends a bookmark saved in the background", async () => {
+    let firstPage = [makePost({ tweet_id: "1" }), makePost({ tweet_id: "2" })]
+
+    const fetchMock = stubGalleryFetch({
+      posts: (url) => {
+        const cursor = new URL(url, "http://localhost").searchParams.get(
+          "cursor"
+        )
+        if (cursor === null) {
+          return jsonResponse({
+            items: firstPage,
+            next_cursor: "c1",
+            has_more: true,
+          })
+        }
+        return jsonResponse({
+          items: [makePost({ tweet_id: "3" })],
+          next_cursor: null,
+          has_more: false,
+        })
+      },
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(2)
+    })
+
+    act(() => {
+      result.current.loadMore()
+    })
+    await waitFor(() => {
+      expect(result.current.posts).toHaveLength(3)
+    })
+
+    // A tweet saved through the extension while the tab was hidden.
+    firstPage = [makePost({ tweet_id: "9" }), ...firstPage]
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    await waitFor(() => {
+      expect(result.current.posts[0].tweet_id).toBe("9")
+    })
+
+    // The appended page survived, and no tweet is duplicated.
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      "9",
+      "1",
+      "2",
+      "3",
+    ])
+    expect(result.current.hasMore).toBe(false)
+    expect(result.current.status).toBe("success")
+
+    // The focus request asked for page one, not for the cursor.
+    const focusPostUrl = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("/posts"))
+      .at(-1)
+    expect(focusPostUrl).not.toContain("cursor=")
+  })
+
+  it("commits nothing when the first page is unchanged", async () => {
     const fetchMock = stubGalleryFetch({
       posts: () =>
-        jsonResponse({ items: POSTS, next_cursor: null, has_more: false }),
+        jsonResponse({ items: POSTS, next_cursor: "abc", has_more: true }),
     })
 
     const { result } = renderHook(() => usePosts("linux"))
@@ -195,15 +260,65 @@ describe("usePosts — refresh (PRD-2 §47/§78)", () => {
     await waitFor(() => {
       expect(result.current.status).toBe("success")
     })
-    const before = fetchMock.mock.calls.length
+
+    const before = result.current.posts
+    const postsCalls = () =>
+      fetchMock.mock.calls.filter((call) =>
+        String(call[0]).includes("/posts")
+      ).length
+    const callsBefore = postsCalls()
 
     act(() => {
       window.dispatchEvent(new Event("focus"))
     })
 
     await waitFor(() => {
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(before)
+      expect(postsCalls()).toBeGreaterThan(callsBefore)
     })
+    // Flush the focus request's promise chain.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // The same array instance: no re-render, no masonry re-pack.
+    expect(result.current.posts).toBe(before)
+    expect(result.current.nextCursor).toBe("abc")
+  })
+
+  it("keeps the readable list when the focus refresh fails", async () => {
+    let calls = 0
+    stubGalleryFetch({
+      posts: () => {
+        calls += 1
+        return calls === 1
+          ? jsonResponse({ items: POSTS, next_cursor: null, has_more: false })
+          : jsonResponse({ status: "error", reason: "backend asleep" }, 500)
+      },
+    })
+
+    const { result } = renderHook(() => usePosts("linux"))
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("success")
+    })
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    await waitFor(() => {
+      expect(calls).toBeGreaterThan(1)
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(result.current.status).toBe("success")
+    expect(result.current.posts.map((post) => post.tweet_id)).toEqual([
+      "1",
+      "2",
+    ])
+    expect(result.current.errorMessage).toBe("")
   })
 })
 
@@ -623,8 +738,8 @@ describe("usePosts — cursor paging (SCROLL-01, SCROLL-03, SCROLL-04)", () => {
   })
 })
 
-describe("usePosts — refresh resets paging, nothing polls (SCROLL-05)", () => {
-  it("resets to page one on a window focus refetch without duplicating posts", async () => {
+describe("usePosts — focus refreshes keep paging, nothing polls (SCROLL-05)", () => {
+  it("keeps the appended page on a window focus without duplicating posts", async () => {
     stubGalleryFetch({
       posts: (url) =>
         cursorOf(url) === null
@@ -655,15 +770,16 @@ describe("usePosts — refresh resets paging, nothing polls (SCROLL-05)", () => 
     act(() => {
       window.dispatchEvent(new Event("focus"))
     })
-
-    await waitFor(() => {
-      expect(result.current.posts).toHaveLength(2)
+    // Flush the focus request's promise chain.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
     const ids = result.current.posts.map((post) => post.tweet_id)
-    expect(ids).toEqual(["1", "2"])
-    expect(new Set(ids).size).toBe(2)
-    expect(result.current.hasMore).toBe(true)
+    expect(ids).toEqual(["1", "2", "3"])
+    expect(new Set(ids).size).toBe(3)
+    // The page-2 result keeps ownership of the terminal paging metadata.
+    expect(result.current.hasMore).toBe(false)
   })
 
   it("issues no request when wall-clock timers advance", async () => {

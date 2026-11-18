@@ -16,7 +16,7 @@ import { MockIntersectionObserver } from "@/test/intersection-observer"
  * cursor paging, pages accumulate without duplicates, the first load is
  * skeleton-covered and later loads show only a compact bottom loader while the
  * existing cards stay mounted, the end of the list stops the requests, and a
- * focus refetch resets to page one.
+ * focus refresh merges page one without resetting the loaded pages.
  *
  * Every `fetch` is mocked and cursor-routed (no network, no server). The
  * `IntersectionObserver` is the controllable stub from `src/test/setup.ts`.
@@ -433,14 +433,14 @@ describe("CollectionPage — sentinel-driven accumulation (SCROLL-01, SCROLL-03,
       }
     }
   })
-})
 
-describe("CollectionPage — refetch policy (SCROLL-05)", () => {
-  it("resets to page one on window focus without duplicating posts", async () => {
-    const fetchMock = stubGalleryFetch({
+  it("keeps every visible card in its column when a refresh inserts newer posts", async () => {
+    let firstPage = PAGE_1
+
+    stubGalleryFetch({
       posts: (url) =>
         cursorOf(url) === null
-          ? page(PAGE_1, "c1", true)
+          ? page(firstPage, "c1", true)
           : page(PAGE_2, null, false),
       collections: () => jsonResponse({ collections: [LINUX] }),
     })
@@ -452,20 +452,84 @@ describe("CollectionPage — refetch policy (SCROLL-05)", () => {
       expect(screen.getAllByTestId("post-card")).toHaveLength(4)
     })
 
+    // Identity by handle, because a prepend shifts every `data-index`.
+    const columnByHandle = new Map(
+      screen
+        .getAllByTestId("post-card")
+        .map((card) => [
+          within(card).getByText(/@/).textContent ?? "",
+          columnOf(card),
+        ])
+    )
+
+    // A bookmark saved while the tab was hidden sorts in front of page one.
+    firstPage = ["zero", ...PAGE_1]
+
     act(() => {
       window.dispatchEvent(new Event("focus"))
     })
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("post-card")).toHaveLength(2)
+      expect(screen.getAllByTestId("post-card")).toHaveLength(5)
     })
 
-    const usernames = cardUsernames()
-    expect(usernames).toEqual(["@user-one", "@user-two"])
-    expect(new Set(usernames).size).toBe(2)
-    // The focus refetch went back to page one (no cursor) — paging was reset.
+    const cards = screen.getAllByTestId("post-card")
+    expect(cards.some((card) => within(card).queryByText("@user-zero"))).toBe(
+      true
+    )
+
+    for (const card of cards) {
+      const handle = within(card).getByText(/@/).textContent ?? ""
+      const before = columnByHandle.get(handle)
+      if (before !== undefined) {
+        expect(columnOf(card)).toBe(before)
+      }
+    }
+  })
+})
+
+describe("CollectionPage — refetch policy (SCROLL-05)", () => {
+  it("keeps the loaded pages and the viewport on window focus", async () => {
+    const fetchMock = stubGalleryFetch({
+      posts: (url) =>
+        cursorOf(url) === null
+          ? page(PAGE_1, "c1", true)
+          : page(PAGE_2, null, false),
+      collections: () => jsonResponse({ collections: [LINUX] }),
+    })
+    const scrollTo = vi.spyOn(window, "scrollTo")
+
+    renderPage()
+    await screen.findByTestId("gallery-masonry")
+    await emitIntersection()
+    await waitFor(() => {
+      expect(screen.getAllByTestId("post-card")).toHaveLength(4)
+    })
+
+    const before = cardUsernames()
+    const requestsBefore = postsRequests(fetchMock).length
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+
+    await waitFor(() => {
+      expect(postsRequests(fetchMock).length).toBeGreaterThan(requestsBefore)
+    })
+    // Flush the focus request's promise chain.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // Page 2 is still on screen, no duplicates, and the page did not scroll.
+    expect(cardUsernames()).toEqual(before)
+    expect(new Set(cardUsernames()).size).toBe(4)
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    // The focus request re-read page one (no cursor); paging was not reset.
     const lastRequest = postsRequests(fetchMock).at(-1)
     expect(lastRequest).not.toContain("cursor=")
+    expect(cursorOf(lastRequest ?? "")).toBeNull()
   })
 
   it("does not move the viewport when a page is appended", async () => {
